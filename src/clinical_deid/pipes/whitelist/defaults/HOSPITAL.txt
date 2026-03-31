@@ -1,0 +1,6 @@
+# Sample hospital names (subset aligned with pyDeid ontario_hospitals wordlist)
+Baycrest Health Sciences
+Toronto General Hospital
+Sunnybrook Health Sciences Centre
+Mount Sinai Hospital
+SickKids
