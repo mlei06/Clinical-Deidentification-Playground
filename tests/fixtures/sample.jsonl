@@ -1,0 +1,2 @@
+{"document": {"id": "doc_a", "text": "Call me at 555-123-4567 on 12/25/2024.", "metadata": {"split": "train"}}, "spans": [{"start": 12, "end": 24, "label": "PHONE", "confidence": 1.0, "source": "gold"}]}
+{"document": {"id": "doc_b", "text": "Contact: jane@hospital.org for MRN 900812.", "metadata": {}}, "spans": [{"start": 9, "end": 26, "label": "EMAIL", "confidence": 1.0, "source": "gold"}, {"start": 35, "end": 41, "label": "ID", "confidence": 1.0, "source": "gold"}]}

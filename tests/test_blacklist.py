@@ -1,0 +1,150 @@
+"""Tests for blacklist span transformer."""
+
+from __future__ import annotations
+
+from clinical_deid.domain import AnnotatedDocument, Document, PHISpan
+from clinical_deid.pipes.blacklist import BlacklistSpans, BlacklistSpansConfig
+from clinical_deid.pipes.registry import load_pipeline
+
+
+def _doc(text: str, spans: list[PHISpan]) -> AnnotatedDocument:
+    return AnnotatedDocument(document=Document(id="d", text=text), spans=spans)
+
+
+def test_blacklist_drops_span_with_token_in_notes_common() -> None:
+    """pyDeid-style: token PATIENT is in bundled notes_common."""
+    text = "seen in PATIENT room"
+    spans = [
+        PHISpan(start=text.index("PATIENT"), end=text.index("PATIENT") + 7, label="FOO"),
+    ]
+    pipe = BlacklistSpans(
+        BlacklistSpansConfig(include_builtin_notes_common=True, match="any_token")
+    )
+    out = pipe.forward(_doc(text, spans)).spans
+    assert len(out) == 0
+
+
+def test_blacklist_keeps_when_no_token_match() -> None:
+    text = "Smith J"
+    spans = [PHISpan(start=0, end=5, label="NAME")]
+    pipe = BlacklistSpans(
+        BlacklistSpansConfig(
+            include_builtin_notes_common=True,
+            match="any_token",
+            apply_to_labels=["NAME"],
+        )
+    )
+    out = pipe.forward(_doc(text, spans)).spans
+    assert len(out) == 1
+
+
+def test_blacklist_apply_to_labels_skips_other_labels() -> None:
+    text = "PATIENT room"
+    spans = [
+        PHISpan(start=0, end=7, label="NAME"),
+        PHISpan(start=0, end=7, label="OTHER"),
+    ]
+    pipe = BlacklistSpans(
+        BlacklistSpansConfig(
+            include_builtin_notes_common=True,
+            match="any_token",
+            apply_to_labels=["NAME"],
+        )
+    )
+    out = pipe.forward(_doc(text, spans)).spans
+    assert len(out) == 1
+    assert out[0].label == "OTHER"
+
+
+def test_exact_span_drops_only_full_match() -> None:
+    text = "PATIENTFOO"
+    spans = [PHISpan(start=0, end=10, label="X")]
+    pipe = BlacklistSpans(
+        BlacklistSpansConfig(
+            terms=["PATIENT"],
+            include_builtin_notes_common=False,
+            match="exact_span",
+        )
+    )
+    assert len(pipe.forward(_doc(text, spans)).spans) == 1
+
+    text2 = "PATIENT"
+    spans2 = [PHISpan(start=0, end=7, label="X")]
+    assert len(pipe.forward(_doc(text2, spans2)).spans) == 0
+
+
+def test_overlap_document_regex_only_regions() -> None:
+    text = "ok Bell palsy end"
+    spans = [
+        PHISpan(start=0, end=2, label="X"),
+        PHISpan(start=3, end=13, label="X"),
+    ]
+    pipe = BlacklistSpans(
+        BlacklistSpansConfig(
+            include_builtin_notes_common=False,
+            match="overlap_document",
+            regex_blacklist_patterns=[r"Bell\s+palsy"],
+        )
+    )
+    out = pipe.forward(_doc(text, spans)).spans
+    assert len(out) == 1
+    assert out[0].start == 0 and out[0].end == 2
+
+
+def test_overlap_document_drops_when_span_overlaps_region() -> None:
+    text = "aa PATIENT bb"
+    spans = [
+        PHISpan(start=0, end=2, label="X"),
+        PHISpan(start=3, end=10, label="X"),
+    ]
+    pipe = BlacklistSpans(
+        BlacklistSpansConfig(
+            terms=["PATIENT"],
+            include_builtin_notes_common=False,
+            match="overlap_document",
+        )
+    )
+    out = pipe.forward(_doc(text, spans)).spans
+    assert len(out) == 1
+    assert out[0].start == 0 and out[0].end == 2
+
+
+def test_blacklist_merge_wordlists_endpoint(client) -> None:
+    r = client.post(
+        "/pipelines/blacklist/parse-wordlists",
+        files=[
+            ("files", ("a.txt", b"alpha\nbeta\n", "text/plain")),
+            ("files", ("b.txt", b"beta\ngamma\n", "text/plain")),
+        ],
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["count"] == 3
+    assert set(body["terms"]) == {"alpha", "beta", "gamma"}
+    assert len(body["source_files"]) == 2
+
+
+def test_blacklist_load_pipeline() -> None:
+    cfg = {
+        "pipes": [
+            {
+                "type": "parallel",
+                "strategy": "union",
+                "detectors": [
+                    {"type": "regex_ner"},
+                    {"type": "whitelist"},
+                ],
+            },
+            {
+                "type": "blacklist",
+                "config": {
+                    "include_builtin_notes_common": True,
+                    "match": "any_token",
+                },
+            },
+        ]
+    }
+    p = load_pipeline(cfg)
+    doc = AnnotatedDocument(document=Document(id="x", text="No special tokens."), spans=[])
+    out = p.forward(doc)
+    assert isinstance(out.spans, list)
