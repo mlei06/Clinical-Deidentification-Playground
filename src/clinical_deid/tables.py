@@ -45,3 +45,37 @@ class PipelineVersionRecord(SQLModel, table=True):
     config: dict[str, Any] = Field(sa_column=Column(JSON))
     config_hash: str = ""
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class AuditLogRecord(SQLModel, table=True):
+    """Persisted audit log entry for each processing request."""
+
+    __tablename__ = "audit_log"
+
+    id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
+    request_id: str = Field(index=True)
+    pipeline_id: str = Field(foreign_key="pipeline.id", index=True)
+    pipeline_name: str = ""
+    pipeline_version: int = 1
+    input_text: str = ""
+    output_text: str = ""
+    spans: list[dict[str, Any]] = Field(sa_column=Column(JSON), default=[])
+    span_count: int = 0
+    processing_time_ms: float = 0.0
+    source: str = "api"  # "api", "batch", "eval", "manual"
+    caller: str | None = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class EvalRunRecord(SQLModel, table=True):
+    """Persisted evaluation run results."""
+
+    __tablename__ = "eval_run"
+
+    id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
+    pipeline_id: str = Field(foreign_key="pipeline.id", index=True)
+    pipeline_version: int = 1
+    dataset_source: str = ""  # path or description of the dataset used
+    metrics: dict[str, Any] = Field(sa_column=Column(JSON), default={})
+    document_count: int = 0
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

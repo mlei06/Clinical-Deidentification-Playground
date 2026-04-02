@@ -143,6 +143,39 @@ _CATALOG: list[PipeCatalogEntry] = [
         extra="pydeid",
         install_hint="pip install '.[pydeid]'",
     ),
+    PipeCatalogEntry(
+        name="surrogate",
+        description="Replace PHI with realistic fake data (Faker-based surrogate generation)",
+        role="redactor",
+        extra="scripts",
+        install_hint="pip install '.[scripts]'",
+    ),
+    PipeCatalogEntry(
+        name="span_resolver",
+        description=(
+            "Resolve overlapping spans: pick winner by longest, highest_confidence, or label priority; "
+            "optionally merge adjacent same-label spans"
+        ),
+        role="span_transformer",
+        extra=None,
+        install_hint="Included by default",
+    ),
+    PipeCatalogEntry(
+        name="consistency_propagator",
+        description=(
+            "Propagate high-confidence spans to all matching text occurrences in the document"
+        ),
+        role="span_transformer",
+        extra=None,
+        install_hint="Included by default",
+    ),
+    PipeCatalogEntry(
+        name="llm_ner",
+        description="LLM-prompted PHI detection via OpenAI-compatible chat API",
+        role="detector",
+        extra="llm",
+        install_hint="pip install '.[llm]'",
+    ),
 ]
 
 
@@ -444,6 +477,32 @@ def _register_builtins() -> None:
         from clinical_deid.pipes.pydeid_ner.pipe import PyDeidNerConfig, PyDeidNerPipe
 
         register("pydeid_ner", PyDeidNerConfig, PyDeidNerPipe)
+    except ImportError:
+        pass
+
+    # Surrogate pipe — requires `pip install faker` (in [scripts] extra)
+    try:
+        from clinical_deid.pipes.surrogate.pipe import SurrogateConfig, SurrogatePipe
+
+        register("surrogate", SurrogateConfig, SurrogatePipe)
+    except ImportError:
+        pass
+
+    # SpanResolver and ConsistencyPropagator — always available (no optional deps)
+    from clinical_deid.pipes.span_resolver import SpanResolverConfig, SpanResolverPipe
+    from clinical_deid.pipes.consistency_propagator import (
+        ConsistencyPropagatorConfig,
+        ConsistencyPropagatorPipe,
+    )
+
+    register("span_resolver", SpanResolverConfig, SpanResolverPipe)
+    register("consistency_propagator", ConsistencyPropagatorConfig, ConsistencyPropagatorPipe)
+
+    # LLM NER pipe — requires `pip install .[llm]` (httpx)
+    try:
+        from clinical_deid.pipes.llm_ner import LlmNerConfig, LlmNerPipe
+
+        register("llm_ner", LlmNerConfig, LlmNerPipe)
     except ImportError:
         pass
 

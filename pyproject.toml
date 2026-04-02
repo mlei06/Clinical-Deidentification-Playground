@@ -17,6 +17,7 @@ dependencies = [
     "pydantic>=2.9.0,<3.0",
     "pydantic-settings>=2.6.0,<3.0",
     "python-multipart>=0.0.12",
+    "click>=8.1.0,<9.0",
 ]
 
 [project.optional-dependencies]
@@ -44,12 +45,16 @@ pydeid = [
 llm = [
     "httpx>=0.27.0",
 ]
+parquet = [
+    "pyarrow>=14.0.0",
+]
 # Everything
 all = [
-    "clinical-deid-playground[dev,presidio,ner,pydeid,llm]",
+    "clinical-deid-playground[dev,presidio,ner,pydeid,llm,parquet]",
 ]
 
 [project.scripts]
+clinical-deid = "clinical_deid.cli:main"
 clinical-deid-api = "clinical_deid.__main__:main"
 
 [tool.setuptools.packages.find]

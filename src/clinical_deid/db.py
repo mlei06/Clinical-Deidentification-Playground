@@ -48,6 +48,8 @@ def get_engine():
 
 def init_db() -> None:
     from clinical_deid.tables import (  # noqa: F401
+        AuditLogRecord,
+        EvalRunRecord,
         PipelineRecord,
         PipelineVersionRecord,
     )

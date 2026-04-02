@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import time
 from typing import Any
 from uuid import uuid4
@@ -23,7 +24,9 @@ from clinical_deid.domain import AnnotatedDocument, Document
 from clinical_deid.pipes.base import Pipe
 from clinical_deid.pipes.combinators import Pipeline
 from clinical_deid.pipes.registry import pipeline_config_requests_intermediary
-from clinical_deid.tables import PipelineRecord, PipelineVersionRecord
+from clinical_deid.tables import AuditLogRecord, PipelineRecord, PipelineVersionRecord
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/process", tags=["process"])
 
@@ -100,7 +103,7 @@ def _process_single(
     else:
         redacted = _redact_text(text, span_responses)
 
-    return ProcessResponse(
+    resp = ProcessResponse(
         request_id=req_id,
         original_text=text,
         redacted_text=redacted,
@@ -111,6 +114,31 @@ def _process_single(
         processing_time_ms=round(elapsed_ms, 2),
         intermediary_trace=intermediary_trace,
     )
+    return resp
+
+
+def _log_audit(
+    session: Any,
+    response: ProcessResponse,
+    source: str = "api",
+) -> None:
+    """Persist an audit log entry (best-effort, never raises)."""
+    try:
+        log = AuditLogRecord(
+            request_id=response.request_id,
+            pipeline_id=response.pipeline_id,
+            pipeline_name=response.pipeline_name,
+            pipeline_version=response.pipeline_version,
+            input_text=response.original_text,
+            output_text=response.redacted_text,
+            spans=[s.model_dump() for s in response.spans],
+            span_count=len(response.spans),
+            processing_time_ms=response.processing_time_ms,
+            source=source,
+        )
+        session.add(log)
+    except Exception:
+        logger.debug("Failed to write audit log", exc_info=True)
 
 
 @router.post("/{pipeline_id}", response_model=ProcessResponse)
@@ -120,7 +148,7 @@ def process_text(
     body: ProcessRequest,
 ) -> ProcessResponse:
     pipe_chain, pipeline, ver = _load_pipeline_and_meta(session, pipeline_id)
-    return _process_single(
+    resp = _process_single(
         body.text,
         body.request_id,
         pipe_chain,
@@ -128,6 +156,8 @@ def process_text(
         ver,
         pipeline_config=ver.config,
     )
+    _log_audit(session, resp, source="api")
+    return resp
 
 
 @router.post("/{pipeline_id}/batch", response_model=BatchProcessResponse)
@@ -151,6 +181,9 @@ def process_batch(
         for item in body.items
     ]
     total_ms = (time.perf_counter() - t0) * 1000
+
+    for resp in results:
+        _log_audit(session, resp, source="batch")
 
     return BatchProcessResponse(
         results=results,

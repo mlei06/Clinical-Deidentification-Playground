@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from clinical_deid.api.routers import pipelines, process
+from clinical_deid.api.routers import audit, evaluation, models, pipelines, process
 from clinical_deid.api.schemas import HealthResponse
 from clinical_deid.db import init_db
 
@@ -41,6 +41,9 @@ app.add_middleware(
 
 app.include_router(pipelines.router)
 app.include_router(process.router)
+app.include_router(audit.router)
+app.include_router(evaluation.router)
+app.include_router(models.router)
 
 
 @app.get("/health", response_model=HealthResponse)
