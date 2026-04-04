@@ -1,3 +1,5 @@
+"""Process endpoint — send text through a named pipeline."""
+
 from __future__ import annotations
 
 import logging
@@ -7,11 +9,7 @@ from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException
 
-from clinical_deid.api.deps import (
-    SessionDep,
-    get_current_version,
-    get_pipeline_or_404,
-)
+from clinical_deid.api.deps import SessionDep
 from clinical_deid.api.schemas import (
     BatchProcessRequest,
     BatchProcessResponse,
@@ -19,37 +17,35 @@ from clinical_deid.api.schemas import (
     ProcessRequest,
     ProcessResponse,
 )
-from clinical_deid.db import get_cached_pipeline
+from clinical_deid.config import get_settings
 from clinical_deid.domain import AnnotatedDocument, Document
+from clinical_deid.pipeline_store import load_pipeline_config
 from clinical_deid.pipes.base import Pipe
 from clinical_deid.pipes.combinators import Pipeline
-from clinical_deid.pipes.registry import pipeline_config_requests_intermediary
-from clinical_deid.tables import AuditLogRecord, PipelineRecord, PipelineVersionRecord
+from clinical_deid.pipes.registry import load_pipeline, pipeline_config_requests_intermediary
+from clinical_deid.tables import AuditLogRecord
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/process", tags=["process"])
 
 
-def _load_pipeline_and_meta(
-    session: SessionDep, pipeline_id: str
-) -> tuple[Pipe, PipelineRecord, PipelineVersionRecord]:
-    """Look up pipeline + current version, build (or retrieve cached) pipe chain."""
-    pipeline = get_pipeline_or_404(session, pipeline_id)
-    ver = get_current_version(session, pipeline)
-
+def _load_pipe_chain(pipeline_name: str) -> tuple[Pipe, dict[str, Any]]:
+    """Load a pipeline from the filesystem by name."""
     try:
-        pipe_chain = get_cached_pipeline(ver.config_hash, ver.config)
+        config = load_pipeline_config(get_settings().pipelines_dir, pipeline_name)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    try:
+        pipe_chain = load_pipeline(config)
     except Exception as exc:
         raise HTTPException(
             status_code=500, detail=f"failed to build pipeline: {exc}"
         ) from exc
-
-    return pipe_chain, pipeline, ver
+    return pipe_chain, config
 
 
 def _redact_text(text: str, spans: list[PHISpanResponse]) -> str:
-    """Replace spans with [LABEL] placeholders, right-to-left to preserve offsets."""
     sorted_spans = sorted(spans, key=lambda s: s.start, reverse=True)
     result = text
     for span in sorted_spans:
@@ -61,9 +57,7 @@ def _process_single(
     text: str,
     request_id: str | None,
     pipe_chain: Pipe,
-    pipeline: PipelineRecord,
-    ver: PipelineVersionRecord,
-    *,
+    pipeline_name: str,
     pipeline_config: dict[str, Any],
 ) -> ProcessResponse:
     req_id = request_id or str(uuid4())
@@ -96,94 +90,78 @@ def _process_single(
         for s in result.spans
     ]
 
-    # If the pipeline includes a redactor (text changed), use the output text.
-    # Otherwise generate [LABEL] replacements from detected spans.
     if result.document.text != text:
         redacted = result.document.text
     else:
         redacted = _redact_text(text, span_responses)
 
-    resp = ProcessResponse(
+    return ProcessResponse(
         request_id=req_id,
         original_text=text,
         redacted_text=redacted,
         spans=span_responses,
-        pipeline_id=pipeline.id,
-        pipeline_name=pipeline.name,
-        pipeline_version=ver.version,
+        pipeline_name=pipeline_name,
         processing_time_ms=round(elapsed_ms, 2),
         intermediary_trace=intermediary_trace,
     )
-    return resp
 
 
 def _log_audit(
     session: Any,
-    response: ProcessResponse,
+    pipeline_name: str,
+    pipeline_config: dict[str, Any],
+    responses: list[ProcessResponse],
     source: str = "api",
 ) -> None:
-    """Persist an audit log entry (best-effort, never raises)."""
+    """Persist a single audit record for one or more processed docs."""
     try:
-        log = AuditLogRecord(
-            request_id=response.request_id,
-            pipeline_id=response.pipeline_id,
-            pipeline_name=response.pipeline_name,
-            pipeline_version=response.pipeline_version,
-            input_text=response.original_text,
-            output_text=response.redacted_text,
-            spans=[s.model_dump() for s in response.spans],
-            span_count=len(response.spans),
-            processing_time_ms=response.processing_time_ms,
-            source=source,
+        import getpass
+
+        total_spans = sum(len(r.spans) for r in responses)
+        total_ms = sum(r.processing_time_ms for r in responses)
+        record = AuditLogRecord(
+            user=getpass.getuser(),
+            command="process" if source == "api" else "process_batch",
+            pipeline_name=pipeline_name,
+            pipeline_config=pipeline_config,
+            doc_count=len(responses),
+            span_count=total_spans,
+            duration_seconds=total_ms / 1000,
+            source="api",
         )
-        session.add(log)
+        session.add(record)
     except Exception:
         logger.debug("Failed to write audit log", exc_info=True)
 
 
-@router.post("/{pipeline_id}", response_model=ProcessResponse)
+@router.post("/{pipeline_name}", response_model=ProcessResponse)
 def process_text(
     session: SessionDep,
-    pipeline_id: str,
+    pipeline_name: str,
     body: ProcessRequest,
 ) -> ProcessResponse:
-    pipe_chain, pipeline, ver = _load_pipeline_and_meta(session, pipeline_id)
-    resp = _process_single(
-        body.text,
-        body.request_id,
-        pipe_chain,
-        pipeline,
-        ver,
-        pipeline_config=ver.config,
-    )
-    _log_audit(session, resp, source="api")
+    pipe_chain, config = _load_pipe_chain(pipeline_name)
+    resp = _process_single(body.text, body.request_id, pipe_chain, pipeline_name, config)
+    _log_audit(session, pipeline_name, config, [resp], source="api")
     return resp
 
 
-@router.post("/{pipeline_id}/batch", response_model=BatchProcessResponse)
+@router.post("/{pipeline_name}/batch", response_model=BatchProcessResponse)
 def process_batch(
     session: SessionDep,
-    pipeline_id: str,
+    pipeline_name: str,
     body: BatchProcessRequest,
 ) -> BatchProcessResponse:
-    pipe_chain, pipeline, ver = _load_pipeline_and_meta(session, pipeline_id)
+    pipe_chain, config = _load_pipe_chain(pipeline_name)
 
     t0 = time.perf_counter()
     results = [
-        _process_single(
-            item.text,
-            item.request_id,
-            pipe_chain,
-            pipeline,
-            ver,
-            pipeline_config=ver.config,
-        )
+        _process_single(item.text, item.request_id, pipe_chain, pipeline_name, config)
         for item in body.items
     ]
     total_ms = (time.perf_counter() - t0) * 1000
 
-    for resp in results:
-        _log_audit(session, resp, source="batch")
+    _log_audit(session, pipeline_name, config, results, source="api")
 
     return BatchProcessResponse(
         results=results,

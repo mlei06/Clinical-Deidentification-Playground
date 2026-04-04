@@ -33,22 +33,53 @@ def _tag_replace(text: str, spans: list[PHISpan]) -> str:
 def _build_pipeline(
     profile: str,
     config_path: str | None,
+    pipeline_name: str | None,
     custom_lists_dir: str | None,
     redactor: str,
-) -> tuple[Any, dict[str, Any]]:
-    """Return ``(pipe_chain, config_dict)``."""
-    from clinical_deid.pipes.registry import load_pipeline
+) -> tuple[Any, dict[str, Any], str]:
+    """Return ``(pipe_chain, config_dict, resolved_pipeline_name)``."""
+    from clinical_deid.pipes.registry import load_pipeline, registered_pipes
 
-    if config_path:
+    # Early check: if surrogate redactor requested, verify faker is available
+    if redactor == "surrogate" and "surrogate" not in registered_pipes():
+        click.echo(
+            "Error: --redactor surrogate requires the faker library.\n"
+            "Install it with:  pip install 'clinical-deid-playground[scripts]'",
+            err=True,
+        )
+        raise SystemExit(1)
+
+    resolved_name = ""
+
+    if pipeline_name:
+        # Load from saved pipeline file
+        from clinical_deid.config import get_settings
+        from clinical_deid.pipeline_store import load_pipeline_config
+
+        try:
+            config = load_pipeline_config(get_settings().pipelines_dir, pipeline_name)
+        except FileNotFoundError as exc:
+            click.echo(f"Error: {exc}", err=True)
+            raise SystemExit(1)
+        resolved_name = pipeline_name
+    elif config_path:
         config = json.loads(Path(config_path).read_text(encoding="utf-8"))
+        resolved_name = Path(config_path).stem
     else:
         from clinical_deid.profiles import get_profile_config
 
         config = get_profile_config(
             profile, custom_lists_dir=custom_lists_dir, redactor=redactor
         )
-    pipeline = load_pipeline(config)
-    return pipeline, config
+        resolved_name = f"profile:{profile}"
+
+    try:
+        pipeline = load_pipeline(config)
+    except RuntimeError as exc:
+        click.echo(f"Error: {exc}", err=True)
+        raise SystemExit(1)
+
+    return pipeline, config, resolved_name
 
 
 def _process_doc(
@@ -114,6 +145,12 @@ def main(verbose: bool) -> None:
     help="Custom pipeline JSON (overrides --profile).",
 )
 @click.option(
+    "--pipeline",
+    "pipeline_name",
+    default=None,
+    help="Name of a saved pipeline (overrides --profile and --config).",
+)
+@click.option(
     "--redactor",
     type=click.Choice(["tag", "surrogate"]),
     default="tag",
@@ -132,6 +169,7 @@ def main(verbose: bool) -> None:
 def run(
     profile: str,
     config_path: str | None,
+    pipeline_name: str | None,
     redactor: str,
     output_format: str,
     custom_lists_dir: str | None,
@@ -143,9 +181,12 @@ def run(
     Examples:
       echo "Patient John Smith DOB 01/15/1980" | clinical-deid run
       clinical-deid run notes.txt
+      clinical-deid run --pipeline my-pipeline notes.txt
       clinical-deid run --profile fast --redactor surrogate notes.txt
     """
-    pipeline, config = _build_pipeline(profile, config_path, custom_lists_dir, redactor)
+    pipeline, config, resolved_name = _build_pipeline(
+        profile, config_path, pipeline_name, custom_lists_dir, redactor
+    )
 
     texts: list[tuple[str, str]] = []
     if files:
@@ -184,18 +225,20 @@ def run(
         click.echo(to_jsonl(results))
 
     # Audit
+    total_spans = sum(len(r.spans) for r in results)
     try:
-        from clinical_deid.audit import log_run, make_record
+        from clinical_deid.audit import log_run
 
-        record = make_record(
+        log_run(
             command="run",
-            profile=profile if not config_path else None,
-            config=config,
+            pipeline_name=resolved_name,
+            pipeline_config=config,
             doc_count=len(texts),
             error_count=0,
+            span_count=total_spans,
             duration_seconds=duration,
+            source="cli",
         )
-        log_run(record)
     except Exception:
         logger.debug("Failed to write audit record", exc_info=True)
 
@@ -214,6 +257,12 @@ def run(
     type=click.Choice(["fast", "balanced", "accurate"]),
     default="balanced",
     show_default=True,
+)
+@click.option(
+    "--pipeline",
+    "pipeline_name",
+    default=None,
+    help="Name of a saved pipeline (overrides --profile and --config).",
 )
 @click.option(
     "--on-error",
@@ -241,6 +290,7 @@ def batch(
     input_path: str,
     output_dir: str,
     profile: str,
+    pipeline_name: str | None,
     on_error: str,
     output_format: str,
     redactor: str,
@@ -253,8 +303,11 @@ def batch(
     Examples:
       clinical-deid batch notes_dir/ -o output/ --on-error skip
       clinical-deid batch corpus.jsonl -o output/ --format jsonl
+      clinical-deid batch notes_dir/ -o output/ --pipeline my-pipeline
     """
-    pipeline, config = _build_pipeline(profile, config_path, custom_lists_dir, redactor)
+    pipeline, config, resolved_name = _build_pipeline(
+        profile, config_path, pipeline_name, custom_lists_dir, redactor
+    )
 
     # Load input documents
     inp = Path(input_path)
@@ -324,18 +377,21 @@ def batch(
     )
 
     # Audit
+    total_spans = sum(len(r.spans) for r in results)
     try:
-        from clinical_deid.audit import log_run, make_record
+        from clinical_deid.audit import log_run
 
-        record = make_record(
+        log_run(
             command="batch",
-            profile=profile if not config_path else None,
-            config=config,
+            pipeline_name=resolved_name,
+            pipeline_config=config,
+            dataset_source=input_path,
             doc_count=len(results),
             error_count=len(errors),
+            span_count=total_spans,
             duration_seconds=duration,
+            source="cli",
         )
-        log_run(record)
     except Exception:
         logger.debug("Failed to write audit record", exc_info=True)
 
@@ -365,6 +421,12 @@ def batch(
     default="balanced",
     show_default=True,
 )
+@click.option(
+    "--pipeline",
+    "pipeline_name",
+    default=None,
+    help="Name of a saved pipeline (overrides --profile and --config).",
+)
 @click.option("--config", "config_path", type=click.Path(exists=True), default=None)
 @click.option("--custom-lists-dir", type=click.Path(exists=True), default=None)
 @click.option(
@@ -384,6 +446,7 @@ def eval_cmd(
     corpus: str,
     corpus_format: str,
     profile: str,
+    pipeline_name: str | None,
     config_path: str | None,
     custom_lists_dir: str | None,
     confidence_threshold: float,
@@ -391,15 +454,17 @@ def eval_cmd(
 ) -> None:
     """Evaluate pipeline against a gold-standard corpus.
 
+    Shows strict, partial-overlap, and token-level metrics plus risk-weighted
+    recall and HIPAA coverage gaps.
+
     \b
     Examples:
       clinical-deid eval --corpus data.jsonl --profile fast
+      clinical-deid eval --corpus data.jsonl --pipeline my-pipeline
       clinical-deid eval --corpus data.jsonl --custom-lists-dir my_lists/
     """
-    from clinical_deid.eval.spans import (
-        collect_low_confidence_spans,
-        strict_eval_report,
-    )
+    from clinical_deid.eval.risk import HIPAA_IDENTIFIER_NAMES, hipaa_coverage_report
+    from clinical_deid.eval.runner import evaluate_pipeline
     from clinical_deid.ingest.sources import load_annotated_corpus
 
     # Load gold corpus
@@ -417,66 +482,114 @@ def eval_cmd(
 
     click.echo(f"Evaluating on {len(golds)} document(s)...", err=True)
 
-    pipeline, config = _build_pipeline(profile, config_path, custom_lists_dir, redactor)
-
-    t0 = time.perf_counter()
-    preds: list[AnnotatedDocument] = []
-    for gold in golds:
-        empty = AnnotatedDocument(document=gold.document, spans=[])
-        preds.append(pipeline.forward(empty))
-    duration = time.perf_counter() - t0
-
-    report = strict_eval_report(preds, golds)
-
-    # Print per-label table
-    click.echo("")
-    header = f"{'Label':<20} {'Prec':>8} {'Recall':>8} {'F1':>8} {'TP':>6} {'FP':>6} {'FN':>6}"
-    click.echo(header)
-    click.echo("-" * len(header))
-    for lm in report.per_label:
-        click.echo(
-            f"{lm.label:<20} {lm.precision:>8.4f} {lm.recall:>8.4f} {lm.f1:>8.4f} "
-            f"{lm.tp:>6} {lm.fp:>6} {lm.fn:>6}"
-        )
-    click.echo("-" * len(header))
-    m = report.micro
-    click.echo(
-        f"{'MICRO (all)':<20} {m.precision:>8.4f} {m.recall:>8.4f} {m.f1:>8.4f} "
-        f"{m.tp:>6} {m.fp:>6} {m.fn:>6}"
+    pipeline, config, resolved_name = _build_pipeline(
+        profile, config_path, pipeline_name, custom_lists_dir, redactor
     )
 
-    # Low-confidence spans
-    low_conf = collect_low_confidence_spans(preds, threshold=confidence_threshold)
+    t0 = time.perf_counter()
+    result = evaluate_pipeline(pipeline, golds)
+    duration = time.perf_counter() - t0
+
+    # ---- Per-label table (strict match) ----
+    click.echo("")
+    header = f"{'Label':<20} {'Prec':>8} {'Recall':>8} {'F1':>8} {'TP':>6} {'FP':>6} {'FN':>6} {'Support':>8}"
+    click.echo(header)
+    click.echo("-" * len(header))
+    for label in sorted(result.per_label):
+        lm = result.per_label[label]
+        s = lm.strict
+        click.echo(
+            f"{label:<20} {s.precision:>8.4f} {s.recall:>8.4f} {s.f1:>8.4f} "
+            f"{s.tp:>6} {s.fp:>6} {s.fn:>6} {lm.support:>8}"
+        )
+    click.echo("-" * len(header))
+    o = result.overall
+    click.echo(
+        f"{'MICRO (all)':<20} {o.strict.precision:>8.4f} {o.strict.recall:>8.4f} {o.strict.f1:>8.4f} "
+        f"{o.strict.tp:>6} {o.strict.fp:>6} {o.strict.fn:>6}"
+    )
+
+    # ---- Summary across matching modes ----
+    click.echo(f"\n{'Matching mode':<25} {'Prec':>8} {'Recall':>8} {'F1':>8}")
+    click.echo("-" * 51)
+    for mode_name, mr in [
+        ("Strict", o.strict),
+        ("Partial overlap", o.partial_overlap),
+        ("Token-level", o.token_level),
+        ("Exact boundary", o.exact_boundary),
+    ]:
+        click.echo(f"{mode_name:<25} {mr.precision:>8.4f} {mr.recall:>8.4f} {mr.f1:>8.4f}")
+    click.echo(f"\n  Risk-weighted recall:  {result.risk_weighted_recall:.4f}")
+
+    # ---- HIPAA coverage ----
+    pipeline_labels: set[str] = set()
+    for lm in result.per_label.values():
+        pipeline_labels.add(lm.label)
+    coverage = hipaa_coverage_report(pipeline_labels)
+    uncovered = [
+        (hid, HIPAA_IDENTIFIER_NAMES[hid])
+        for hid, status in coverage.items()
+        if status == "uncovered"
+    ]
+    if uncovered:
+        click.echo(f"\n  HIPAA gaps ({len(uncovered)} uncovered):")
+        for hid, name in uncovered:
+            click.echo(f"    #{hid}: {name}")
+    else:
+        click.echo("\n  HIPAA: all applicable identifiers covered")
+
+    # ---- Low-confidence spans (from false positives per doc) ----
+    low_conf: list[tuple[str, PHISpan]] = []
+    for dr in result.document_results:
+        for span in dr.false_positives:
+            if span.confidence is not None and span.confidence < confidence_threshold:
+                low_conf.append((dr.document_id, span))
     if low_conf:
-        click.echo(f"\nLow-confidence spans (< {confidence_threshold}): {len(low_conf)} flagged")
-        for doc_id, span, surface in low_conf[:20]:
+        click.echo(f"\n  Low-confidence false positives (conf < {confidence_threshold}): {len(low_conf)} flagged")
+        for doc_id, span in low_conf[:20]:
             click.echo(
-                f"  doc {doc_id!r}: [{span.start}:{span.end}] "
-                f"{surface!r} ({span.label}, conf={span.confidence:.2f}, source={span.source})"
+                f"    doc {doc_id!r}: [{span.start}:{span.end}] "
+                f"({span.label}, conf={span.confidence:.2f}, src={span.source})"
             )
         if len(low_conf) > 20:
-            click.echo(f"  ... and {len(low_conf) - 20} more")
+            click.echo(f"    ... and {len(low_conf) - 20} more")
 
-    click.echo(f"\nEval completed in {duration:.1f}s on {len(golds)} doc(s).")
+    # ---- Worst documents ----
+    worst = result.document_results[:3]
+    if worst and worst[0].metrics.strict.f1 < 1.0:
+        click.echo(f"\n  Worst documents (by strict F1):")
+        for dr in worst:
+            click.echo(
+                f"    {dr.document_id}: F1={dr.metrics.strict.f1:.4f}  "
+                f"FN={len(dr.false_negatives)}  FP={len(dr.false_positives)}  "
+                f"risk_recall={dr.risk_weighted_recall:.4f}"
+            )
+
+    click.echo(f"\nEval completed in {duration:.1f}s on {result.document_count} doc(s).")
 
     # Audit
     try:
-        from clinical_deid.audit import log_run, make_record
+        from clinical_deid.audit import log_run
 
-        record = make_record(
+        log_run(
             command="eval",
-            profile=profile if not config_path else None,
-            config=config,
-            doc_count=len(golds),
+            pipeline_name=resolved_name,
+            pipeline_config=config,
+            dataset_source=corpus,
+            doc_count=result.document_count,
             error_count=0,
+            span_count=o.strict.tp + o.strict.fp,
             duration_seconds=duration,
             metrics={
-                "micro_precision": m.precision,
-                "micro_recall": m.recall,
-                "micro_f1": m.f1,
+                "strict_precision": o.strict.precision,
+                "strict_recall": o.strict.recall,
+                "strict_f1": o.strict.f1,
+                "partial_f1": o.partial_overlap.f1,
+                "token_f1": o.token_level.f1,
+                "risk_weighted_recall": result.risk_weighted_recall,
             },
+            source="cli",
         )
-        log_run(record)
     except Exception:
         logger.debug("Failed to write audit record", exc_info=True)
 
@@ -493,58 +606,60 @@ def audit() -> None:
 
 @audit.command(name="list")
 @click.option("--limit", type=int, default=20, show_default=True)
-def audit_list(limit: int) -> None:
+@click.option("--source", type=click.Choice(["cli", "api"]), default=None)
+def audit_list(limit: int, source: str | None) -> None:
     """List recent audit records."""
     from clinical_deid.audit import list_runs
 
-    records = list_runs(limit=limit)
+    records = list_runs(limit=limit, source=source)
     if not records:
         click.echo("No audit records found.")
         return
 
     header = (
-        f"{'Run ID':<12} {'Timestamp':<22} {'User':<12} {'Cmd':<8} "
-        f"{'Profile':<12} {'Docs':>6} {'Errs':>6} {'Duration':>10} {'Recall':>8}"
+        f"{'ID':<12} {'Timestamp':<20} {'User':<10} {'Cmd':<8} "
+        f"{'Pipeline':<20} {'Src':<5} {'Docs':>5} {'Spans':>7} {'Time':>8}"
     )
     click.echo(header)
     click.echo("-" * len(header))
     for r in records:
-        recall = ""
-        if r.metrics_json:
-            metrics = json.loads(r.metrics_json)
-            if "micro_recall" in metrics:
-                recall = f"{metrics['micro_recall']:.3f}"
+        ts = r.timestamp.strftime("%Y-%m-%d %H:%M:%S") if r.timestamp else ""
         click.echo(
-            f"{r.run_id[:12]:<12} {r.timestamp[:22]:<22} {r.user:<12} "
-            f"{r.command:<8} {(r.profile or '-'):<12} {r.doc_count:>6} "
-            f"{r.error_count:>6} {r.duration_seconds:>9.1f}s {recall:>8}"
+            f"{r.id[:12]:<12} {ts:<20} {r.user:<10} "
+            f"{r.command:<8} {r.pipeline_name[:20]:<20} {r.source:<5} "
+            f"{r.doc_count:>5} {r.span_count:>7} {r.duration_seconds:>7.1f}s"
         )
 
 
 @audit.command(name="show")
-@click.argument("run_id")
-def audit_show(run_id: str) -> None:
-    """Show details of a specific run."""
+@click.argument("record_id")
+def audit_show(record_id: str) -> None:
+    """Show details of a specific audit record."""
     from clinical_deid.audit import get_run
 
-    record = get_run(run_id)
+    record = get_run(record_id)
     if record is None:
-        click.echo(f"No record found for {run_id!r}.", err=True)
+        click.echo(f"No record found for {record_id!r}.", err=True)
         raise SystemExit(1)
 
-    click.echo(f"Run ID:    {record.run_id}")
-    click.echo(f"Timestamp: {record.timestamp}")
-    click.echo(f"User:      {record.user}")
-    click.echo(f"Command:   {record.command}")
-    click.echo(f"Profile:   {record.profile or '-'}")
-    click.echo(f"Docs:      {record.doc_count}")
-    click.echo(f"Errors:    {record.error_count}")
-    click.echo(f"Duration:  {record.duration_seconds:.1f}s")
-    if record.metrics_json:
-        click.echo(f"Metrics:   {record.metrics_json}")
+    ts = record.timestamp.strftime("%Y-%m-%d %H:%M:%S") if record.timestamp else ""
+    click.echo(f"ID:            {record.id}")
+    click.echo(f"Timestamp:     {ts}")
+    click.echo(f"User:          {record.user}")
+    click.echo(f"Command:       {record.command}")
+    click.echo(f"Pipeline:      {record.pipeline_name}")
+    click.echo(f"Source:        {record.source}")
+    click.echo(f"Docs:          {record.doc_count}")
+    click.echo(f"Errors:        {record.error_count}")
+    click.echo(f"Spans:         {record.span_count}")
+    click.echo(f"Duration:      {record.duration_seconds:.1f}s")
+    if record.dataset_source:
+        click.echo(f"Dataset:       {record.dataset_source}")
+    if record.metrics:
+        click.echo(f"Metrics:       {json.dumps(record.metrics, indent=2)}")
     if record.notes:
-        click.echo(f"Notes:     {record.notes}")
-    click.echo(f"\nPipeline config:\n{record.config_json}")
+        click.echo(f"Notes:         {record.notes}")
+    click.echo(f"\nPipeline config:\n{json.dumps(record.pipeline_config, indent=2)}")
 
 
 # ---------------------------------------------------------------------------

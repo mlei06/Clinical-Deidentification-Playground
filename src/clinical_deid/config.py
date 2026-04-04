@@ -12,6 +12,8 @@ from clinical_deid.synthesis.client import OpenAICompatibleChatClient
 
 class Settings(BaseSettings):
     database_url: str = "sqlite:///./var/dev.sqlite"
+    pipelines_dir: Path = Path("pipelines")
+    evaluations_dir: Path = Path("evaluations")
     models_dir: Path = Path("models")
 
     #: For :class:`~clinical_deid.synthesis.client.OpenAICompatibleChatClient`. Loaded from ``.env`` or the environment. Either ``OPENAI_API_KEY`` or ``CLINICAL_DEID_OPENAI_API_KEY`` may be set.

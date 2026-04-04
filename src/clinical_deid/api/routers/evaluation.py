@@ -2,20 +2,20 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+import logging
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
-from sqlmodel import col, select
 
-from clinical_deid.api.deps import (
-    SessionDep,
-    get_current_version,
-    get_pipeline_or_404,
-)
-from clinical_deid.db import get_cached_pipeline
-from clinical_deid.tables import EvalRunRecord
+from clinical_deid.api.deps import SessionDep
+from clinical_deid.config import get_settings
+from clinical_deid.eval_store import EvalResultInfo, list_eval_results, load_eval_result, save_eval_result
+from clinical_deid.pipeline_store import load_pipeline_config
+from clinical_deid.pipes.registry import load_pipeline
+from clinical_deid.tables import AuditLogRecord
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/eval", tags=["evaluation"])
 
@@ -43,20 +43,19 @@ class EvalMetricsResponse(BaseModel):
 
 
 class EvalRunRequest(BaseModel):
-    pipeline_id: str
+    pipeline_name: str
     dataset_path: str  # local path to JSONL or BRAT corpus
     dataset_format: str = "jsonl"  # "jsonl", "brat-dir", "brat-corpus"
 
 
 class EvalRunSummary(BaseModel):
     id: str
-    pipeline_id: str
-    pipeline_version: int
+    pipeline_name: str
     dataset_source: str
     document_count: int
     strict_f1: float
     risk_weighted_recall: float
-    created_at: datetime
+    created_at: str
 
 
 class EvalRunDetail(EvalRunSummary):
@@ -80,19 +79,30 @@ class EvalCompareResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-def _run_detail(r: EvalRunRecord) -> EvalRunDetail:
-    metrics = r.metrics or {}
-    strict = metrics.get("overall", {}).get("strict", {})
-    rwr = metrics.get("risk_weighted_recall", 0.0)
+def _info_to_summary(info: EvalResultInfo) -> EvalRunSummary:
+    return EvalRunSummary(
+        id=info.id,
+        pipeline_name=info.pipeline_name,
+        dataset_source=info.dataset_source,
+        document_count=info.document_count,
+        strict_f1=info.strict_f1,
+        risk_weighted_recall=info.risk_weighted_recall,
+        created_at=info.created_at,
+    )
+
+
+def _data_to_detail(data: dict[str, Any]) -> EvalRunDetail:
+    metrics = data.get("metrics", {})
+    overall = metrics.get("overall", {})
+    strict = overall.get("strict", {})
     return EvalRunDetail(
-        id=r.id,
-        pipeline_id=r.pipeline_id,
-        pipeline_version=r.pipeline_version,
-        dataset_source=r.dataset_source,
-        document_count=r.document_count,
+        id=data.get("id", ""),
+        pipeline_name=data.get("pipeline_name", ""),
+        dataset_source=data.get("dataset_source", ""),
+        document_count=data.get("document_count", 0),
         strict_f1=strict.get("f1", 0.0),
-        risk_weighted_recall=rwr,
-        created_at=r.created_at,
+        risk_weighted_recall=metrics.get("risk_weighted_recall", 0.0),
+        created_at=data.get("created_at", ""),
         metrics=metrics,
     )
 
@@ -130,11 +140,16 @@ def run_evaluation(session: SessionDep, body: EvalRunRequest) -> EvalRunDetail:
     from clinical_deid.eval.runner import evaluate_pipeline
     from clinical_deid.ingest.sources import load_annotated_corpus
 
-    pipeline_rec = get_pipeline_or_404(session, body.pipeline_id)
-    ver = get_current_version(session, pipeline_rec)
+    settings = get_settings()
+
+    # Load pipeline from filesystem
+    try:
+        config = load_pipeline_config(settings.pipelines_dir, body.pipeline_name)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     try:
-        pipe_chain = get_cached_pipeline(ver.config_hash, ver.config)
+        pipe_chain = load_pipeline(config)
     except Exception as exc:
         raise HTTPException(
             status_code=500, detail=f"failed to build pipeline: {exc}"
@@ -183,76 +198,90 @@ def run_evaluation(session: SessionDep, body: EvalRunRequest) -> EvalRunDetail:
         "label_confusion": result.label_confusion,
     }
 
-    # Persist
-    record = EvalRunRecord(
-        pipeline_id=pipeline_rec.id,
-        pipeline_version=ver.version,
+    # Persist eval result to filesystem
+    save_eval_result(
+        settings.evaluations_dir,
+        pipeline_name=body.pipeline_name,
         dataset_source=body.dataset_path,
         metrics=metrics,
         document_count=result.document_count,
     )
-    session.add(record)
-    session.flush()
 
-    return _run_detail(record)
+    # Audit log
+    try:
+        import getpass
+
+        record = AuditLogRecord(
+            user=getpass.getuser(),
+            command="eval",
+            pipeline_name=body.pipeline_name,
+            pipeline_config=config,
+            dataset_source=body.dataset_path,
+            doc_count=result.document_count,
+            span_count=result.overall.strict.tp + result.overall.strict.fp,
+            duration_seconds=0.0,
+            metrics={
+                "strict_f1": result.overall.strict.f1,
+                "risk_weighted_recall": result.risk_weighted_recall,
+            },
+            source="api",
+        )
+        session.add(record)
+    except Exception:
+        logger.debug("Failed to write eval audit log", exc_info=True)
+
+    # Return result
+    data = {
+        "id": f"{body.pipeline_name}_latest",
+        "pipeline_name": body.pipeline_name,
+        "dataset_source": body.dataset_path,
+        "document_count": result.document_count,
+        "metrics": metrics,
+        "created_at": "",
+    }
+    return _data_to_detail(data)
 
 
 @router.get("/runs", response_model=list[EvalRunSummary])
 def list_eval_runs(
-    session: SessionDep,
-    pipeline_id: str | None = Query(default=None),
+    pipeline_name: str | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
 ) -> list[EvalRunSummary]:
-    """List past evaluation runs."""
-    stmt = select(EvalRunRecord)
-    if pipeline_id:
-        stmt = stmt.where(EvalRunRecord.pipeline_id == pipeline_id)
-    stmt = stmt.order_by(col(EvalRunRecord.created_at).desc()).offset(offset).limit(limit)
-    records = session.exec(stmt).all()
-
-    results = []
-    for r in records:
-        metrics = r.metrics or {}
-        strict = metrics.get("overall", {}).get("strict", {})
-        results.append(
-            EvalRunSummary(
-                id=r.id,
-                pipeline_id=r.pipeline_id,
-                pipeline_version=r.pipeline_version,
-                dataset_source=r.dataset_source,
-                document_count=r.document_count,
-                strict_f1=strict.get("f1", 0.0),
-                risk_weighted_recall=metrics.get("risk_weighted_recall", 0.0),
-                created_at=r.created_at,
-            )
-        )
-    return results
+    """List past evaluation runs (from filesystem)."""
+    settings = get_settings()
+    results = list_eval_results(settings.evaluations_dir, pipeline_name=pipeline_name)
+    # Apply offset/limit
+    results = results[offset : offset + limit]
+    return [_info_to_summary(r) for r in results]
 
 
 @router.get("/runs/{run_id}", response_model=EvalRunDetail)
-def get_eval_run(session: SessionDep, run_id: str) -> EvalRunDetail:
+def get_eval_run(run_id: str) -> EvalRunDetail:
     """Get detailed metrics for an evaluation run."""
-    record = session.get(EvalRunRecord, run_id)
-    if record is None:
-        raise HTTPException(status_code=404, detail="eval run not found")
-    return _run_detail(record)
+    settings = get_settings()
+    try:
+        data = load_eval_result(settings.evaluations_dir, run_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return _data_to_detail(data)
 
 
 @router.post("/compare", response_model=EvalCompareResponse)
-def compare_eval_runs(
-    session: SessionDep, body: EvalCompareRequest
-) -> EvalCompareResponse:
+def compare_eval_runs(body: EvalCompareRequest) -> EvalCompareResponse:
     """Compare two evaluation runs side by side."""
-    run_a = session.get(EvalRunRecord, body.run_id_a)
-    run_b = session.get(EvalRunRecord, body.run_id_b)
-    if run_a is None:
+    settings = get_settings()
+    try:
+        data_a = load_eval_result(settings.evaluations_dir, body.run_id_a)
+    except FileNotFoundError:
         raise HTTPException(status_code=404, detail=f"run {body.run_id_a!r} not found")
-    if run_b is None:
+    try:
+        data_b = load_eval_result(settings.evaluations_dir, body.run_id_b)
+    except FileNotFoundError:
         raise HTTPException(status_code=404, detail=f"run {body.run_id_b!r} not found")
 
-    detail_a = _run_detail(run_a)
-    detail_b = _run_detail(run_b)
+    detail_a = _data_to_detail(data_a)
+    detail_b = _data_to_detail(data_b)
 
     return EvalCompareResponse(
         run_a=detail_a,

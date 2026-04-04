@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -11,41 +10,22 @@ class HealthResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Pipeline CRUD
+# Pipeline CRUD (filesystem-backed)
 # ---------------------------------------------------------------------------
 
 
 class CreatePipelineRequest(BaseModel):
     name: str
-    description: str = ""
     config: dict[str, Any]  # {"pipes": [...]}
 
 
 class UpdatePipelineRequest(BaseModel):
-    description: str | None = None
     config: dict[str, Any] | None = None
 
 
-class PipelineSummary(BaseModel):
-    id: str
+class PipelineDetail(BaseModel):
     name: str
-    description: str
-    latest_version: int
-    is_active: bool
-    created_at: datetime
-    updated_at: datetime
-
-
-class PipelineVersionDetail(BaseModel):
-    id: str
-    version: int
     config: dict[str, Any]
-    config_hash: str
-    created_at: datetime
-
-
-class PipelineDetail(PipelineSummary):
-    current_version: PipelineVersionDetail
 
 
 class ValidatePipelineRequest(BaseModel):
@@ -62,7 +42,7 @@ class ValidatePipelineResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-MAX_TEXT_LENGTH = 500_000  # ~500 KB of text; raise if you need longer clinical notes
+MAX_TEXT_LENGTH = 500_000  # ~500 KB of text
 
 class ProcessRequest(BaseModel):
     text: str = Field(..., max_length=MAX_TEXT_LENGTH)
@@ -83,9 +63,7 @@ class ProcessResponse(BaseModel):
     original_text: str
     redacted_text: str
     spans: list[PHISpanResponse]
-    pipeline_id: str
     pipeline_name: str
-    pipeline_version: int
     processing_time_ms: float
     intermediary_trace: list[dict[str, Any]] | None = Field(
         default=None,
@@ -123,7 +101,7 @@ class PipeTypeInfo(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Regex NER list uploads (UI drag-and-drop → JSON terms for pipeline config)
+# Regex NER list uploads
 # ---------------------------------------------------------------------------
 
 
@@ -135,26 +113,20 @@ class ParseListFileResult(BaseModel):
 
 
 class ParseListFilesResponse(BaseModel):
-    """Parsed terms per file; merge into ``whitelist`` ``per_label.<label>.terms``."""
-
     results: list[ParseListFileResult]
 
 
 class NerBuiltinInfo(BaseModel):
-    """Built-in regex labels and bundled whitelist phrase files."""
-
     regex_labels: list[str]
     whitelist_labels: list[str]
 
 
 # ---------------------------------------------------------------------------
-# Blacklist — merge multiple uploads into one ``terms`` array
+# Blacklist
 # ---------------------------------------------------------------------------
 
 
 class BlacklistMergeResponse(BaseModel):
-    """Deduped combined terms for ``blacklist`` ``config.terms`` (drag multiple .txt → one list)."""
-
     terms: list[str]
     count: int
     source_files: list[str]
