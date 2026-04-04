@@ -10,86 +10,112 @@ A **local-first platform** for clinical text de-identification. Three complement
 
 1. **Local training** — Prepare annotated data, export to your trainer (spaCy, HuggingFace, etc.), and train or fine-tune models **on your machines**. Artifacts live under `models/` (see `models/README.md`) and are referenced from pipe configs so detectors stay reproducible.
 
-2. **Pipeline composition** — Configure **pipes** (regex, whitelist, Presidio, pyDeid, combinators, redactors, …) and compose them into versioned **pipelines** (JSON config, registry-backed). The API supports creating/updating pipelines, validation, and machine-readable config schemas with `ui_*` hints for building forms.
+2. **Pipeline composition** — Configure **pipes** (regex, whitelist, Presidio, pyDeid, LLM, combinators, redactors) and compose them into named **pipelines** (JSON files in `pipelines/`, registry-backed). The API supports creating/updating pipelines, validation, and machine-readable config schemas with `ui_*` hints for building forms.
 
-3. **Inference for services** — Expose **HTTP endpoints** so upstream systems send text (or batch items) and receive de-identified output plus **auditable** metadata: `request_id`, spans, timings, pipeline name/version, and optional **intermediary traces** when the pipeline enables step capture. Persistent audit-log storage and a log viewer are planned; today, callers persist responses or integrate with their own logging stack.
+3. **Inference for services** — Expose **HTTP endpoints** so upstream systems send text (or batch items) and receive de-identified output plus **auditable** metadata: `request_id`, spans, timings, pipeline name, and optional **intermediary traces** when the pipeline enables step capture. All operations are logged to a unified SQLite audit trail.
 
-4. **Playground (planned UI)** — A **web UI** on top of the same APIs so people can: **(a)** pick a saved pipeline, paste or upload text, and inspect results (redacted output, spans, optional step trace); **(b)** run **evaluation** against annotated data either from **paths on the server** (JSONL, BRAT corpus roots the app can read) or from **drag-and-drop uploads** in the browser (multipart / ephemeral session storage, then the same eval runner as local corpora). The goal is parity: *one eval implementation*, two ways to supply gold data.
+4. **Playground (planned UI)** — A **web UI** on top of the same APIs so people can: **(a)** pick a saved pipeline, paste or upload text, and inspect results (redacted output, spans, optional step trace); **(b)** run **evaluation** against annotated data either from **paths on the server** (JSONL, BRAT corpus roots the app can read) or from **drag-and-drop uploads** in the browser. The goal is parity: *one eval implementation*, two ways to supply gold data.
 
 ---
 
 ## Design priorities
 
-1. **Minimal setup for new pipes (highest)** — Adding a detector, transformer, or redactor should stay a **small, local change**: Pydantic config + `forward` implementation + **one `register()` call** (and optionally one **catalog** line for install hints / role). Pipes should not require edits to the process router, pipeline loader, or UI beyond what JSON Schema + `ui_*` hints already provide. Optional third-party deps should use **extras + try/import** registration patterns so core installs stay light.
-2. **Composable pipelines** — JSON-defined sequential and parallel graphs, immutable versions, validation before save.
-3. **Observable inference** — Rich process responses today; persisted audit + log viewer next.
+1. **Minimal setup for new pipes (highest)** — Adding a detector, transformer, or redactor should stay a **small, local change**: Pydantic config + `forward` implementation + **one `register()` call** (and optionally one **catalog** line for install hints / role). Pipes should not require edits to the process router, pipeline loader, or UI beyond what JSON Schema + `ui_*` hints already provide.
+2. **Composable pipelines** — JSON-defined sequential and parallel graphs, validation before save.
+3. **Observable inference** — Rich process responses, persistent audit trail, eval metrics.
 4. **Training + eval loop** — Local training artifacts, eval on disk or uploads, compare runs over time.
 
 ---
 
 ## Current state of the codebase
 
-**~5,000 lines of Python** across 67 source modules, 19 test files, and 9 scripts. FastAPI backend with SQLite (SQLModel). Python 3.11+.
+**~7,000 lines of Python** across 96 source modules, 25 test files, and 9 scripts. FastAPI backend with SQLite for audit only. Python 3.11+.
 
 ### What's built and working
 
 | Component | Details |
 |---|---|
 | **Domain models** | `Document` (id, text, metadata), `PHISpan` (start, end, label, confidence, source), `AnnotatedDocument` (document + spans). Universal contract across all services. |
-| **Pipe system** | Protocol-based: `Pipe.forward(AnnotatedDocument) → AnnotatedDocument`. Subtypes: `Detector`, `Preprocessor`, `SpanTransformer`, `Redactor`. |
-| **Built-in pipes** | Detectors: `RegexNerPipe` (pattern-based), `WhitelistPipe` (phrase/dictionary matching), `PresidioNerPipe` (HuggingFace model via Presidio), `PyDeidNerPipe` (pyDeid rule-based). Span transforms: `BlacklistSpans` (false-positive filter), `ResolveSpans` (overlap resolution), `LabelMapper` (remap labels), `LabelFilter` (keep/drop labels). Redactor: `PresidioAnonymizerPipe` (text redaction). |
-| **Pipeline composition** | `Pipeline` (sequential chain), `ParallelDetectors` (fan-out with merge: union, consensus voting, max-confidence). |
+| **Pipe system** | Protocol-based: `Pipe.forward(AnnotatedDocument) -> AnnotatedDocument`. Subtypes: `Detector`, `Preprocessor`, `SpanTransformer`, `Redactor`. |
+| **Built-in pipes** | Detectors: `RegexNerPipe`, `WhitelistPipe`, `PresidioNerPipe`, `PyDeidNerPipe`, `LlmNerPipe`. Span transforms: `BlacklistSpans`, `ResolveSpans`, `LabelMapper`, `LabelFilter`, `SpanResolverPipe`, `ConsistencyPropagatorPipe`. Redactors: `PresidioAnonymizerPipe`, `SurrogatePipe`. |
+| **Pipeline composition** | `Pipeline` (sequential chain), `ParallelDetectors` (fan-out with merge: union, consensus voting, max-confidence, longest, exact-dedupe). |
 | **Pipe registry** | Maps type names to (config_class, pipe_class) pairs. JSON serialization/deserialization. Adding a new detector = config class + pipe class + one `register()` call. |
+| **Pipeline profiles** | `fast` (regex-only), `balanced` (+ presidio), `accurate` (+ consistency propagation + span resolution). |
+| **CLI** | `run` (stdin/files), `batch` (directory/JSONL), `eval` (gold corpus), `audit list/show`, `setup`, `serve`. All support `--profile`, `--pipeline`, `--config`, `--redactor`. |
+| **API** | Pipeline CRUD, process (single + batch), evaluation (run/list/compare), audit (logs/stats), models (list/detail/refresh). |
+| **Evaluation** | 4 matching modes (strict, exact boundary, partial overlap, token-level BIO), risk-weighted recall, HIPAA Safe Harbor coverage, per-label breakdown, confusion matrix, worst-document ranking. |
+| **Storage** | Filesystem-first: pipelines as JSON, eval results as JSON, models as directories. SQLite only for append-only audit trail. |
 | **Dataset ingestion** | JSONL, BRAT (.txt/.ann with splits), ASQ-PHI, MIMIC synthetic notes, PhysioNet i2b2. |
 | **Analytics** | Label distribution, span length histogram, docs-by-span-count, overlapping spans, label co-occurrence matrix. |
 | **Transforms** | Label remapping, random resize (downsample/upsample), boost by label, train/valid/test split reassignment. |
 | **Composition** | Merge, interleave, proportional sampling across multiple corpora. |
-| **Evaluation** | `strict_micro_f1` — exact (start, end, label) match. Precision, recall, F1, TP/FP/FN. Code only, not yet exposed as API. Planned: partial-overlap, token-level, exact-boundary matching modes, per-label breakdowns, risk-weighted recall, label confusion matrix, HIPAA coverage verification. |
 | **LLM synthesis** | Few-shot clinical note generation via OpenAI-compatible API. Prompt templates, PHI extraction, span alignment. |
-| **Storage** | SQLite (SQLModel) for **pipelines**: `PipelineRecord`, `PipelineVersionRecord`. Dataset rows may be added when a dataset HTTP API is mounted; today, corpora live on disk (`data/`, `var/data/`) and in JSONL/BRAT via scripts. |
-| **API (default app)** | FastAPI: `GET /health`, **pipeline CRUD** (`/pipelines`, `/pipelines/pipe-types`, validate, helpers), **inference** (`POST /process/{pipeline_id}`, batch). Dataset import/analytics/document routes may be extended separately; **dataset prep** is well supported via `clinical_deid.ingest`, transforms, and `scripts/`. |
-| **Tests** | 19 test files covering API, ingestion, analytics, transforms, synthesis, config, compose, pipeline execution. |
-| **Scripts** | CLI tools for PhysioNet conversion, ASQ-PHI processing, MIMIC generation, dataset transforms, analytics, span listing, corpus composition. |
+| **Tests** | 25 test files covering API, ingestion, analytics, transforms, synthesis, config, compose, pipeline execution, span resolution. |
 
 ### What's NOT built yet
 
 | Gap | Status |
 |---|---|
-| Setup CLI (`clinical-deid setup`) | Planned |
-| **Persistent** audit log (DB rows for every process call; query API `/audit/logs`) | Planned — responses already carry auditable fields for clients to log |
-| Log viewer UI (htmx/Jinja2 dashboard) | Planned |
-| **Playground UI** — pipeline picker + text try-it (inference); eval job with **local dataset path** or **browser upload** (JSONL / zip BRAT) | Planned |
-| Evaluation API (run pipeline vs dataset **from path or uploaded corpus**, store results, compare runs) | Planned |
-| Training data export (AnnotatedDocument → spaCy DocBin / HF JSONL / CoNLL) | Planned |
-| Training runner (CLI wrapper for spaCy/HF training) | Planned |
-| Custom NER pipe (loads trained models from models directory by name) | Planned (model directory + discovery implemented in `models.py`) |
-| LLM-prompted detector pipe | Planned |
-| SpanResolver pipe (overlap/conflict resolution, interval-tree-based) | Planned |
-| ConsistencyPropagator pipe (document-level span propagation) | Planned |
-| Surrogate pipe (realistic PHI replacement with per-document consistency) | Planned |
-| HIPAA Safe Harbor label mapping + coverage verification | Planned |
+| **Playground UI** (`htmx + Jinja2`) | Planned — pipeline picker + text try-it; eval with local path or browser upload |
+| **Log viewer UI** | Planned — browse audit trail in browser |
+| **Training data export** (spaCy DocBin / HF JSONL / CoNLL) | Planned |
+| **Training runner CLI** | Planned |
+| **Custom NER pipe** (loads trained models from `models/` by name) | Planned |
+| **Eval corpus upload** (multipart JSONL / zip BRAT for browser eval) | Planned |
+| **Dataset HTTP API** (import/list/analytics) | Optional — library + scripts exist |
 
 ---
 
 ## Architecture
 
 ```
-        ┌──────────────────────────────┐     ┌─────────────────────────┐
-        │   Playground UI (planned)     │     │   Log / audit viewer     │
-        │  • Try pipeline on text      │     │   (htmx + Jinja2)       │
-        │  • Eval: local path | upload  │     └────────────┬────────────┘
-        └──────────────────┬───────────┘                  │
-                           │         FastAPI Gateway      │
-                           └─────────────┬────────────────┘
-                                         │
-  ┌──────────┬──────────┬────────────────┼──────────┬──────────┬──────────────┐
-  │          │          │                │          │          │              │
-  ▼          ▼          ▼                ▼          ▼          ▼              ▼
-Data prep Training   Model           Pipeline   Process   Audit-Log     Evaluation
-(scripts  (local     Directory       Service    Service   Service       Service
-+library) CLI only)  (planned        (exists)   (exists)  (partial:     (planned;
-                     FS registry)                         response-only  local + UI upload)
+     +--------------------------------+       +-------------------------+
+     | Playground UI (planned)         |       | Log / audit viewer       |
+     |  text in -> spans out; eval     |       | (htmx + Jinja2, planned) |
+     |  local path or file upload      |       +------------+------------+
+     +----------------+---------------+                    |
+                      |          FastAPI Gateway            |
+                      +----------------+-------------------+
+                                       |
+  +----------+----------+--------------+----------+----------+--------------+
+  |          |          |              |          |          |              |
+  v          v          v              v          v          v              v
+Data prep  Training   Model          Pipeline   Process   Audit-Log     Evaluation
++ library  (local     Directory      Service    Service   Service       Service
+(scripts)  CLI, plan) (FS registry)  (exists)   (exists)  (exists)      (exists)
 ```
+
+---
+
+## Storage architecture
+
+**Filesystem-first, database only for audit.**
+
+| Store | Implementation | Files |
+|-------|---------------|-------|
+| **Pipelines** | `pipeline_store.py` — `list_pipelines()`, `load_pipeline_config()`, `save_pipeline_config()`, `delete_pipeline()` | `pipelines/{name}.json` |
+| **Eval results** | `eval_store.py` — `save_eval_result()`, `list_eval_results()`, `load_eval_result()` | `evaluations/{pipeline}_{timestamp}.json` |
+| **Models** | `models.py` — `scan_models()` reads `model_manifest.json` from `models/{framework}/{name}/` | Filesystem directories |
+| **Audit log** | `audit.py` — `log_run()`, `list_runs()`, `get_run()` via SQLModel | `var/dev.sqlite`, table `audit_log` |
+
+The `AuditLogRecord` table schema:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | str (UUID) | Primary key |
+| `timestamp` | datetime | UTC |
+| `user` | str | OS username |
+| `command` | str | "run", "batch", "eval", "process", "process_batch" |
+| `pipeline_name` | str | Pipeline that ran |
+| `pipeline_config` | JSON | Full config snapshot |
+| `dataset_source` | str | Filesystem path or "" |
+| `doc_count` | int | Documents processed |
+| `error_count` | int | Errors encountered |
+| `span_count` | int | Total spans detected |
+| `duration_seconds` | float | Wall-clock time |
+| `metrics` | JSON | Eval metrics or span counts |
+| `source` | str | "cli" or "api" |
+| `notes` | str | Optional notes |
 
 ---
 
@@ -110,10 +136,8 @@ class Detector(Pipe, Protocol):
 
 ### Adding a new detector (minimal setup)
 
-Keep new integrations **scoped to a module + registry**: no changes to HTTP routers when the pipe follows the protocol and is registered. Optional: add `json_schema_extra` / `field_ui` hints so forms stay informative; add a **catalog** entry for “pip install …” messaging for heavy deps.
-
 ```python
-# 1. Config (Pydantic — serializable)
+# 1. Config (Pydantic -- serializable)
 class MyConfig(BaseModel):
     some_param: str = "default"
 
@@ -129,13 +153,13 @@ class MyPipe:
 register("my_pipe", MyConfig, MyPipe)
 ```
 
-After registration, it works in pipeline JSON configs, the CRUD API, the process endpoint, and evaluation — zero other code changes.
+After registration, it works in pipeline JSON configs, the CRUD API, the process endpoint, evaluation, and CLI — zero other code changes.
 
 ### Pipeline composition
 
 Sequential:
 ```json
-{"pipes": [{"type": "regex_ner"}, {"type": "presidio_ner"}, {"type": "presidio_anonymizer"}]}
+{"pipes": [{"type": "regex_ner"}, {"type": "blacklist"}, {"type": "resolve_spans"}]}
 ```
 
 Parallel with consensus:
@@ -148,90 +172,40 @@ Parallel with consensus:
     "detectors": [
       {"type": "regex_ner"},
       {"type": "presidio_ner"},
-      {"type": "custom_ner", "config": {"model_name": "deid-roberta-v3"}}
+      {"type": "llm_ner", "config": {"model": "gpt-4o-mini"}}
     ]
   }]
 }
 ```
 
-Merge strategies: `union` (keep all), `consensus` (N detectors must agree), `max_confidence` (greedy highest), or a custom callable.
-
----
-
-## Model directory (planned, not DB-backed)
-
-Training is local-only (CLI/scripts). No training API. The filesystem is the registry:
-
-```
-models/
-  spacy/
-    deid-ner-v1/
-      model-best/
-      model_manifest.json    ← {"name", "framework", "labels", "metrics", ...}
-  huggingface/
-    deid-roberta-i2b2/
-      config.json, model.safetensors, tokenizer.json
-      model_manifest.json
-  external/
-    presidio-default/
-      model_manifest.json
-```
-
-Drop a model in, write a manifest, it's available as `{"type": "custom_ner", "config": {"model_name": "deid-ner-v1"}}`. The API only has read-only endpoints to list what's there.
-
----
-
-## Database tables
-
-**Existing (current `tables.py`):**
-- `PipelineRecord` — id, name, description, latest_version, is_active, created_at, updated_at
-- `PipelineVersionRecord` — id, pipeline_id, version, config (JSON), config_hash, created_at (immutable — old versions never modified)
-
-**Planned / optional (dataset service):**
-- `DatasetRecord` — id, name, version, parent_dataset_id, created_at
-- `DocumentRecord` — id, dataset_id, external_id, text, spans (JSON), doc_metadata (JSON)
-
-**Planned:**
-- `AuditLogRecord` — id, request_id, pipeline_version_id, pipeline_name, input_text, output_text, spans (JSON), span_count, processing_time_ms, source, caller, created_at
-- `EvalRunRecord` — id, pipeline_version_id, dataset_id, metrics (JSON), document_count, created_at
+Merge strategies: `union`, `exact_dedupe`, `consensus`, `max_confidence`, `longest_non_overlapping`.
 
 ---
 
 ## API endpoints
 
-### Existing (default `clinical_deid.api.app`)
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/health` | Liveness check |
 | `GET` | `/pipelines/pipe-types` | Pipe catalog, install hints, JSON Schema (+ `ui_*`) for configs |
-| `GET` | `/pipelines/ner/builtins` | Packaged regex / whitelist label names |
+| `GET` | `/pipelines/ner/builtins` | Bundled regex / whitelist label names |
 | `POST` | `/pipelines/whitelist/parse-lists` | Parse uploaded list files for whitelist config |
 | `POST` | `/pipelines/blacklist/parse-wordlists` | Merge wordlist uploads for blacklist |
 | `POST` | `/pipelines` | Create named pipeline from JSON config |
 | `GET` | `/pipelines` | List pipelines |
-| `GET` | `/pipelines/{id}` | Pipeline detail + current version config |
-| `PUT` | `/pipelines/{id}` | Update pipeline (new version when config changes) |
-| `DELETE` | `/pipelines/{id}` | Soft-delete |
-| `POST` | `/pipelines/{id}/validate` | Dry-run validation |
-| `POST` | `/process/{pipeline_id}` | Run pipeline on plain text; auditable JSON (`request_id`, spans, latency, optional trace) |
-| `POST` | `/process/{pipeline_id}/batch` | Batch process |
-
-### Planned / optional extensions
-| Method | Path | Description |
-|---|---|---|
-| `POST` | `/datasets/import-jsonl` | Import JSONL dataset (HTTP) — library + scripts exist today |
-| `GET` | `/datasets` | List datasets |
-| `GET` | `/datasets/{id}/analytics` | Analytics |
-| `GET` | `/documents/{id}` | Fetch document |
-| `GET` | `/audit/logs` | List persisted audit logs (paginated, filtered) |
+| `GET` | `/pipelines/{name}` | Pipeline config |
+| `PUT` | `/pipelines/{name}` | Update pipeline config |
+| `DELETE` | `/pipelines/{name}` | Delete pipeline |
+| `POST` | `/pipelines/{name}/validate` | Dry-run validation |
+| `POST` | `/process/{pipeline_name}` | Run pipeline on text; auditable JSON response |
+| `POST` | `/process/{pipeline_name}/batch` | Batch process |
+| `POST` | `/eval/run` | Run pipeline against gold dataset |
+| `GET` | `/eval/runs` | List eval results |
+| `GET` | `/eval/runs/{id}` | Eval result detail |
+| `POST` | `/eval/compare` | Compare two eval runs |
+| `GET` | `/audit/logs` | Query audit trail (paginated, filtered) |
 | `GET` | `/audit/logs/{id}` | Audit log detail |
 | `GET` | `/audit/stats` | Aggregate stats |
-| `POST` | `/eval/run` | Run pipeline against gold data: **server path** (JSONL/BRAT root), **saved dataset id**, or **pre-uploaded** corpus id from multipart |
-| `POST` | `/eval/corpora/upload` (name TBD) | Accept drag-and-drop zip/JSONL; return ephemeral id for `/eval/run` |
-| `GET` | `/eval/runs` | List eval runs |
-| `GET` | `/eval/runs/{id}` | Eval run detail |
-| `POST` | `/eval/compare` | Compare two eval runs |
-| `GET` / `POST` | `/playground/...` (name TBD) | Server-rendered try-it + eval UI (optional separate router) |
 | `GET` | `/models` | List models from filesystem |
 | `GET` | `/models/{framework}/{name}` | Model manifest details |
 | `POST` | `/models/refresh` | Re-scan models directory |
@@ -243,36 +217,51 @@ Drop a model in, write a manifest, it's available as `{"type": "custom_ner", "co
 ```
 src/clinical_deid/
   domain.py                  # Document, PHISpan, AnnotatedDocument
-  tables.py                  # SQLModel tables (pipelines + versions)
-  db.py                      # SQLite engine, init_db(), pipeline cache
+  tables.py                  # AuditLogRecord (only DB table)
+  db.py                      # SQLite engine, init_db()
   config.py                  # Settings (pydantic-settings), .env loading
+  audit.py                   # Unified audit: log_run(), list_runs(), get_run()
+  pipeline_store.py          # Filesystem pipeline CRUD
+  eval_store.py              # Filesystem eval result storage
   models.py                  # Filesystem model registry (scan, get, list)
+  profiles.py                # fast/balanced/accurate profile builders
+  cli.py                     # Click CLI (run, batch, eval, audit, setup, serve)
+  export.py                  # Output formatters (text, JSON, JSONL, CSV, Parquet)
   ids.py                     # UUID helpers
   env_file.py                # .env resolution
   pipes/
     base.py                  # Pipe, Detector, Preprocessor, SpanTransformer, Redactor protocols
     registry.py              # Type registry, JSON load/dump, pipe catalog
-    ui_schema.py             # `field_ui`, `pipe_config_json_schema` (UI hints in JSON Schema)
+    ui_schema.py             # field_ui, pipe_config_json_schema (UI hints in JSON Schema)
     span_merge.py            # Merge strategies (union, consensus, max_confidence, etc.)
     trace.py                 # Intermediary trace capture
     detector_label_mapping.py # Shared label mapping utilities
+    combinators.py           # Pipeline, ParallelDetectors, ResolveSpans, LabelMapper, LabelFilter
+    span_resolver.py         # Overlap resolution (longest, highest_confidence, priority)
+    consistency_propagator.py # Document-level span propagation
+    llm_ner.py               # LLM-prompted detection
     regex_ner/               # Regex-based PHI detection
     whitelist/               # Phrase/dictionary matching
     blacklist/               # False-positive filtering
     presidio_ner/            # Microsoft Presidio wrapper
     pydeid_ner/              # pyDeid wrapper
-    resolve_spans/           # Overlap resolution
-    presidio_anonymizer/     # Text redaction
-    combinators.py           # Pipeline, ParallelDetectors, ResolveSpans, LabelMapper, LabelFilter
+    presidio_anonymizer/     # Text redaction via Presidio
+    surrogate/               # Realistic fake data replacement
   api/
     app.py                   # FastAPI app, CORS, lifespan, router mounting
-    deps.py                  # Dependency injection (DB session)
+    deps.py                  # Dependency injection (DB session for audit)
     schemas.py               # Request/response models
     routers/
       pipelines.py           # Pipeline CRUD, pipe-types, validate, list helpers
-      process.py             # Inference (text + batch), auditable responses
+      process.py             # Inference (text + batch), audit logging
+      evaluation.py          # Eval run/list/compare (filesystem-backed)
+      audit.py               # Audit log query + stats
+      models.py              # Model listing (filesystem-backed)
   eval/
     spans.py                 # strict_micro_f1, SpanMicroF1
+    matching.py              # 4 matching modes (strict, exact boundary, partial, token-level)
+    risk.py                  # Risk-weighted recall, HIPAA coverage report
+    runner.py                # Batch eval runner with per-label/per-doc results
   analytics/
     stats.py                 # Label distribution, histograms, overlaps, co-occurrence
   ingest/
@@ -291,61 +280,59 @@ src/clinical_deid/
 
 ---
 
-## Key design decisions already made
+## Key design decisions
 
-1. **Registry-first extensibility** — New pipe types are added with **config model + pipe class + `register()`** (and optional catalog metadata). Process, pipeline load/dump, and `/pipelines/pipe-types` stay generic; this is the main lever for keeping third-party and in-house detectors **low boilerplate**.
-2. **Pipes are pure transformations** — `AnnotatedDocument → AnnotatedDocument`. No side effects, no awareness of pipeline context.
-3. **Serializable configs + UI hints** — Pydantic + JSON Schema; `ui_*` keys for generated forms without custom per-pipe frontend code.
+1. **Registry-first extensibility** — New pipe types are added with **config model + pipe class + `register()`** (and optional catalog metadata). Process, pipeline load/dump, and `/pipelines/pipe-types` stay generic.
+2. **Pipes are pure transformations** — `AnnotatedDocument -> AnnotatedDocument`. No side effects, no awareness of pipeline context.
+3. **Serializable configs + UI hints** — Pydantic + JSON Schema; `ui_*` keys for generated forms.
 4. **Model directory, not model database** — training is local-only (CLI). The filesystem is the registry. API is read-only.
-5. **Immutable pipeline versions** — updating a pipeline creates a new version row; old versions persist. Audit logs and eval runs reference the exact version that ran.
-6. **Multi-mode evaluation** — strict, partial-overlap, token-level, and exact-boundary matching. Per-label breakdowns, risk-weighted recall, label confusion matrix, HIPAA coverage reporting. **Same runner** should accept gold data from **server-visible paths** or **UI uploads** (temp extract → ingest → eval).
-7. **SQLite for MVP** — configurable via `CLINICAL_DEID_DATABASE_URL`. Can switch to Postgres later.
-8. **htmx + Jinja2 for UI** — avoids React build pipeline for MVP (playground + log viewer). Can migrate later.
-9. **Datasets are mutable with provenance** (when stored in DB) — version bumps + parent_dataset_id for lineage; filesystem + scripts cover many workflows today.
-10. **Post-processing pipe chain** — detect → resolve overlaps (SpanResolver) → propagate across document (ConsistencyPropagator) → replace with surrogates (SurrogatePipe). Each step is a registered pipe, composable via JSON config.
+5. **Filesystem-first storage** — Pipelines, eval results, and models live on the filesystem as JSON/directories. Use git for history. No migrations.
+6. **SQLite only for audit** — The database stores only the append-only audit trail (`AuditLogRecord`). Both CLI and API write to the same table.
+7. **Multi-mode evaluation** — strict, partial-overlap, token-level, and exact-boundary matching. Per-label breakdowns, risk-weighted recall, label confusion matrix, HIPAA coverage reporting. Same runner for CLI and API.
+8. **Three profiles** — `fast` (regex-only), `balanced` (+ presidio), `accurate` (+ consistency propagation + span resolution). CLI defaults to `balanced`.
+9. **Name-based pipeline routes** — Pipelines are identified by name (e.g., `/pipelines/my-pipeline`), not UUIDs. Simpler, human-readable, filesystem-backed.
+10. **One eval implementation, many ingest paths** — local filesystem, API request, or future UI uploads should all normalize to `AnnotatedDocument` iterators before scoring.
 
 ---
 
 ## Implementation phases
 
-| Phase | Scope | Dependencies |
+| Phase | Scope | Status |
 |---|---|---|
-| **1. Setup CLI** | `clinical-deid setup/serve`, model downloads | None |
-| **2. Persistent audit** | `AuditLogRecord`, write-through on `/process`, query API | None (process endpoint exists) |
-| **3. Evaluation API** | Eval runner service: `POST /eval/run` with **dataset source** = registered path, `dataset_id`, or **upload token** from multipart ingest; `EvalRunRecord`, list/detail/compare | Pipelines |
-| **4. Playground UI** | htmx pages: pipeline selector, text try-it (wraps `/process`), eval form (**local path** OR **drag-and-drop** JSONL/BRAT zip) | Phases 2–3 |
-| **5. Log Viewer UI** | htmx templates, dashboard, log viewer | Phase 2 |
-| **6. Training & Models** | Model directory, exporters, training CLI, custom_ner pipe, models API | Independent |
-| **7. Dataset HTTP API** | Optional mount: import/list/analytics/documents alongside pipelines (can back persistent eval datasets) | None |
-
-Pipeline CRUD and the process endpoint are **implemented**; next differentiators are **playground + eval with upload/local parity**, **persistent audit**, and **training/model discovery**—without complicating the **register-a-pipe** path.
+| **1. Pipe system + composition** | Protocol, registry, built-in pipes, combinators, JSON serialization | Done |
+| **2. API + CLI** | Pipeline CRUD, process, batch, CLI commands, profiles | Done |
+| **3. Evaluation** | Multi-mode matching, risk-weighted recall, HIPAA coverage, eval runner, eval API | Done |
+| **4. Storage refactor** | Filesystem-first pipelines + eval, unified audit trail | Done |
+| **5. Playground UI** | htmx pages: pipeline selector, text try-it, eval form (local path or drag-and-drop) | Planned |
+| **6. Log Viewer UI** | htmx templates, dashboard, log viewer | Planned |
+| **7. Training & Models** | Exporters, training CLI, custom_ner pipe | Planned |
 
 ---
 
 ## Tech stack
 
-- **Backend:** Python 3.11+, FastAPI, Pydantic, SQLModel (SQLAlchemy), Uvicorn
+- **Backend:** Python 3.11+, FastAPI, Pydantic v2, SQLModel (SQLAlchemy), Uvicorn
 - **ML/NLP:** spaCy, HuggingFace Transformers, Microsoft Presidio
 - **LLM:** OpenAI-compatible API client
 - **Testing:** Pytest, Faker, HTTPx (async test client)
 - **Data:** Pandas (scripts), custom JSONL/BRAT parsers
 - **UI (planned):** htmx, Jinja2, Chart.js
-- **Storage:** SQLite (MVP), local filesystem for models and dataset artifacts
+- **Storage:** SQLite (audit only), local filesystem for everything else
 
 ---
 
 ## The full loop
 
 ```
-1. Ingest data        → datasets/import-jsonl, BRAT, etc.
-2. Prepare data       → label remap, compose, augment with synthesis
-3. Export             → clinical-deid export (spaCy/HF/CoNLL)
-4. Train              → clinical-deid train (local, outputs to models/)
-5. Available          → model directory scanned, appears in GET /models
-6. Build pipeline     → {"type": "custom_ner", "config": {"model_name": "..."}}
-7. Evaluate pipeline  → POST /eval/run (local path or upload) or **Playground UI**
-8. Try interactively  → **Playground**: choose pipeline, paste text, inspect spans / trace
-9. Deploy pipeline    → POST /process/{pipeline_id} (log responses today; DB audit planned)
-10. Monitor           → client-side logs now; audit API + UI planned
-11. Retrain           → new data or failed cases → back to step 2
+1. Ingest data        -> JSONL, BRAT, ASQ-PHI, MIMIC
+2. Prepare data       -> label remap, compose, augment with LLM synthesis
+3. Export             -> clinical-deid export (spaCy/HF/CoNLL) [planned]
+4. Train              -> clinical-deid train (local, outputs to models/) [planned]
+5. Available          -> model directory scanned, appears in GET /models
+6. Build pipeline     -> save as pipelines/my-pipeline.json or POST /pipelines
+7. Evaluate pipeline  -> clinical-deid eval or POST /eval/run
+8. Try interactively  -> Playground UI [planned]: choose pipeline, paste text
+9. Deploy pipeline    -> POST /process/{pipeline_name} (with audit logging)
+10. Monitor           -> GET /audit/logs, GET /audit/stats
+11. Retrain           -> new data or failed cases -> back to step 2
 ```
