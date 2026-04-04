@@ -199,13 +199,14 @@ def run_evaluation(session: SessionDep, body: EvalRunRequest) -> EvalRunDetail:
     }
 
     # Persist eval result to filesystem
-    save_eval_result(
+    result_path = save_eval_result(
         settings.evaluations_dir,
         pipeline_name=body.pipeline_name,
         dataset_source=body.dataset_path,
         metrics=metrics,
         document_count=result.document_count,
     )
+    result_id = result_path.stem
 
     # Audit log
     try:
@@ -230,16 +231,9 @@ def run_evaluation(session: SessionDep, body: EvalRunRequest) -> EvalRunDetail:
     except Exception:
         logger.debug("Failed to write eval audit log", exc_info=True)
 
-    # Return result
-    data = {
-        "id": f"{body.pipeline_name}_latest",
-        "pipeline_name": body.pipeline_name,
-        "dataset_source": body.dataset_path,
-        "document_count": result.document_count,
-        "metrics": metrics,
-        "created_at": "",
-    }
-    return _data_to_detail(data)
+    # Return result — read back the saved file for consistent id/created_at
+    saved = load_eval_result(settings.evaluations_dir, result_id)
+    return _data_to_detail(saved)
 
 
 @router.get("/runs", response_model=list[EvalRunSummary])

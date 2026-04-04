@@ -7,14 +7,20 @@ from fastapi.testclient import TestClient
 @pytest.fixture
 def client(tmp_path, monkeypatch):
     db_file = tmp_path / "test.sqlite"
+    pipelines_dir = tmp_path / "pipelines"
+    evaluations_dir = tmp_path / "evaluations"
+    pipelines_dir.mkdir()
+    evaluations_dir.mkdir()
+
     monkeypatch.setenv("CLINICAL_DEID_DATABASE_URL", f"sqlite:///{db_file.as_posix()}")
+    monkeypatch.setenv("CLINICAL_DEID_PIPELINES_DIR", str(pipelines_dir))
+    monkeypatch.setenv("CLINICAL_DEID_EVALUATIONS_DIR", str(evaluations_dir))
 
     from clinical_deid.config import reset_settings
-    from clinical_deid.db import clear_pipeline_cache, init_db, reset_engine
+    from clinical_deid.db import init_db, reset_engine
 
     reset_settings()
     reset_engine()
-    clear_pipeline_cache()
     init_db()
 
     from clinical_deid.api.app import app
