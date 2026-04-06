@@ -229,7 +229,7 @@ def run_evaluation(session: SessionDep, body: EvalRunRequest) -> EvalRunDetail:
         )
         session.add(record)
     except Exception:
-        logger.debug("Failed to write eval audit log", exc_info=True)
+        logger.warning("Failed to write eval audit log", exc_info=True)
 
     # Return result — read back the saved file for consistent id/created_at
     saved = load_eval_result(settings.evaluations_dir, result_id)

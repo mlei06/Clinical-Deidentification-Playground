@@ -79,7 +79,7 @@ Data prep  Training   Model          Pipeline   Process   Audit-Log     Evaluati
 
 ## 3. Core design principles
 
-- **Optimize for new pipes** — Prefer **one registration site** (`register(name, Config, Pipe)` + optional `PipeCatalogEntry`). Avoid per-pipe routes, switch statements, or frontend forks; discovery flows through **`/pipelines/pipe-types`** and JSON Schema.
+- **Optimize for new pipes** — Built-in pipes are registered by adding a single `PipeCatalogEntry` to the catalog in `registry.py` (includes `config_path` and `pipe_path`); `_register_builtins()` auto-imports and registers from the catalog. External plugins call `register()` directly. Discovery flows through **`/pipelines/pipe-types`** and JSON Schema.
 - **Everything is data-driven** — pipes, pipelines, and configs are serializable Pydantic models. The registry maps type names to (config, class) pairs; pipelines are JSON documents.
 - **Filesystem-first** — Pipelines, eval results, models, and datasets live on the filesystem. The database stores only the append-only audit trail. Use git for version history.
 - **Pipes are pure transformations** — `AnnotatedDocument -> AnnotatedDocument`. No awareness of pipeline or dataset context.
@@ -122,9 +122,7 @@ The pipe system is designed so that adding a new detector is a **three-step** pr
 
 1. **Define a config** (Pydantic model with the detector's parameters; add `Field(json_schema_extra=field_ui(...))` only if you want richer forms)
 2. **Implement a pipe class** (with `forward(AnnotatedDocument) -> AnnotatedDocument` and, for detectors, `labels` / `label_mapping` as applicable)
-3. **Register it** — `register("my_pipe", MyConfig, MyPipe)` (typically in the same module or `_register_builtins`)
-
-**Optional fourth steps** (only when needed): append to **`pipe_catalog()`** in `registry.py` for install hints; wrap registration in **`try: ... except ImportError`** for heavy extras.
+3. **Register it** — for built-in pipes, add a `PipeCatalogEntry` to `_CATALOG` in `registry.py` with `config_path` and `pipe_path`; `_register_builtins()` handles import and registration automatically (optional deps are silently skipped). For external plugins, call `register("my_pipe", MyConfig, MyPipe)` directly.
 
 After registration, the new detector is immediately available in pipeline JSON configs, the CRUD API, the process endpoint, evaluation, and CLI — **without** edits to `process.py` or pipeline loaders.
 

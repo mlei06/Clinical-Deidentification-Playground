@@ -240,7 +240,7 @@ def run(
             source="cli",
         )
     except Exception:
-        logger.debug("Failed to write audit record", exc_info=True)
+        logger.warning("Failed to write audit record", exc_info=True)
 
 
 # ---------------------------------------------------------------------------
@@ -393,7 +393,7 @@ def batch(
             source="cli",
         )
     except Exception:
-        logger.debug("Failed to write audit record", exc_info=True)
+        logger.warning("Failed to write audit record", exc_info=True)
 
 
 # ---------------------------------------------------------------------------
@@ -591,7 +591,7 @@ def eval_cmd(
             source="cli",
         )
     except Exception:
-        logger.debug("Failed to write audit record", exc_info=True)
+        logger.warning("Failed to write audit record", exc_info=True)
 
 
 # ---------------------------------------------------------------------------

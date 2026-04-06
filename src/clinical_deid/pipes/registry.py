@@ -33,6 +33,7 @@ JSON schema example::
 
 from __future__ import annotations
 
+import importlib
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -47,6 +48,13 @@ from clinical_deid.pipes.base import Pipe
 # ---------------------------------------------------------------------------
 
 _REGISTRY: dict[str, tuple[type[BaseModel], type]] = {}
+
+
+def _import_dotted(path: str) -> type:
+    """Import ``'some.module:ClassName'`` and return the class."""
+    module_path, class_name = path.rsplit(":", 1)
+    mod = importlib.import_module(module_path)
+    return getattr(mod, class_name)
 
 
 def register(name: str, config_cls: type[BaseModel], pipe_cls: type) -> None:
@@ -72,6 +80,8 @@ class PipeCatalogEntry:
     role: str  # "detector", "span_transformer", "redactor", "preprocessor"
     extra: str | None  # pip extra name, e.g. "presidio", or None if always available
     install_hint: str  # human-readable install command
+    config_path: str  # "module.path:ConfigClass"
+    pipe_path: str  # "module.path:PipeClass"
 
 
 _CATALOG: list[PipeCatalogEntry] = [
@@ -81,6 +91,8 @@ _CATALOG: list[PipeCatalogEntry] = [
         role="detector",
         extra=None,
         install_hint="Included by default",
+        config_path="clinical_deid.pipes.regex_ner.pipe:RegexNerConfig",
+        pipe_path="clinical_deid.pipes.regex_ner.pipe:RegexNerPipe",
     ),
     PipeCatalogEntry(
         name="whitelist",
@@ -88,6 +100,8 @@ _CATALOG: list[PipeCatalogEntry] = [
         role="detector",
         extra=None,
         install_hint="Included by default",
+        config_path="clinical_deid.pipes.whitelist.pipe:WhitelistConfig",
+        pipe_path="clinical_deid.pipes.whitelist.pipe:WhitelistPipe",
     ),
     PipeCatalogEntry(
         name="label_mapper",
@@ -95,6 +109,8 @@ _CATALOG: list[PipeCatalogEntry] = [
         role="span_transformer",
         extra=None,
         install_hint="Included by default",
+        config_path="clinical_deid.pipes.combinators:LabelMapperConfig",
+        pipe_path="clinical_deid.pipes.combinators:LabelMapper",
     ),
     PipeCatalogEntry(
         name="label_filter",
@@ -102,6 +118,8 @@ _CATALOG: list[PipeCatalogEntry] = [
         role="span_transformer",
         extra=None,
         install_hint="Included by default",
+        config_path="clinical_deid.pipes.combinators:LabelFilterConfig",
+        pipe_path="clinical_deid.pipes.combinators:LabelFilter",
     ),
     PipeCatalogEntry(
         name="resolve_spans",
@@ -112,6 +130,8 @@ _CATALOG: list[PipeCatalogEntry] = [
         role="span_transformer",
         extra=None,
         install_hint="Included by default",
+        config_path="clinical_deid.pipes.combinators:ResolveSpansConfig",
+        pipe_path="clinical_deid.pipes.combinators:ResolveSpans",
     ),
     PipeCatalogEntry(
         name="blacklist",
@@ -121,6 +141,8 @@ _CATALOG: list[PipeCatalogEntry] = [
         role="span_transformer",
         extra=None,
         install_hint="Included by default",
+        config_path="clinical_deid.pipes.blacklist.pipe:BlacklistSpansConfig",
+        pipe_path="clinical_deid.pipes.blacklist.pipe:BlacklistSpans",
     ),
     PipeCatalogEntry(
         name="presidio_ner",
@@ -128,6 +150,8 @@ _CATALOG: list[PipeCatalogEntry] = [
         role="detector",
         extra="presidio",
         install_hint="pip install '.[presidio]'",
+        config_path="clinical_deid.pipes.presidio_ner.pipe:PresidioNerConfig",
+        pipe_path="clinical_deid.pipes.presidio_ner.pipe:PresidioNerPipe",
     ),
     PipeCatalogEntry(
         name="presidio_anonymizer",
@@ -135,6 +159,8 @@ _CATALOG: list[PipeCatalogEntry] = [
         role="redactor",
         extra="presidio",
         install_hint="pip install '.[presidio]'",
+        config_path="clinical_deid.pipes.presidio_anonymizer.pipe:PresidioAnonymizerConfig",
+        pipe_path="clinical_deid.pipes.presidio_anonymizer.pipe:PresidioAnonymizerPipe",
     ),
     PipeCatalogEntry(
         name="pydeid_ner",
@@ -142,6 +168,8 @@ _CATALOG: list[PipeCatalogEntry] = [
         role="detector",
         extra="pydeid",
         install_hint="pip install '.[pydeid]'",
+        config_path="clinical_deid.pipes.pydeid_ner.pipe:PyDeidNerConfig",
+        pipe_path="clinical_deid.pipes.pydeid_ner.pipe:PyDeidNerPipe",
     ),
     PipeCatalogEntry(
         name="surrogate",
@@ -149,6 +177,8 @@ _CATALOG: list[PipeCatalogEntry] = [
         role="redactor",
         extra="scripts",
         install_hint="pip install '.[scripts]'",
+        config_path="clinical_deid.pipes.surrogate.pipe:SurrogateConfig",
+        pipe_path="clinical_deid.pipes.surrogate.pipe:SurrogatePipe",
     ),
     PipeCatalogEntry(
         name="span_resolver",
@@ -159,6 +189,8 @@ _CATALOG: list[PipeCatalogEntry] = [
         role="span_transformer",
         extra=None,
         install_hint="Included by default",
+        config_path="clinical_deid.pipes.span_resolver:SpanResolverConfig",
+        pipe_path="clinical_deid.pipes.span_resolver:SpanResolverPipe",
     ),
     PipeCatalogEntry(
         name="consistency_propagator",
@@ -168,6 +200,8 @@ _CATALOG: list[PipeCatalogEntry] = [
         role="span_transformer",
         extra=None,
         install_hint="Included by default",
+        config_path="clinical_deid.pipes.consistency_propagator:ConsistencyPropagatorConfig",
+        pipe_path="clinical_deid.pipes.consistency_propagator:ConsistencyPropagatorPipe",
     ),
     PipeCatalogEntry(
         name="llm_ner",
@@ -175,6 +209,8 @@ _CATALOG: list[PipeCatalogEntry] = [
         role="detector",
         extra="llm",
         install_hint="pip install '.[llm]'",
+        config_path="clinical_deid.pipes.llm_ner:LlmNerConfig",
+        pipe_path="clinical_deid.pipes.llm_ner:LlmNerPipe",
     ),
 ]
 
@@ -434,77 +470,19 @@ def save_pipeline(pipeline: Any, path: str | Path) -> None:
 # ---------------------------------------------------------------------------
 
 def _register_builtins() -> None:
-    """Register all built-in pipes.
+    """Register all built-in pipes from the catalog.
 
-    Pipes whose optional dependencies are not installed are silently skipped —
-    they can still be registered later by importing their module directly.
+    Pipes whose optional dependencies are not installed are silently skipped.
+    Always-available pipes (``extra is None``) re-raise on ``ImportError``.
     """
-    from clinical_deid.pipes.combinators import (
-        LabelFilter,
-        LabelFilterConfig,
-        LabelMapper,
-        LabelMapperConfig,
-        ResolveSpans,
-        ResolveSpansConfig,
-    )
-    from clinical_deid.pipes.blacklist.pipe import BlacklistSpans, BlacklistSpansConfig
-    from clinical_deid.pipes.regex_ner.pipe import RegexNerConfig, RegexNerPipe
-    from clinical_deid.pipes.whitelist.pipe import WhitelistConfig, WhitelistPipe
-
-    # Always-available pipes (no optional deps)
-    register("regex_ner", RegexNerConfig, RegexNerPipe)
-    register("whitelist", WhitelistConfig, WhitelistPipe)
-    register("label_mapper", LabelMapperConfig, LabelMapper)
-    register("label_filter", LabelFilterConfig, LabelFilter)
-    register("resolve_spans", ResolveSpansConfig, ResolveSpans)
-    register("blacklist", BlacklistSpansConfig, BlacklistSpans)
-
-    # Presidio pipes — require `pip install .[presidio]`
-    try:
-        from clinical_deid.pipes.presidio_anonymizer.pipe import (
-            PresidioAnonymizerConfig,
-            PresidioAnonymizerPipe,
-        )
-        from clinical_deid.pipes.presidio_ner.pipe import PresidioNerConfig, PresidioNerPipe
-
-        register("presidio_ner", PresidioNerConfig, PresidioNerPipe)
-        register("presidio_anonymizer", PresidioAnonymizerConfig, PresidioAnonymizerPipe)
-    except ImportError:
-        pass
-
-    # pyDeid pipe — requires pyDeid cloned into project root
-    try:
-        from clinical_deid.pipes.pydeid_ner.pipe import PyDeidNerConfig, PyDeidNerPipe
-
-        register("pydeid_ner", PyDeidNerConfig, PyDeidNerPipe)
-    except ImportError:
-        pass
-
-    # Surrogate pipe — requires `pip install faker` (in [scripts] extra)
-    try:
-        from clinical_deid.pipes.surrogate.pipe import SurrogateConfig, SurrogatePipe
-
-        register("surrogate", SurrogateConfig, SurrogatePipe)
-    except ImportError:
-        pass
-
-    # SpanResolver and ConsistencyPropagator — always available (no optional deps)
-    from clinical_deid.pipes.span_resolver import SpanResolverConfig, SpanResolverPipe
-    from clinical_deid.pipes.consistency_propagator import (
-        ConsistencyPropagatorConfig,
-        ConsistencyPropagatorPipe,
-    )
-
-    register("span_resolver", SpanResolverConfig, SpanResolverPipe)
-    register("consistency_propagator", ConsistencyPropagatorConfig, ConsistencyPropagatorPipe)
-
-    # LLM NER pipe — requires `pip install .[llm]` (httpx)
-    try:
-        from clinical_deid.pipes.llm_ner import LlmNerConfig, LlmNerPipe
-
-        register("llm_ner", LlmNerConfig, LlmNerPipe)
-    except ImportError:
-        pass
+    for entry in _CATALOG:
+        try:
+            config_cls = _import_dotted(entry.config_path)
+            pipe_cls = _import_dotted(entry.pipe_path)
+            register(entry.name, config_cls, pipe_cls)
+        except ImportError:
+            if entry.extra is None:
+                raise  # always-available pipes must not fail silently
 
 
 _register_builtins()

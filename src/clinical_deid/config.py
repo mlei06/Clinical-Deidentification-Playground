@@ -15,6 +15,10 @@ class Settings(BaseSettings):
     pipelines_dir: Path = Path("pipelines")
     evaluations_dir: Path = Path("evaluations")
     models_dir: Path = Path("models")
+    cors_origins: list[str] = Field(
+        default=["http://localhost:3000", "http://127.0.0.1:3000"],
+        description="Allowed CORS origins for the API.",
+    )
 
     #: For :class:`~clinical_deid.synthesis.client.OpenAICompatibleChatClient`. Loaded from ``.env`` or the environment. Either ``OPENAI_API_KEY`` or ``CLINICAL_DEID_OPENAI_API_KEY`` may be set.
     openai_api_key: str | None = Field(

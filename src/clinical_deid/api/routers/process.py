@@ -131,7 +131,7 @@ def _log_audit(
         )
         session.add(record)
     except Exception:
-        logger.debug("Failed to write audit log", exc_info=True)
+        logger.warning("Failed to write audit log", exc_info=True)
 
 
 @router.post("/{pipeline_name}", response_model=ProcessResponse)

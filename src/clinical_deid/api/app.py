@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from clinical_deid.api.routers import audit, evaluation, models, pipelines, process
 from clinical_deid.api.schemas import HealthResponse
+from clinical_deid.config import get_settings
 from clinical_deid.db import init_db
 
 logger = logging.getLogger("clinical_deid")
@@ -31,10 +32,10 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS — restrictive by default; widen allow_origins for production deployments.
+# CORS — configured via settings (env var CLINICAL_DEID_CORS_ORIGINS or .env).
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_origins=get_settings().cors_origins,
     allow_methods=["GET", "POST", "PUT", "DELETE"],
     allow_headers=["*"],
 )

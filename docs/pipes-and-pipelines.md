@@ -393,35 +393,28 @@ Key rules:
 
 ### Step 3: Register
 
+**For built-in pipes**, add a single `PipeCatalogEntry` to the `_CATALOG` list in `registry.py`. The `config_path` and `pipe_path` fields use `"module:Class"` format. `_register_builtins()` imports and registers every catalog entry automatically (optional deps are silently skipped):
+
 ```python
-# src/clinical_deid/pipes/my_detector/__init__.py
+PipeCatalogEntry(
+    name="my_detector",
+    description="My custom PHI detector",
+    role="detector",
+    extra="my_extra",                # None if always available
+    install_hint="pip install '.[my_extra]'",
+    config_path="clinical_deid.pipes.my_detector.pipe:MyDetectorConfig",
+    pipe_path="clinical_deid.pipes.my_detector.pipe:MyDetectorPipe",
+),
+```
+
+**For external/plugin pipes**, call `register()` directly from your package:
+
+```python
 from clinical_deid.pipes.registry import register
-from .pipe import MyDetectorConfig, MyDetectorPipe
+from my_plugin.pipe import MyDetectorConfig, MyDetectorPipe
 
 register("my_detector", MyDetectorConfig, MyDetectorPipe)
 ```
-
-Then add an import in `src/clinical_deid/pipes/__init__.py`:
-
-```python
-from clinical_deid.pipes import my_detector  # noqa: F401 — triggers register()
-```
-
-### Step 4 (optional): Add to the pipe catalog
-
-If your pipe has optional heavyweight dependencies, add it to the catalog in `registry.py` so the UI can show install hints:
-
-```python
-_PIPE_CATALOG.append({
-    "name": "my_detector",
-    "description": "My custom PHI detector",
-    "role": "detector",
-    "extra": "my_detector",
-    "install_hint": 'pip install -e ".[my_detector]"',
-})
-```
-
-Wrap the import in a try/except so the platform still loads when the dependency isn't installed.
 
 ### Step 5 (optional): Label mapping support
 
