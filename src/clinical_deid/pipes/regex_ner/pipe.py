@@ -7,6 +7,7 @@ import re
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from clinical_deid.domain import AnnotatedDocument, PHISpan
+from clinical_deid.pipes.base import ConfigurablePipe
 from clinical_deid.pipes.detector_label_mapping import (
     apply_detector_label_mapping,
     detector_label_mapping_field,
@@ -181,7 +182,7 @@ def _resolve_regex(config: RegexNerConfig) -> list[_ResolvedRegex]:
     return out
 
 
-class RegexNerPipe:
+class RegexNerPipe(ConfigurablePipe):
     """Detector: regex patterns only."""
 
     def __init__(self, config: RegexNerConfig | None = None) -> None:

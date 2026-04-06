@@ -18,6 +18,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from clinical_deid.domain import AnnotatedDocument, PHISpan
+from clinical_deid.pipes.base import ConfigurablePipe
 
 logger = logging.getLogger(__name__)
 
@@ -133,7 +134,7 @@ def _parse_llm_response(raw: str, text_length: int) -> list[dict[str, Any]]:
     return valid
 
 
-class LlmNerPipe:
+class LlmNerPipe(ConfigurablePipe):
     """Detector that uses an LLM to identify PHI spans."""
 
     def __init__(self, config: LlmNerConfig | None = None) -> None:

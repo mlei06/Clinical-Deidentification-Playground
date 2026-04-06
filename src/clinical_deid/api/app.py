@@ -8,7 +8,6 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from clinical_deid.api.routers import audit, evaluation, models, pipelines, process
 from clinical_deid.api.schemas import HealthResponse
-from clinical_deid.config import get_settings
 from clinical_deid.db import init_db
 
 logger = logging.getLogger("clinical_deid")
@@ -21,32 +20,40 @@ async def lifespan(_app: FastAPI):
     yield
 
 
-app = FastAPI(
-    title="Clinical De-Identification Playground",
-    description=(
-        "Platform API: compose and version de-identification pipelines, run inference for upstream "
-        "services, and return auditable responses (timing, spans, optional step traces). "
-        "Train models locally, drop artifacts under `models/`, and reference them from pipe configs. "
-        "Planned: playground UI (try text + evaluate on local paths or uploads) and eval APIs—see docs."
-    ),
-    lifespan=lifespan,
-)
+def create_app() -> FastAPI:
+    """Application factory — defers settings access until called."""
+    from clinical_deid.config import get_settings
 
-# CORS — configured via settings (env var CLINICAL_DEID_CORS_ORIGINS or .env).
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=get_settings().cors_origins,
-    allow_methods=["GET", "POST", "PUT", "DELETE"],
-    allow_headers=["*"],
-)
+    application = FastAPI(
+        title="Clinical De-Identification Playground",
+        description=(
+            "Platform API: compose and version de-identification pipelines, run inference for upstream "
+            "services, and return auditable responses (timing, spans, optional step traces). "
+            "Train models locally, drop artifacts under `models/`, and reference them from pipe configs. "
+            "Planned: playground UI (try text + evaluate on local paths or uploads) and eval APIs—see docs."
+        ),
+        lifespan=lifespan,
+    )
 
-app.include_router(pipelines.router)
-app.include_router(process.router)
-app.include_router(audit.router)
-app.include_router(evaluation.router)
-app.include_router(models.router)
+    # CORS — configured via settings (env var CLINICAL_DEID_CORS_ORIGINS or .env).
+    application.add_middleware(
+        CORSMiddleware,
+        allow_origins=get_settings().cors_origins,
+        allow_methods=["GET", "POST", "PUT", "DELETE"],
+        allow_headers=["*"],
+    )
+
+    application.include_router(pipelines.router)
+    application.include_router(process.router)
+    application.include_router(audit.router)
+    application.include_router(evaluation.router)
+    application.include_router(models.router)
+
+    @application.get("/health", response_model=HealthResponse)
+    def health() -> HealthResponse:
+        return HealthResponse()
+
+    return application
 
 
-@app.get("/health", response_model=HealthResponse)
-def health() -> HealthResponse:
-    return HealthResponse()
+app = create_app()

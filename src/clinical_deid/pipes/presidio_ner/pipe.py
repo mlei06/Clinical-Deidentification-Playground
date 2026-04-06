@@ -5,6 +5,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 from clinical_deid.domain import AnnotatedDocument, PHISpan
+from clinical_deid.pipes.base import ConfigurablePipe
 from clinical_deid.pipes.detector_label_mapping import (
     apply_detector_label_mapping,
     detector_label_mapping_field,
@@ -250,7 +251,7 @@ class PresidioNerConfig(BaseModel):
     label_mapping: dict[str, str | None] = detector_label_mapping_field()
 
 
-class PresidioNerPipe:
+class PresidioNerPipe(ConfigurablePipe):
     def __init__(self, config: PresidioNerConfig | None = None) -> None:
         try:
             import presidio_analyzer  # noqa: F401

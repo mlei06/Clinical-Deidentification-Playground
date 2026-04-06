@@ -14,6 +14,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from clinical_deid.domain import AnnotatedDocument, PHISpan
+from clinical_deid.pipes.base import ConfigurablePipe
 from clinical_deid.pipes.ui_schema import field_ui
 from clinical_deid.pipes.whitelist.lists import parse_list_file
 
@@ -187,7 +188,7 @@ def _interval_overlaps_regions(s: int, e: int, regions: list[tuple[int, int]]) -
     return False
 
 
-class BlacklistSpans:
+class BlacklistSpans(ConfigurablePipe):
     """Span transformer: remove spans that hit the blacklist (benign vocabulary)."""
 
     def __init__(self, config: BlacklistSpansConfig | None = None) -> None:

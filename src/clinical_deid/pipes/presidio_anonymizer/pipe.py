@@ -18,6 +18,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 from clinical_deid.domain import AnnotatedDocument, Document, PHISpan
+from clinical_deid.pipes.base import ConfigurablePipe
 from clinical_deid.pipes.ui_schema import field_ui
 
 
@@ -133,7 +134,7 @@ def _spans_to_recognizer_results(spans: list[PHISpan]) -> list[Any]:
     ]
 
 
-class PresidioAnonymizerPipe:
+class PresidioAnonymizerPipe(ConfigurablePipe):
     """Redactor that uses Presidio Anonymizer to consume spans and transform text."""
 
     def __init__(self, config: PresidioAnonymizerConfig | None = None) -> None:

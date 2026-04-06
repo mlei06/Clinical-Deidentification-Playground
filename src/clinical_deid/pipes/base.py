@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Protocol, runtime_checkable
 
+from pydantic import BaseModel
+
 from clinical_deid.domain import AnnotatedDocument
 
 
@@ -10,6 +12,20 @@ class Pipe(Protocol):
     """Base protocol — all pipes take and return AnnotatedDocument."""
 
     def forward(self, doc: AnnotatedDocument) -> AnnotatedDocument: ...
+
+
+class ConfigurablePipe:
+    """Concrete base for pipes that store a Pydantic config as ``_config``.
+
+    Provides a :attr:`pipe_config` property so serialization (``dump_pipe``)
+    can access the config without relying on private-attribute conventions.
+    """
+
+    _config: BaseModel
+
+    @property
+    def pipe_config(self) -> BaseModel:
+        return self._config
 
 
 @runtime_checkable

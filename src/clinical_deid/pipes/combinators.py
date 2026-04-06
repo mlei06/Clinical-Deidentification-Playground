@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from pydantic import BaseModel, Field
 
 from clinical_deid.domain import AnnotatedDocument, PHISpan
-from clinical_deid.pipes.base import Detector, Pipe
+from clinical_deid.pipes.base import ConfigurablePipe, Detector, Pipe
 from clinical_deid.pipes.span_merge import MergeStrategy, apply_resolve_spans
 from clinical_deid.pipes.ui_schema import field_ui
 from clinical_deid.pipes.trace import PipelineRunResult, PipelineTraceFrame, snapshot_document
@@ -57,7 +57,7 @@ class ResolveSpansConfig(BaseModel):
     )
 
 
-class ResolveSpans:
+class ResolveSpans(ConfigurablePipe):
     """SpanTransformer that applies :func:`~clinical_deid.pipes.span_merge.apply_resolve_spans` to ``doc.spans``."""
 
     def __init__(self, config: ResolveSpansConfig | None = None) -> None:
@@ -110,7 +110,7 @@ class LabelFilterConfig(BaseModel):
             raise ValueError("Provide either 'drop' or 'keep'")
 
 
-class LabelFilter:
+class LabelFilter(ConfigurablePipe):
     """Remove or retain spans by label."""
 
     def __init__(self, config: LabelFilterConfig) -> None:
@@ -149,7 +149,7 @@ class LabelMapperConfig(BaseModel):
     )
 
 
-class LabelMapper:
+class LabelMapper(ConfigurablePipe):
     """SpanTransformer that remaps span labels.
 
     Map a label to ``null`` to drop spans with that label.

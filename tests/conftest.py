@@ -23,7 +23,9 @@ def client(tmp_path, monkeypatch):
     reset_engine()
     init_db()
 
-    from clinical_deid.api.app import app
+    from clinical_deid.api.app import create_app
 
-    with TestClient(app) as test_client:
+    test_app = create_app()
+
+    with TestClient(test_app) as test_client:
         yield test_client

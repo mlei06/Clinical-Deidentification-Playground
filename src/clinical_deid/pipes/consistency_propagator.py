@@ -12,6 +12,7 @@ import re
 from pydantic import BaseModel, Field
 
 from clinical_deid.domain import AnnotatedDocument, PHISpan
+from clinical_deid.pipes.base import ConfigurablePipe
 
 
 class ConsistencyPropagatorConfig(BaseModel):
@@ -46,7 +47,7 @@ def _find_all_occurrences(text: str, substring: str, *, case_sensitive: bool) ->
     return [m.start() for m in re.finditer(pattern, text, flags)]
 
 
-class ConsistencyPropagatorPipe:
+class ConsistencyPropagatorPipe(ConfigurablePipe):
     """SpanTransformer that finds all occurrences of detected span text in the document."""
 
     def __init__(self, config: ConsistencyPropagatorConfig | None = None) -> None:

@@ -10,6 +10,7 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict, Field
 
 from clinical_deid.domain import AnnotatedDocument, PHISpan
+from clinical_deid.pipes.base import ConfigurablePipe
 from clinical_deid.pipes.detector_label_mapping import (
     apply_detector_label_mapping,
     detector_label_mapping_field,
@@ -198,7 +199,7 @@ def _resolve_list_labels(config: WhitelistConfig) -> list[_ResolvedList]:
     return resolved
 
 
-class WhitelistPipe:
+class WhitelistPipe(ConfigurablePipe):
     """Detector: whitelist phrase matching only."""
 
     def __init__(self, config: WhitelistConfig | None = None) -> None:

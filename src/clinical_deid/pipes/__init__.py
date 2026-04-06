@@ -1,4 +1,5 @@
 from clinical_deid.pipes.base import (
+    ConfigurablePipe,
     Detector,
     DetectorWithLabelMapping,
     Pipe,
@@ -52,6 +53,8 @@ from clinical_deid.pipes.span_merge import apply_resolve_spans
 from clinical_deid.pipes.whitelist import WhitelistConfig, WhitelistPipe, WhitelistLabelConfig, bundled_whitelist_label_names
 
 __all__ = [
+    # Base
+    "ConfigurablePipe",
     # Protocols
     "Detector",
     "DetectorWithLabelMapping",

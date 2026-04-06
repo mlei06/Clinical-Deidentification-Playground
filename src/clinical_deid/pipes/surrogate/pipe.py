@@ -5,6 +5,7 @@ from __future__ import annotations
 from pydantic import BaseModel, Field
 
 from clinical_deid.domain import AnnotatedDocument, Document
+from clinical_deid.pipes.base import ConfigurablePipe
 from clinical_deid.pipes.ui_schema import field_ui
 
 
@@ -23,7 +24,7 @@ class SurrogateConfig(BaseModel):
     )
 
 
-class SurrogatePipe:
+class SurrogatePipe(ConfigurablePipe):
     """Redactor: replace detected PHI spans with realistic synthetic data (Faker)."""
 
     def __init__(self, config: SurrogateConfig | None = None) -> None:

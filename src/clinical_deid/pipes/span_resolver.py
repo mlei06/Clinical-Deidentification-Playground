@@ -12,6 +12,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from clinical_deid.domain import AnnotatedDocument, PHISpan
+from clinical_deid.pipes.base import ConfigurablePipe
 
 
 class SpanResolverConfig(BaseModel):
@@ -111,7 +112,7 @@ def _merge_adjacent_spans(spans: list[PHISpan]) -> list[PHISpan]:
     return merged
 
 
-class SpanResolverPipe:
+class SpanResolverPipe(ConfigurablePipe):
     """SpanTransformer that resolves overlapping spans into non-overlapping output."""
 
     def __init__(self, config: SpanResolverConfig | None = None) -> None:

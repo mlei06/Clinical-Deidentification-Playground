@@ -12,6 +12,7 @@ from typing import Any
 import click
 
 from clinical_deid.domain import AnnotatedDocument, Document, PHISpan
+from clinical_deid.export import ProcessedResult
 
 logger = logging.getLogger(__name__)
 
@@ -87,8 +88,8 @@ def _process_doc(
     doc_id: str,
     text: str,
     redactor: str,
-) -> dict[str, Any]:
-    """Run pipeline on one document and return a result dict."""
+) -> ProcessedResult:
+    """Run pipeline on one document and return a ProcessedResult."""
     doc = AnnotatedDocument(document=Document(id=doc_id, text=text), spans=[])
     out = pipeline.forward(doc)
 
@@ -97,12 +98,13 @@ def _process_doc(
     else:
         output_text = _tag_replace(text, out.spans)
 
-    return {
-        "doc_id": doc_id,
-        "original_text": text,
-        "output_text": output_text,
-        "spans": [s.model_dump() for s in out.spans],
-    }
+    return ProcessedResult(
+        doc_id=doc_id,
+        original_text=text,
+        output_text=output_text,
+        spans=[s.model_dump() for s in out.spans],
+        metadata={},
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -199,20 +201,7 @@ def run(
         texts.append(("stdin", sys.stdin.read()))
 
     t0 = time.perf_counter()
-    from clinical_deid.export import ProcessedResult
-
-    results: list[ProcessedResult] = []
-    for doc_id, text in texts:
-        r = _process_doc(pipeline, doc_id, text, redactor)
-        results.append(
-            ProcessedResult(
-                doc_id=r["doc_id"],
-                original_text=r["original_text"],
-                output_text=r["output_text"],
-                spans=r["spans"],
-                metadata={},
-            )
-        )
+    results = [_process_doc(pipeline, doc_id, text, redactor) for doc_id, text in texts]
     duration = time.perf_counter() - t0
 
     from clinical_deid.export import to_json, to_jsonl, to_text
@@ -332,7 +321,7 @@ def batch(
 
     click.echo(f"Processing {len(texts)} document(s)...", err=True)
 
-    from clinical_deid.export import ProcessedResult, write_results
+    from clinical_deid.export import write_results
 
     t0 = time.perf_counter()
     results: list[ProcessedResult] = []
@@ -340,16 +329,7 @@ def batch(
 
     for doc_id, text in texts:
         try:
-            r = _process_doc(pipeline, doc_id, text, redactor)
-            results.append(
-                ProcessedResult(
-                    doc_id=r["doc_id"],
-                    original_text=r["original_text"],
-                    output_text=r["output_text"],
-                    spans=r["spans"],
-                    metadata={},
-                )
-            )
+            results.append(_process_doc(pipeline, doc_id, text, redactor))
         except Exception as exc:
             if on_error == "fail":
                 raise

@@ -83,8 +83,7 @@ def _build_confusion_matrix(
         for ps in pred_spans:
             # Check for overlap
             if ps.start < gs.end and gs.start < ps.end:
-                if ps.label != gs.label:
-                    confusion[gs.label][ps.label] += 1
+                confusion[gs.label][ps.label] += 1
                 matched = True
         if not matched:
             confusion[gs.label]["<MISSED>"] += 1

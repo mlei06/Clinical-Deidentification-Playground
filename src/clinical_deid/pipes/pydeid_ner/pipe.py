@@ -12,6 +12,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from clinical_deid.domain import AnnotatedDocument, PHISpan
+from clinical_deid.pipes.base import ConfigurablePipe
 from clinical_deid.pipes.detector_label_mapping import (
     apply_detector_label_mapping,
     detector_label_mapping_field,
@@ -138,7 +139,7 @@ class PyDeidNerConfig(BaseModel):
     label_mapping: dict[str, str | None] = detector_label_mapping_field()
 
 
-class PyDeidNerPipe:
+class PyDeidNerPipe(ConfigurablePipe):
     """Detector that delegates PHI finding to the pyDeid library.
 
     On first ``forward`` call the pyDeid builder constructs the internal

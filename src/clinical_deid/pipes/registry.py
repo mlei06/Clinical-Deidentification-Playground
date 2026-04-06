@@ -41,7 +41,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from clinical_deid.pipes.base import Pipe
+from clinical_deid.pipes.base import ConfigurablePipe, Pipe
 
 # ---------------------------------------------------------------------------
 # Registry
@@ -430,7 +430,10 @@ def dump_pipe(pipe: Pipe) -> dict[str, Any]:
     # Registered pipes — reverse lookup by class
     for name, (config_cls, pipe_cls) in _REGISTRY.items():
         if isinstance(pipe, pipe_cls):
-            config: BaseModel = pipe._config  # type: ignore[attr-defined]
+            if isinstance(pipe, ConfigurablePipe):
+                config = pipe.pipe_config
+            else:
+                config = pipe._config  # type: ignore[attr-defined]
             dumped = config.model_dump()
             # Omit fields that match defaults to keep JSON concise
             defaults = {}
