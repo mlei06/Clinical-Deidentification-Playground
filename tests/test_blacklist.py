@@ -127,14 +127,8 @@ def test_blacklist_merge_wordlists_endpoint(client) -> None:
 def test_blacklist_load_pipeline() -> None:
     cfg = {
         "pipes": [
-            {
-                "type": "parallel",
-                "strategy": "union",
-                "detectors": [
-                    {"type": "regex_ner"},
-                    {"type": "whitelist"},
-                ],
-            },
+            {"type": "regex_ner"},
+            {"type": "whitelist"},
             {
                 "type": "blacklist",
                 "config": {

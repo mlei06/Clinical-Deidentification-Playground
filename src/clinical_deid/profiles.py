@@ -24,14 +24,8 @@ def fast_profile(*, custom_lists_dir: str | None = None) -> dict[str, Any]:
     wl = _whitelist_config(custom_lists_dir)
     return {
         "pipes": [
-            {
-                "type": "parallel",
-                "strategy": "union",
-                "detectors": [
-                    {"type": "regex_ner"},
-                    {"type": "whitelist", "config": wl} if wl else {"type": "whitelist"},
-                ],
-            },
+            {"type": "regex_ner"},
+            {"type": "whitelist", "config": wl} if wl else {"type": "whitelist"},
             {"type": "blacklist"},
             {"type": "resolve_spans", "config": {"strategy": "longest_non_overlapping"}},
         ],
@@ -52,15 +46,9 @@ def balanced_profile(*, custom_lists_dir: str | None = None) -> dict[str, Any]:
     wl = _whitelist_config(custom_lists_dir)
     return {
         "pipes": [
-            {
-                "type": "parallel",
-                "strategy": "longest_non_overlapping",
-                "detectors": [
-                    {"type": "regex_ner"},
-                    {"type": "whitelist", "config": wl} if wl else {"type": "whitelist"},
-                    {"type": "presidio_ner"},
-                ],
-            },
+            {"type": "regex_ner"},
+            {"type": "whitelist", "config": wl} if wl else {"type": "whitelist"},
+            {"type": "presidio_ner"},
             {"type": "blacklist"},
             {"type": "resolve_spans", "config": {"strategy": "longest_non_overlapping"}},
         ],
@@ -70,7 +58,7 @@ def balanced_profile(*, custom_lists_dir: str | None = None) -> dict[str, Any]:
 def accurate_profile(*, custom_lists_dir: str | None = None) -> dict[str, Any]:
     """Regex + whitelist + presidio + consistency propagation + span resolution.
 
-    Highest quality: runs all detectors in parallel, propagates high-confidence
+    Highest quality: chains all detectors, propagates high-confidence
     spans across the document, then resolves overlaps by confidence.
     """
     from clinical_deid.pipes.registry import registered_pipes
@@ -83,15 +71,9 @@ def accurate_profile(*, custom_lists_dir: str | None = None) -> dict[str, Any]:
     wl = _whitelist_config(custom_lists_dir)
     return {
         "pipes": [
-            {
-                "type": "parallel",
-                "strategy": "union",
-                "detectors": [
-                    {"type": "regex_ner"},
-                    {"type": "whitelist", "config": wl} if wl else {"type": "whitelist"},
-                    {"type": "presidio_ner"},
-                ],
-            },
+            {"type": "regex_ner"},
+            {"type": "whitelist", "config": wl} if wl else {"type": "whitelist"},
+            {"type": "presidio_ner"},
             {"type": "blacklist"},
             {"type": "consistency_propagator", "config": {"min_confidence": 0.7}},
             {"type": "span_resolver", "config": {"strategy": "highest_confidence", "merge_adjacent": True}},

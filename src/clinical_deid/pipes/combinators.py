@@ -1,4 +1,4 @@
-"""Pipe combinators: Pipeline, ParallelDetectors, ResolveSpans, LabelMapper, LabelFilter."""
+"""Pipe combinators: Pipeline, ResolveSpans, LabelMapper, LabelFilter."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from pydantic import BaseModel, Field
 
 from clinical_deid.domain import AnnotatedDocument, PHISpan
-from clinical_deid.pipes.base import ConfigurablePipe, Detector, Pipe
+from clinical_deid.pipes.base import ConfigurablePipe, Pipe
 from clinical_deid.pipes.span_merge import MergeStrategy, apply_resolve_spans
 from clinical_deid.pipes.ui_schema import field_ui
 from clinical_deid.pipes.trace import PipelineRunResult, PipelineTraceFrame, snapshot_document
@@ -21,9 +21,8 @@ from clinical_deid.pipes.trace import PipelineRunResult, PipelineTraceFrame, sna
 class ResolveSpansConfig(BaseModel):
     """Merge / dedupe / arbitrate overlapping spans.
 
-    Passes ``[doc.spans]`` to the same resolution logic as :class:`ParallelDetectors`, so one
-    detector’s overlapping spans can be collapsed (e.g. ``longest_non_overlapping``) without a
-    parallel block.
+    Passes ``[doc.spans]`` to the resolution logic, so accumulated spans from
+    multiple detectors can be collapsed (e.g. ``longest_non_overlapping``).
 
     Strategies match :func:`~clinical_deid.pipes.span_merge.apply_resolve_spans`:
 
@@ -174,182 +173,28 @@ class LabelMapper(ConfigurablePipe):
 
 
 # ---------------------------------------------------------------------------
-# ParallelDetectors
+# Pipeline
 # ---------------------------------------------------------------------------
-
-
-@dataclass
-class ParallelBranch:
-    """One detector arm inside :class:`ParallelDetectors` (metadata for tracing + dump)."""
-
-    pipe: Pipe
-    pipe_type: str = "unknown"
-    store_if_intermediary: bool = False
-
-
-class ParallelDetectors:
-    """Run multiple detectors on the same document and merge their spans.
-
-    Uses :func:`~clinical_deid.pipes.span_merge.apply_resolve_spans` — the same strategies as
-    :class:`ResolveSpans`.
-
-    Merge strategies:
-    - ``union``: keep all spans from every detector.
-    - ``exact_dedupe``: identical (start, end, label) only once.
-    - ``consensus``: keep spans agreed on by >= *consensus_threshold* detectors.
-    - ``max_confidence``: greedily keep highest-confidence, skip overlaps.
-    - ``longest_non_overlapping``: greedily keep longest spans, skip overlaps.
-    """
-
-    branches: list[ParallelBranch]
-    strategy: MergeStrategy
-    consensus_threshold: int
-    store_if_intermediary: bool
-
-    def __init__(
-        self,
-        detectors: list[Pipe] | None = None,
-        *,
-        branches: list[ParallelBranch] | None = None,
-        strategy: MergeStrategy = "union",
-        consensus_threshold: int = 2,
-        store_if_intermediary: bool = False,
-    ) -> None:
-        if detectors is not None and branches is not None:
-            raise ValueError("Pass either detectors= or branches=, not both")
-        if branches is not None:
-            self.branches = branches
-        elif detectors is not None:
-            self.branches = [ParallelBranch(pipe=p) for p in detectors]
-        else:
-            self.branches = []
-        self.strategy = strategy
-        self.consensus_threshold = consensus_threshold
-        self.store_if_intermediary = store_if_intermediary
-
-    @property
-    def detectors(self) -> list[Pipe]:
-        return [b.pipe for b in self.branches]
-
-    @property
-    def labels(self) -> set[str]:
-        out: set[str] = set()
-        for b in self.branches:
-            if isinstance(b.pipe, Detector):
-                out |= b.pipe.labels
-        return out
-
-    def forward(self, doc: AnnotatedDocument) -> AnnotatedDocument:
-        span_groups: list[list[PHISpan]] = []
-        for b in self.branches:
-            branch_doc = b.pipe.forward(doc)
-            # Parallel detection assumes spans are relative to the same input text.
-            # If any branch mutates text (redactor/anonymizer), offsets become invalid.
-            if branch_doc.document.text != doc.document.text:
-                raise ValueError(
-                    "ParallelDetectors only supports text-preserving pipes. "
-                    "Move any redaction/anonymizer pipe outside the parallel block "
-                    "(e.g. run parallel detectors first, then anonymize sequentially)."
-                )
-            span_groups.append(list(branch_doc.spans))
-        merged = apply_resolve_spans(
-            span_groups,
-            strategy=self.strategy,
-            consensus_threshold=self.consensus_threshold,
-        )
-        return doc.with_spans(merged)
-
-    def forward_with_trace(
-        self,
-        doc: AnnotatedDocument,
-        *,
-        path: str,
-        trace: list[PipelineTraceFrame],
-        step_flag: bool,
-        pipeline_store: bool,
-    ) -> AnnotatedDocument:
-        """Merge detectors like :meth:`forward`, optionally recording pre/post-merge snapshots."""
-        span_groups: list[list[PHISpan]] = []
-        for j, b in enumerate(self.branches):
-            branch_doc = b.pipe.forward(doc)
-            if branch_doc.document.text != doc.document.text:
-                raise ValueError(
-                    "ParallelDetectors only supports text-preserving pipes. "
-                    "Move any redaction/anonymizer pipe outside the parallel block "
-                    "(e.g. run parallel detectors first, then anonymize sequentially)."
-                )
-            span_groups.append(list(branch_doc.spans))
-            capture_branch = (
-                pipeline_store
-                or step_flag
-                or self.store_if_intermediary
-                or b.store_if_intermediary
-            )
-            if capture_branch:
-                trace.append(
-                    PipelineTraceFrame(
-                        path=f"{path}/parallel/branch_{j}",
-                        stage="parallel_pre_merge",
-                        pipe_type=b.pipe_type,
-                        branch_index=j,
-                        document=snapshot_document(branch_doc),
-                        extra={"parallel_strategy": self.strategy},
-                    )
-                )
-
-        merged = apply_resolve_spans(
-            span_groups,
-            strategy=self.strategy,
-            consensus_threshold=self.consensus_threshold,
-        )
-        out = doc.with_spans(merged)
-        branch_requested = any(b.store_if_intermediary for b in self.branches)
-        capture_merge = (
-            pipeline_store or step_flag or self.store_if_intermediary or branch_requested
-        )
-        if capture_merge:
-            trace.append(
-                PipelineTraceFrame(
-                    path=f"{path}/parallel/post_merge",
-                    stage="parallel_post_merge",
-                    pipe_type="parallel",
-                    branch_index=None,
-                    document=snapshot_document(out),
-                    extra={
-                        "parallel_strategy": self.strategy,
-                        "consensus_threshold": self.consensus_threshold,
-                    },
-                )
-            )
-        return out
 
 
 def _pipe_type_label(pipe: Pipe) -> str:
-    if isinstance(pipe, ParallelDetectors):
-        return "parallel"
     if isinstance(pipe, Pipeline):
         return "pipeline"
     return type(pipe).__name__
-
-
-# ---------------------------------------------------------------------------
-# Pipeline
-# ---------------------------------------------------------------------------
 
 
 @dataclass
 class Pipeline:
     """Top-level sequential runner.
 
-    Entries can be any ``Pipe``, ``ParallelDetectors``, ``ResolveSpans``, ``BlacklistSpans``,
+    Entries can be any ``Pipe``, ``ResolveSpans``, ``BlacklistSpans``,
     or nested ``Pipeline``.
 
     Set ``store_intermediary`` on the pipeline dict to capture every step; or set
-    ``store_if_intermediary`` on individual pipe specs. For ``parallel`` blocks, each detector
-    may set ``store_if_intermediary`` to capture outputs before merge.
+    ``store_if_intermediary`` on individual pipe specs.
     """
 
-    pipes: list[Pipe | ParallelDetectors | ResolveSpans | Pipeline] = field(
+    pipes: list[Pipe | ResolveSpans | Pipeline] = field(
         default_factory=list
     )
     store_intermediary: bool = False
@@ -383,14 +228,6 @@ class Pipeline:
                 sub = pipe.forward_with_trace(doc, path_prefix=f"{step_path}/")
                 doc = sub.final
                 trace.extend(sub.trace)
-            elif isinstance(pipe, ParallelDetectors):
-                doc = pipe.forward_with_trace(
-                    doc,
-                    path=step_path,
-                    trace=trace,
-                    step_flag=step_flag,
-                    pipeline_store=self.store_intermediary,
-                )
             else:
                 doc = pipe.forward(doc)
                 if step_flag:

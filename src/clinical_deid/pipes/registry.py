@@ -8,23 +8,9 @@ JSON schema example::
     {
       "store_intermediary": false,
       "pipes": [
-        {
-          "type": "parallel",
-          "strategy": "union",
-          "detectors": [
-            {"type": "regex_ner", "config": {"label_mapping": {"PHONE": "TEL", "DATE": null}}},
-            {"type": "whitelist", "store_if_intermediary": true},
-          ],
-        },
-        {
-          "type": "parallel",
-          "strategy": "consensus",
-          "consensus_threshold": 2,
-          "detectors": [
-            {"type": "regex_ner"},
-            {"type": "presidio_ner", "config": {"model": "HuggingFace/obi/deid_roberta_i2b2"}}
-          ]
-        },
+        {"type": "regex_ner", "config": {"label_mapping": {"PHONE": "TEL", "DATE": null}}},
+        {"type": "whitelist", "store_if_intermediary": true},
+        {"type": "presidio_ner", "config": {"model": "HuggingFace/obi/deid_roberta_i2b2"}},
         {"type": "label_mapper", "config": {"mapping": {"NAME": "PATIENT"}}},
         {"type": "resolve_spans", "config": {"strategy": "longest_non_overlapping"}}
       ]
@@ -35,6 +21,7 @@ from __future__ import annotations
 
 import importlib
 import json
+import warnings
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -96,7 +83,7 @@ _CATALOG: list[PipeCatalogEntry] = [
     ),
     PipeCatalogEntry(
         name="whitelist",
-        description="Phrase / dictionary (gazetteer) matching per label; compose with regex_ner in parallel",
+        description="Phrase / dictionary (gazetteer) matching per label; chain with regex_ner for combined coverage",
         role="detector",
         extra=None,
         install_hint="Included by default",
@@ -124,8 +111,8 @@ _CATALOG: list[PipeCatalogEntry] = [
     PipeCatalogEntry(
         name="resolve_spans",
         description=(
-            "Merge/dedupe/arbitrate overlapping spans (same strategies as parallel: union, "
-            "exact_dedupe, consensus, max_confidence, longest_non_overlapping); use after one or more detectors"
+            "Merge/dedupe/arbitrate overlapping spans (union, exact_dedupe, consensus, "
+            "max_confidence, longest_non_overlapping); use after one or more detectors"
         ),
         role="span_transformer",
         extra=None,
@@ -232,10 +219,7 @@ def _collect_redactors_in_spec(spec: Any) -> list[str]:
         found.append(pipe_type)
 
     # Structural recursion
-    if pipe_type == "parallel":
-        for d in spec.get("detectors", []):
-            found.extend(_collect_redactors_in_spec(d))
-    elif pipe_type == "pipeline":
+    if pipe_type == "pipeline":
         for p in spec.get("pipes", []):
             found.extend(_collect_redactors_in_spec(p))
 
@@ -279,12 +263,21 @@ def _load_pipeline_from_dict(spec: dict[str, Any]) -> Any:
 
     if "pipes" not in spec:
         raise ValueError(f"pipeline spec missing 'pipes': {spec}")
-    pipe_list = [load_pipe(p) for p in spec["pipes"]]
-    flags = tuple(bool(p.get("store_if_intermediary", False)) for p in spec["pipes"])
+    pipe_list: list[Pipe] = []
+    flags_list: list[bool] = []
+    for p in spec["pipes"]:
+        result = load_pipe(p)
+        flag = bool(p.get("store_if_intermediary", False))
+        if isinstance(result, list):
+            pipe_list.extend(result)
+            flags_list.extend(flag for _ in result)
+        else:
+            pipe_list.append(result)
+            flags_list.append(flag)
     return Pipeline(
         pipes=pipe_list,
         store_intermediary=bool(spec.get("store_intermediary", False)),
-        step_store_if_intermediary=flags,
+        step_store_if_intermediary=tuple(flags_list),
     )
 
 
@@ -300,11 +293,7 @@ def _pipe_spec_requests_intermediary(p: dict[str, Any]) -> bool:
     if p.get("store_if_intermediary"):
         return True
     pt = p.get("type")
-    if pt == "parallel":
-        for d in p.get("detectors", []):
-            if isinstance(d, dict) and _pipe_spec_requests_intermediary(d):
-                return True
-    elif pt == "pipeline":
+    if pt == "pipeline":
         return pipeline_config_requests_intermediary(p)
     return False
 
@@ -316,37 +305,32 @@ def _pipes_request_intermediary(pipes: list[Any]) -> bool:
     return False
 
 
-def load_pipe(spec: dict[str, Any]) -> Pipe:
-    """Recursively build a single pipe from a JSON-like dict."""
-    from clinical_deid.pipes.combinators import ParallelBranch, ParallelDetectors
+def load_pipe(spec: dict[str, Any]) -> Pipe | list[Pipe]:
+    """Recursively build a single pipe from a JSON-like dict.
 
+    Returns a list of pipes for deprecated ``"parallel"`` blocks (flattened
+    into the parent pipeline).
+    """
     pipe_type = spec.get("type")
     if pipe_type is None:
         raise ValueError(f"Pipe spec missing 'type': {spec}")
 
-    # Structural types handled inline
+    # Backward-compat: flatten deprecated parallel blocks into sequential detectors
     if pipe_type == "parallel":
-        redactors = _collect_redactors_in_spec(spec)
-        if redactors:
-            raise ValueError(
-                "ParallelDetectors only supports text-preserving detector/transformer pipes. "
-                "Move any redactor pipes outside the parallel block. "
-                f"Found redactor(s): {', '.join(sorted(redactors))}"
-            )
-        branches = [
-            ParallelBranch(
-                pipe=load_pipe(d),
-                pipe_type=str(d.get("type", "unknown")),
-                store_if_intermediary=bool(d.get("store_if_intermediary", False)),
-            )
-            for d in spec["detectors"]
-        ]
-        return ParallelDetectors(
-            branches=branches,
-            strategy=spec.get("strategy", "union"),
-            consensus_threshold=spec.get("consensus_threshold", 2),
-            store_if_intermediary=bool(spec.get("store_if_intermediary", False)),
+        warnings.warn(
+            '"type": "parallel" is deprecated. Chain detectors sequentially instead '
+            "and use resolve_spans for overlap handling.",
+            DeprecationWarning,
+            stacklevel=2,
         )
+        pipes: list[Pipe] = []
+        for d in spec.get("detectors", []):
+            result = load_pipe(d)
+            if isinstance(result, list):
+                pipes.extend(result)
+            else:
+                pipes.append(result)
+        return pipes
 
     if pipe_type == "pipeline":
         return _load_pipeline_from_dict(spec)
@@ -399,28 +383,7 @@ def _dump_pipeline_steps(pipeline: Any) -> dict[str, Any]:
 
 def dump_pipe(pipe: Pipe) -> dict[str, Any]:
     """Serialize a single pipe to a JSON-compatible dict."""
-    from clinical_deid.pipes.combinators import LabelFilter, LabelMapper, ParallelDetectors, Pipeline
-
-    if isinstance(pipe, ParallelDetectors):
-        result = {
-            "type": "parallel",
-            "detectors": [],
-        }
-        for b in pipe.branches:
-            d = dump_pipe(b.pipe)
-            if b.store_if_intermediary:
-                d["store_if_intermediary"] = True
-            result["detectors"].append(d)
-        strategy = pipe.strategy
-        if isinstance(strategy, str):
-            result["strategy"] = strategy
-        else:
-            result["strategy"] = "custom"
-        if strategy == "consensus":
-            result["consensus_threshold"] = pipe.consensus_threshold
-        if pipe.store_if_intermediary:
-            result["store_if_intermediary"] = True
-        return result
+    from clinical_deid.pipes.combinators import LabelFilter, LabelMapper, Pipeline
 
     if isinstance(pipe, Pipeline):
         out = _dump_pipeline_steps(pipe)

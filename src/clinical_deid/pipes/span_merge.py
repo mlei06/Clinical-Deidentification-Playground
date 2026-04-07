@@ -1,8 +1,7 @@
-"""Shared span merge / resolution for :class:`ParallelDetectors` and :class:`ResolveSpans`.
+"""Shared span merge / resolution strategies.
 
-``ParallelDetectors`` passes one span list per detector.  :class:`ResolveSpans` passes
-``[doc.spans]`` — a single group — so the same strategies apply to overlaps from one detector
-or many.
+:class:`ResolveSpans` passes ``[doc.spans]`` — a single group — so these
+strategies can resolve overlaps accumulated from any number of upstream detectors.
 """
 
 from __future__ import annotations
@@ -21,7 +20,7 @@ def overlaps(a: PHISpan, b: PHISpan) -> bool:
     return a.start < b.end and b.start < a.end
 
 
-def _has_overlap_with_kept(span: PHISpan, kept: list[PHISpan]) -> bool:
+def has_overlap_with_kept(span: PHISpan, kept: list[PHISpan]) -> bool:
     """Check if *span* overlaps any span in *kept* (sorted by start).
 
     Uses the sorted order of *kept* to skip spans that end before ``span.start``
@@ -102,7 +101,7 @@ def merge_max_confidence(span_groups: list[list[PHISpan]]) -> list[PHISpan]:
 
     kept: list[PHISpan] = []
     for span in all_spans:
-        if not _has_overlap_with_kept(span, kept):
+        if not has_overlap_with_kept(span, kept):
             # Insert into sorted position (by start) to maintain order for sweep.
             _insort_by_start(kept, span)
 
@@ -117,7 +116,7 @@ def merge_longest_non_overlapping(span_groups: list[list[PHISpan]]) -> list[PHIS
 
     kept: list[PHISpan] = []
     for span in all_spans:
-        if not _has_overlap_with_kept(span, kept):
+        if not has_overlap_with_kept(span, kept):
             _insort_by_start(kept, span)
 
     kept.sort(key=lambda s: (s.start, s.end, s.label))

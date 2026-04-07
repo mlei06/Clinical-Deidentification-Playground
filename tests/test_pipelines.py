@@ -2,55 +2,31 @@
 
 from __future__ import annotations
 
-# Default: union of regex patterns + list phrases.
-PARALLEL_REGEX_LIST = {
+# Default: regex + whitelist chained (detectors accumulate spans).
+REGEX_WHITELIST = {
     "pipes": [
-        {
-            "type": "parallel",
-            "strategy": "union",
-            "detectors": [
-                {"type": "regex_ner"},
-                {"type": "whitelist"},
-            ],
-        }
+        {"type": "regex_ner"},
+        {"type": "whitelist"},
     ]
 }
 LABEL_MAPPER_CONFIG = {
     "pipes": [
-        {
-            "type": "parallel",
-            "strategy": "union",
-            "detectors": [
-                {"type": "regex_ner"},
-                {"type": "whitelist"},
-            ],
-        },
+        {"type": "regex_ner"},
+        {"type": "whitelist"},
         {"type": "label_mapper", "config": {"mapping": {"PHONE": "TELEPHONE"}}},
     ]
 }
 LABEL_FILTER_DROP_CONFIG = {
     "pipes": [
-        {
-            "type": "parallel",
-            "strategy": "union",
-            "detectors": [
-                {"type": "regex_ner"},
-                {"type": "whitelist"},
-            ],
-        },
+        {"type": "regex_ner"},
+        {"type": "whitelist"},
         {"type": "label_filter", "config": {"drop": ["DATE"]}},
     ]
 }
 LABEL_FILTER_KEEP_CONFIG = {
     "pipes": [
-        {
-            "type": "parallel",
-            "strategy": "union",
-            "detectors": [
-                {"type": "regex_ner"},
-                {"type": "whitelist"},
-            ],
-        },
+        {"type": "regex_ner"},
+        {"type": "whitelist"},
         {"type": "label_filter", "config": {"keep": ["PHONE"]}},
     ]
 }
@@ -64,22 +40,22 @@ LABEL_FILTER_KEEP_CONFIG = {
 def test_create_pipeline(client) -> None:
     r = client.post(
         "/pipelines",
-        json={"name": "test-regex", "config": PARALLEL_REGEX_LIST},
+        json={"name": "test-regex", "config": REGEX_WHITELIST},
     )
     assert r.status_code == 201, r.text
     body = r.json()
     assert body["name"] == "test-regex"
-    assert body["config"] == PARALLEL_REGEX_LIST
+    assert body["config"] == REGEX_WHITELIST
 
 
 def test_create_pipeline_duplicate_name(client) -> None:
     client.post(
         "/pipelines",
-        json={"name": "dup", "config": PARALLEL_REGEX_LIST},
+        json={"name": "dup", "config": REGEX_WHITELIST},
     )
     r = client.post(
         "/pipelines",
-        json={"name": "dup", "config": PARALLEL_REGEX_LIST},
+        json={"name": "dup", "config": REGEX_WHITELIST},
     )
     assert r.status_code == 409
 
@@ -93,19 +69,19 @@ def test_create_pipeline_invalid_config(client) -> None:
 
 
 def test_list_pipelines(client) -> None:
-    client.post("/pipelines", json={"name": "p1", "config": PARALLEL_REGEX_LIST})
-    client.post("/pipelines", json={"name": "p2", "config": PARALLEL_REGEX_LIST})
+    client.post("/pipelines", json={"name": "p1", "config": REGEX_WHITELIST})
+    client.post("/pipelines", json={"name": "p2", "config": REGEX_WHITELIST})
     r = client.get("/pipelines")
     assert r.status_code == 200
     assert len(r.json()) == 2
 
 
 def test_get_pipeline(client) -> None:
-    client.post("/pipelines", json={"name": "get-me", "config": PARALLEL_REGEX_LIST})
+    client.post("/pipelines", json={"name": "get-me", "config": REGEX_WHITELIST})
     r = client.get("/pipelines/get-me")
     assert r.status_code == 200
     assert r.json()["name"] == "get-me"
-    assert r.json()["config"] == PARALLEL_REGEX_LIST
+    assert r.json()["config"] == REGEX_WHITELIST
 
 
 def test_get_pipeline_not_found(client) -> None:
@@ -114,25 +90,25 @@ def test_get_pipeline_not_found(client) -> None:
 
 
 def test_update_pipeline_config(client) -> None:
-    client.post("/pipelines", json={"name": "upd", "config": PARALLEL_REGEX_LIST})
+    client.post("/pipelines", json={"name": "upd", "config": REGEX_WHITELIST})
     r = client.put("/pipelines/upd", json={"config": LABEL_MAPPER_CONFIG})
     assert r.status_code == 200
     assert r.json()["config"] == LABEL_MAPPER_CONFIG
 
 
 def test_update_pipeline_not_found(client) -> None:
-    r = client.put("/pipelines/nonexistent", json={"config": PARALLEL_REGEX_LIST})
+    r = client.put("/pipelines/nonexistent", json={"config": REGEX_WHITELIST})
     assert r.status_code == 404
 
 
 def test_update_pipeline_invalid_config(client) -> None:
-    client.post("/pipelines", json={"name": "bad-upd", "config": PARALLEL_REGEX_LIST})
+    client.post("/pipelines", json={"name": "bad-upd", "config": REGEX_WHITELIST})
     r = client.put("/pipelines/bad-upd", json={"config": {"pipes": [{"type": "bad"}]}})
     assert r.status_code == 422
 
 
 def test_delete_pipeline(client) -> None:
-    client.post("/pipelines", json={"name": "del-me", "config": PARALLEL_REGEX_LIST})
+    client.post("/pipelines", json={"name": "del-me", "config": REGEX_WHITELIST})
     r = client.delete("/pipelines/del-me")
     assert r.status_code == 204
 
@@ -144,7 +120,7 @@ def test_delete_pipeline(client) -> None:
 
 
 def test_validate_pipeline(client) -> None:
-    client.post("/pipelines", json={"name": "val", "config": PARALLEL_REGEX_LIST})
+    client.post("/pipelines", json={"name": "val", "config": REGEX_WHITELIST})
 
     r = client.post("/pipelines/val/validate", json={"config": LABEL_MAPPER_CONFIG})
     assert r.status_code == 200
@@ -165,7 +141,7 @@ def test_validate_pipeline(client) -> None:
 
 
 def _create_pipeline(client, name="proc-pipe", config=None):
-    config = config or PARALLEL_REGEX_LIST
+    config = config or REGEX_WHITELIST
     r = client.post("/pipelines", json={"name": name, "config": config})
     assert r.status_code == 201, r.text
     return name

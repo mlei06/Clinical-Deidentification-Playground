@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from clinical_deid.domain import AnnotatedDocument, PHISpan
 from clinical_deid.pipes.base import ConfigurablePipe
 from clinical_deid.pipes.detector_label_mapping import (
+    accumulate_spans,
     apply_detector_label_mapping,
     detector_label_mapping_field,
     effective_detector_labels,
@@ -50,7 +51,7 @@ class WhitelistConfig(BaseModel):
         json_schema_extra={
             "description": (
                 "Per-label phrase lists (whitelist gazetteer). "
-                "Compose with ``regex_ner`` in ``parallel`` for combined coverage."
+                "Chain with ``regex_ner`` for combined coverage."
             )
         }
     )
@@ -96,6 +97,17 @@ class WhitelistConfig(BaseModel):
     )
 
     label_mapping: dict[str, str | None] = detector_label_mapping_field()
+
+    skip_overlapping: bool = Field(
+        default=False,
+        description="Drop new spans that overlap any existing span in the document.",
+        json_schema_extra=field_ui(
+            ui_group="General",
+            ui_order=99,
+            ui_widget="switch",
+            ui_advanced=True,
+        ),
+    )
 
 
 @lru_cache
@@ -242,4 +254,4 @@ class WhitelistPipe(ConfigurablePipe):
                     )
         found.sort(key=lambda s: (s.start, s.end, s.label))
         found = apply_detector_label_mapping(found, self._config.label_mapping)
-        return doc.with_spans(found)
+        return accumulate_spans(doc, found, skip_overlapping=self._config.skip_overlapping)

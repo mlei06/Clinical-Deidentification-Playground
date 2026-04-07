@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from clinical_deid.domain import AnnotatedDocument, Document, PHISpan
-from clinical_deid.pipes.combinators import ParallelDetectors, ResolveSpans, ResolveSpansConfig
+from clinical_deid.pipes.combinators import Pipeline, ResolveSpans, ResolveSpansConfig
 from clinical_deid.pipes.regex_ner import RegexNerConfig, RegexNerPipe
 from clinical_deid.pipes.registry import load_pipeline
 from clinical_deid.pipes.whitelist import WhitelistConfig, WhitelistPipe
@@ -36,19 +36,14 @@ def test_resolve_spans_exact_dedupe() -> None:
     assert len(out) == 1
 
 
-def test_parallel_and_resolve_spans_share_code_path() -> None:
+def test_chained_detectors_then_resolve() -> None:
+    """Chained detectors accumulate spans; resolve_spans dedupes them."""
     cfg = {
         "pipes": [
+            {"type": "regex_ner"},
             {
-                "type": "parallel",
-                "strategy": "union",
-                "detectors": [
-                    {"type": "regex_ner"},
-                    {
-                        "type": "whitelist",
-                        "config": {"include_builtin_term_files": False},
-                    },
-                ],
+                "type": "whitelist",
+                "config": {"include_builtin_term_files": False},
             },
             {"type": "resolve_spans", "config": {"strategy": "exact_dedupe"}},
         ]
@@ -60,13 +55,10 @@ def test_parallel_and_resolve_spans_share_code_path() -> None:
 
 
 def test_regex_then_resolve_longest() -> None:
-    pipe = ParallelDetectors(
-        detectors=[
-            RegexNerPipe(RegexNerConfig()),
-            WhitelistPipe(WhitelistConfig(include_builtin_term_files=False)),
-        ],
-        strategy="union",
-    )
+    pipe = Pipeline(pipes=[
+        RegexNerPipe(RegexNerConfig()),
+        WhitelistPipe(WhitelistConfig(include_builtin_term_files=False)),
+    ])
     doc = AnnotatedDocument(document=Document(id="d", text="a@b.co extra"), spans=[])
     doc = pipe.forward(doc)
     resolver = ResolveSpans(ResolveSpansConfig(strategy="longest_non_overlapping"))

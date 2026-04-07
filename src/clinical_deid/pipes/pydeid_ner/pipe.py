@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 from clinical_deid.domain import AnnotatedDocument, PHISpan
 from clinical_deid.pipes.base import ConfigurablePipe
 from clinical_deid.pipes.detector_label_mapping import (
+    accumulate_spans,
     apply_detector_label_mapping,
     detector_label_mapping_field,
     effective_detector_labels,
@@ -138,6 +139,17 @@ class PyDeidNerConfig(BaseModel):
 
     label_mapping: dict[str, str | None] = detector_label_mapping_field()
 
+    skip_overlapping: bool = Field(
+        default=False,
+        description="Drop new spans that overlap any existing span in the document.",
+        json_schema_extra=field_ui(
+            ui_group="General",
+            ui_order=99,
+            ui_widget="switch",
+            ui_advanced=True,
+        ),
+    )
+
 
 class PyDeidNerPipe(ConfigurablePipe):
     """Detector that delegates PHI finding to the pyDeid library.
@@ -204,7 +216,7 @@ class PyDeidNerPipe(ConfigurablePipe):
         handler = self._ensure_handler()
         text = doc.document.text
         if not text:
-            return doc.with_spans([])
+            return doc
 
         # Run find → prune (no replacement)
         handler.handle_string(text)
@@ -234,7 +246,7 @@ class PyDeidNerPipe(ConfigurablePipe):
 
         spans.sort(key=lambda s: (s.start, s.end, s.label))
         spans = apply_detector_label_mapping(spans, self._config.label_mapping)
-        return doc.with_spans(spans)
+        return accumulate_spans(doc, spans, skip_overlapping=self._config.skip_overlapping)
 
 
 def _resolve_label(type_list: list[str], rules: list[tuple[str, str]]) -> str:

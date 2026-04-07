@@ -1,4 +1,4 @@
-"""Shared label mapping for detector pipes."""
+"""Shared label mapping and span accumulation for detector pipes."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from typing import Any
 
 from pydantic import Field
 
-from clinical_deid.domain import PHISpan
+from clinical_deid.domain import AnnotatedDocument, PHISpan
 from clinical_deid.pipes.ui_schema import field_ui
 
 DETECTOR_LABEL_MAPPING_DESCRIPTION = (
@@ -49,6 +49,31 @@ def apply_detector_label_mapping(
         else:
             out.append(s)
     return out
+
+
+def accumulate_spans(
+    doc: AnnotatedDocument,
+    new_spans: list[PHISpan],
+    skip_overlapping: bool = False,
+) -> AnnotatedDocument:
+    """Return *doc* with existing spans plus *new_spans* accumulated.
+
+    If *skip_overlapping* is True, new spans that overlap any existing
+    span in ``doc.spans`` are silently dropped.
+    """
+    existing = list(doc.spans)
+    if skip_overlapping and existing:
+        from clinical_deid.pipes.span_merge import has_overlap_with_kept
+
+        sorted_existing = sorted(existing, key=lambda s: s.start)
+        kept_new = [
+            s for s in new_spans if not has_overlap_with_kept(s, sorted_existing)
+        ]
+    else:
+        kept_new = new_spans
+    combined = existing + kept_new
+    combined.sort(key=lambda s: (s.start, s.end, s.label))
+    return doc.with_spans(combined)
 
 
 def effective_detector_labels(

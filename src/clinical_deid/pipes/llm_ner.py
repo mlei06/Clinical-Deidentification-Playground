@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field
 
 from clinical_deid.domain import AnnotatedDocument, PHISpan
 from clinical_deid.pipes.base import ConfigurablePipe
+from clinical_deid.pipes.detector_label_mapping import accumulate_spans
 
 logger = logging.getLogger(__name__)
 
@@ -84,6 +85,10 @@ class LlmNerConfig(BaseModel):
     max_text_length: int = Field(
         default=30_000,
         description="Truncate input text beyond this length to avoid token limits.",
+    )
+    skip_overlapping: bool = Field(
+        default=False,
+        description="Drop new spans that overlap any existing span in the document.",
     )
 
 
@@ -203,6 +208,4 @@ class LlmNerPipe(ConfigurablePipe):
                 )
             )
 
-        all_spans = list(doc.spans) + spans
-        all_spans.sort(key=lambda s: (s.start, s.end))
-        return doc.with_spans(all_spans)
+        return accumulate_spans(doc, spans, skip_overlapping=self._config.skip_overlapping)
