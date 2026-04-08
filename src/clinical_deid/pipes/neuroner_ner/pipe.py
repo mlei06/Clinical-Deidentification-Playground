@@ -6,6 +6,7 @@ communicates via line-delimited JSON on stdin/stdout.
 
 from __future__ import annotations
 
+import concurrent.futures
 import json
 import logging
 import subprocess
@@ -28,6 +29,51 @@ from clinical_deid.pipes.ui_schema import field_ui
 logger = logging.getLogger(__name__)
 
 _WORKER_SCRIPT = str(Path(__file__).with_name("_worker.py"))
+
+
+# ── Runtime availability check (called by registry.pipe_availability) ─────
+
+def check_neuroner_ready() -> tuple[bool, dict[str, Any]]:
+    """Check whether the NeuroNER runtime prerequisites are satisfied.
+
+    Returns ``(all_ok, details)`` where *details* has per-component status:
+
+    - **venv_python**: Python 3.7 interpreter exists at the expected path
+    - **models**: at least one model directory exists in ``models/neuroner/``
+    - **embeddings**: GloVe embedding file exists at the expected path
+
+    Uses the same default paths as :class:`NeuroNerConfig`.
+    """
+    venv = Path("neuroner-cspmc/venv/bin/python").resolve()
+    models_dir = Path("models/neuroner").resolve()
+    embedding = Path("data/word_vectors/glove.6B.100d.txt").resolve()
+
+    venv_ok = venv.exists() and venv.is_file()
+    models_found = (
+        sorted(p.name for p in models_dir.iterdir() if p.is_dir())
+        if models_dir.exists()
+        else []
+    )
+    models_ok = len(models_found) > 0
+    embedding_ok = embedding.exists() and embedding.is_file()
+
+    details: dict[str, Any] = {
+        "venv_python": {
+            "ok": venv_ok,
+            "path": str(venv),
+        },
+        "models": {
+            "ok": models_ok,
+            "path": str(models_dir),
+            "found": models_found,
+        },
+        "embeddings": {
+            "ok": embedding_ok,
+            "path": str(embedding),
+        },
+    }
+    return (venv_ok and models_ok and embedding_ok), details
+
 
 # ── Default entity mapping: neuroner i2b2 labels → clinical-deid labels ──
 
@@ -217,6 +263,8 @@ class NeuroNerPipe(ConfigurablePipe):
         self._process: subprocess.Popen[str] | None = None
         self._lock = threading.Lock()
         self._model_labels: list[str] | None = None
+        self._stderr_thread: threading.Thread | None = None
+        self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
 
     # ── Subprocess lifecycle ───────────────────────────────────────────
 
@@ -285,23 +333,33 @@ class NeuroNerPipe(ConfigurablePipe):
                 bufsize=1,  # line-buffered
             )
 
+            # Continuously drain stderr in a background thread so the OS pipe
+            # buffer never fills up.  (TensorFlow and NeuroNER emit verbose
+            # warnings to stderr; if the buffer fills, the child blocks on
+            # write() and deadlocks.)
+            self._stderr_thread = threading.Thread(
+                target=self._drain_stderr_loop,
+                daemon=True,
+                name="neuroner-stderr-drain",
+            )
+            self._stderr_thread.start()
+
             # Wait for the "ready" message
             ready_line = self._readline_with_timeout(self._config.startup_timeout)
             if ready_line is None:
-                stderr = self._drain_stderr()
                 self._kill_process()
                 raise TimeoutError(
                     f"NeuroNER worker did not become ready within "
-                    f"{self._config.startup_timeout}s.\nstderr: {stderr}"
+                    f"{self._config.startup_timeout}s.  "
+                    f"Check logs for 'neuroner worker:' stderr output."
                 )
 
             msg = json.loads(ready_line)
             if msg.get("status") == "error":
-                stderr = self._drain_stderr()
                 self._kill_process()
                 raise RuntimeError(
-                    f"NeuroNER worker failed to start: {msg.get('detail', '')}\n"
-                    f"stderr: {stderr}"
+                    f"NeuroNER worker failed to start: {msg.get('detail', '')}  "
+                    f"Check logs for 'neuroner worker:' stderr output."
                 )
 
             self._model_labels = msg.get("labels")
@@ -314,32 +372,28 @@ class NeuroNerPipe(ConfigurablePipe):
 
     def _readline_with_timeout(self, timeout: float) -> str | None:
         """Read one line from the subprocess stdout with a timeout."""
-        import concurrent.futures
-
         assert self._process is not None and self._process.stdout is not None
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-            future = pool.submit(self._process.stdout.readline)
-            try:
-                return future.result(timeout=timeout)
-            except concurrent.futures.TimeoutError:
-                return None
-
-    def _drain_stderr(self) -> str:
-        """Read whatever is buffered on the subprocess stderr (non-blocking)."""
-        if self._process is None or self._process.stderr is None:
-            return ""
-        import select
-
-        chunks: list[str] = []
+        future = self._executor.submit(self._process.stdout.readline)
         try:
-            while select.select([self._process.stderr], [], [], 0.1)[0]:
-                chunk = self._process.stderr.read(4096)
-                if not chunk:
-                    break
-                chunks.append(chunk)
+            return future.result(timeout=timeout)
+        except concurrent.futures.TimeoutError:
+            return None
+
+    def _drain_stderr_loop(self) -> None:
+        """Background loop: read stderr until EOF, logging each line.
+
+        Runs in a daemon thread so the OS pipe buffer never fills up.
+        """
+        proc = self._process
+        if proc is None or proc.stderr is None:
+            return
+        try:
+            for line in proc.stderr:
+                line = line.rstrip("\n")
+                if line:
+                    logger.debug("neuroner worker: %s", line)
         except Exception:
             pass
-        return "".join(chunks)[-2000:]  # last 2000 chars
 
     def _kill_process(self) -> None:
         if self._process is not None:
@@ -353,7 +407,13 @@ class NeuroNerPipe(ConfigurablePipe):
     # ── JSON-RPC communication ─────────────────────────────────────────
 
     def _send_request(self, request: dict[str, Any]) -> dict[str, Any]:
-        """Send a JSON request and read a JSON response.  Thread-safe."""
+        """Send a JSON request and read a JSON response.  Thread-safe.
+
+        The lock serializes all stdin writes and stdout reads so that
+        concurrent callers cannot interleave requests.  The child process
+        is single-threaded (one NeuroNER session), so it processes
+        requests sequentially — no additional child-side locking is needed.
+        """
         with self._lock:
             proc = self._process
             if proc is None or proc.poll() is not None:
@@ -365,10 +425,9 @@ class NeuroNerPipe(ConfigurablePipe):
 
             line = self._readline_with_timeout(self._config.predict_timeout)
             if line is None:
-                stderr = self._drain_stderr()
                 raise TimeoutError(
-                    f"NeuroNER worker timed out after {self._config.predict_timeout}s.\n"
-                    f"stderr: {stderr}"
+                    f"NeuroNER worker timed out after {self._config.predict_timeout}s.  "
+                    f"Check logs for 'neuroner worker:' stderr output."
                 )
 
             response = json.loads(line)
@@ -444,19 +503,20 @@ class NeuroNerPipe(ConfigurablePipe):
     # ── Cleanup ────────────────────────────────────────────────────────
 
     def shutdown(self) -> None:
-        """Gracefully stop the worker subprocess."""
+        """Gracefully stop the worker subprocess and release resources."""
         with self._lock:
             if self._process is None or self._process.poll() is not None:
                 self._process = None
-                return
-            try:
-                assert self._process.stdin is not None
-                self._process.stdin.write(json.dumps({"action": "shutdown"}) + "\n")
-                self._process.stdin.flush()
-                self._process.wait(timeout=10)
-            except Exception:
-                self._kill_process()
-            self._process = None
+            else:
+                try:
+                    assert self._process.stdin is not None
+                    self._process.stdin.write(json.dumps({"action": "shutdown"}) + "\n")
+                    self._process.stdin.flush()
+                    self._process.wait(timeout=10)
+                except Exception:
+                    self._kill_process()
+                self._process = None
+        self._executor.shutdown(wait=False)
 
     def __del__(self) -> None:
         try:
