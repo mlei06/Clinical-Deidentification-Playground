@@ -19,6 +19,12 @@ models/
   external/           # Models loaded via third-party libraries (e.g. Presidio)
     presidio-default/
       model_manifest.json
+  neuroner/           # NeuroNER LSTM-CRF models (TF1 checkpoints)
+    i2b2_2014_glove_spacy_bioes/
+      dataset.pickle
+      model.ckpt.*
+      parameters.ini
+      model_manifest.json
 ```
 
 Each model directory **must** contain a `model_manifest.json` with at minimum:

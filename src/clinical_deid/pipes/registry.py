@@ -199,6 +199,15 @@ _CATALOG: list[PipeCatalogEntry] = [
         config_path="clinical_deid.pipes.llm_ner:LlmNerConfig",
         pipe_path="clinical_deid.pipes.llm_ner:LlmNerPipe",
     ),
+    PipeCatalogEntry(
+        name="neuroner_ner",
+        description="Clinical PHI detection via NeuroNER LSTM-CRF (i2b2, MIMIC models; Python 3.7 subprocess)",
+        role="detector",
+        extra="neuroner",
+        install_hint="Requires neuroner-cspmc with Python 3.7 venv",
+        config_path="clinical_deid.pipes.neuroner_ner.pipe:NeuroNerConfig",
+        pipe_path="clinical_deid.pipes.neuroner_ner.pipe:NeuroNerPipe",
+    ),
 ]
 
 

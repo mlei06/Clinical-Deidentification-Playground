@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 
-SUPPORTED_FRAMEWORKS = ("spacy", "huggingface", "external")
+SUPPORTED_FRAMEWORKS = ("spacy", "huggingface", "external", "neuroner")
 
 
 @dataclass(frozen=True)
