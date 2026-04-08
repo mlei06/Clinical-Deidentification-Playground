@@ -39,3 +39,9 @@ data/wordlists/*
 .DS_Store
 .idea/
 .vscode/
+# NeuroNER — venv and large data files
+neuroner-cspmc/venv/
+data/word_vectors/
+data/neuroner_deploy/
+models/neuroner/
+output/neuroner/
