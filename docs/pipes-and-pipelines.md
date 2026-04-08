@@ -311,20 +311,13 @@ Run multiple detectors in parallel and merge their results:
 
 ### Intermediary tracing
 
-Enable step-by-step capture for debugging:
+Tracing is a runtime option, not part of the pipeline config. Pass `?trace=true` as a query parameter on the process endpoint to capture the document state after every pipeline step:
 
-```json
-{
-  "store_intermediary": true,
-  "pipes": [
-    {"type": "regex_ner", "config": {}, "store_if_intermediary": true},
-    {"type": "blacklist", "config": {"mode": "any_token"}, "store_if_intermediary": true},
-    {"type": "resolve_spans", "config": {"strategy": "longest_non_overlapping"}}
-  ]
-}
+```
+POST /process/my-pipeline?trace=true
 ```
 
-When `store_intermediary` is `true` and individual pipes have `store_if_intermediary` set, the API response includes an `intermediary_trace` array showing the document state after each marked step.
+The API response includes an `intermediary_trace` array with one snapshot per step.
 
 ## Adding a new pipe
 
@@ -445,7 +438,7 @@ When the API receives a `POST /process/{pipeline_id}`:
 1. **Lookup** — Fetch the pipeline record and its current version from SQLite.
 2. **Cache** — Check the in-memory LRU cache (max 32 entries, keyed by config hash). If miss, build the pipe chain from the JSON config.
 3. **Build** — `load_pipeline(config)` deserialises each pipe step, instantiates configs and pipe objects, and composes them into a `Pipeline` (sequential) or `ParallelDetectors` (parallel blocks).
-4. **Execute** — Call `pipe_chain.forward(doc)` (or `forward_with_trace` for intermediary capture).
+4. **Execute** — Call `pipe_chain.forward(doc)` (or `pipe_chain.run(doc, trace=True)` for intermediary capture).
 5. **Redact** — If the pipeline includes a redactor (text changed), use the output text. Otherwise, generate `[LABEL]` replacements from detected spans.
 6. **Respond** — Return spans, redacted text, timing, and optional trace.
 

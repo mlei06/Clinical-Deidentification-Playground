@@ -25,7 +25,7 @@ A paste-and-try interface for running pipelines on ad-hoc text.
 - Paste or type clinical text into an input area.
 - Submit and see results side-by-side: original text on the left, redacted text on the right, with detected spans highlighted and colour-coded by label.
 - Span table below showing start, end, label, confidence, and source for each detection.
-- Toggle intermediary trace view to inspect the document state after each pipeline step (when the pipeline config has `store_intermediary` enabled).
+- Toggle intermediary trace view to inspect the document state after each pipeline step (sends `?trace=true` to the process endpoint).
 - Processing time displayed for latency awareness.
 - Batch mode: upload a text file or JSONL and process all documents, download results as JSONL.
 
