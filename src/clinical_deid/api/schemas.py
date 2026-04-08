@@ -67,10 +67,7 @@ class ProcessResponse(BaseModel):
     processing_time_ms: float
     intermediary_trace: list[dict[str, Any]] | None = Field(
         default=None,
-        description=(
-            "Snapshots after selected pipeline stages when the pipeline JSON sets "
-            "`store_intermediary` and/or `store_if_intermediary`."
-        ),
+        description="Snapshots after each pipeline stage. Present when `?trace=true` query param is set.",
     )
 
 

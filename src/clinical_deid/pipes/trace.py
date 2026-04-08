@@ -20,28 +20,34 @@ class PipelineTraceFrame:
     path: str
     stage: str
     pipe_type: str
-    document: AnnotatedDocument
+    document: AnnotatedDocument | None = None
+    elapsed_ms: float | None = None
     branch_index: int | None = None
     extra: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
 class PipelineRunResult:
-    """Result of :func:`forward_with_trace`."""
+    """Result of :meth:`Pipeline.run`."""
 
     final: AnnotatedDocument
     trace: list[PipelineTraceFrame]
+    total_elapsed_ms: float | None = None
 
     def frames_as_jsonable(self) -> list[dict[str, Any]]:
         """Frames with each document as ``model_dump()`` for API responses."""
-        return [
-            {
+        out: list[dict[str, Any]] = []
+        for f in self.trace:
+            d: dict[str, Any] = {
                 "path": f.path,
                 "stage": f.stage,
                 "pipe_type": f.pipe_type,
                 "branch_index": f.branch_index,
-                "document": f.document.model_dump(),
                 "extra": f.extra,
             }
-            for f in self.trace
-        ]
+            if f.document is not None:
+                d["document"] = f.document.model_dump()
+            if f.elapsed_ms is not None:
+                d["elapsed_ms"] = f.elapsed_ms
+            out.append(d)
+        return out

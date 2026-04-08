@@ -22,7 +22,7 @@ from clinical_deid.domain import AnnotatedDocument, Document
 from clinical_deid.pipeline_store import load_pipeline_config
 from clinical_deid.pipes.base import Pipe
 from clinical_deid.pipes.combinators import Pipeline
-from clinical_deid.pipes.registry import load_pipeline, pipeline_config_requests_intermediary
+from clinical_deid.pipes.registry import load_pipeline
 from clinical_deid.tables import AuditLogRecord
 
 logger = logging.getLogger(__name__)
@@ -59,6 +59,8 @@ def _process_single(
     pipe_chain: Pipe,
     pipeline_name: str,
     pipeline_config: dict[str, Any],
+    *,
+    trace: bool = False,
 ) -> ProcessResponse:
     req_id = request_id or str(uuid4())
 
@@ -67,16 +69,17 @@ def _process_single(
         spans=[],
     )
 
-    t0 = time.perf_counter()
-    want_trace = pipeline_config_requests_intermediary(pipeline_config)
     intermediary_trace: list[dict[str, Any]] | None = None
-    if want_trace and isinstance(pipe_chain, Pipeline):
-        run = pipe_chain.forward_with_trace(doc)
-        result = run.final
-        intermediary_trace = run.frames_as_jsonable()
+    if isinstance(pipe_chain, Pipeline):
+        run_result = pipe_chain.run(doc, trace=trace, timing=True)
+        result = run_result.final
+        elapsed_ms = run_result.total_elapsed_ms or 0.0
+        if trace:
+            intermediary_trace = run_result.frames_as_jsonable()
     else:
+        t0 = time.perf_counter()
         result = pipe_chain.forward(doc)
-    elapsed_ms = (time.perf_counter() - t0) * 1000
+        elapsed_ms = (time.perf_counter() - t0) * 1000
 
     span_responses = [
         PHISpanResponse(
@@ -139,9 +142,10 @@ def process_text(
     session: SessionDep,
     pipeline_name: str,
     body: ProcessRequest,
+    trace: bool = False,
 ) -> ProcessResponse:
     pipe_chain, config = _load_pipe_chain(pipeline_name)
-    resp = _process_single(body.text, body.request_id, pipe_chain, pipeline_name, config)
+    resp = _process_single(body.text, body.request_id, pipe_chain, pipeline_name, config, trace=trace)
     _log_audit(session, pipeline_name, config, [resp], source="api")
     return resp
 
@@ -151,12 +155,13 @@ def process_batch(
     session: SessionDep,
     pipeline_name: str,
     body: BatchProcessRequest,
+    trace: bool = False,
 ) -> BatchProcessResponse:
     pipe_chain, config = _load_pipe_chain(pipeline_name)
 
     t0 = time.perf_counter()
     results = [
-        _process_single(item.text, item.request_id, pipe_chain, pipeline_name, config)
+        _process_single(item.text, item.request_id, pipe_chain, pipeline_name, config, trace=trace)
         for item in body.items
     ]
     total_ms = (time.perf_counter() - t0) * 1000

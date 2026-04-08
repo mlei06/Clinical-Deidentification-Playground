@@ -10,6 +10,8 @@ from clinical_deid.domain import AnnotatedDocument, PHISpan
 from clinical_deid.pipes.base import ConfigurablePipe, Pipe
 from clinical_deid.pipes.span_merge import MergeStrategy, apply_resolve_spans
 from clinical_deid.pipes.ui_schema import field_ui
+import time
+
 from clinical_deid.pipes.trace import PipelineRunResult, PipelineTraceFrame, snapshot_document
 
 
@@ -190,15 +192,13 @@ class Pipeline:
     Entries can be any ``Pipe``, ``ResolveSpans``, ``BlacklistSpans``,
     or nested ``Pipeline``.
 
-    Set ``store_intermediary`` on the pipeline dict to capture every step; or set
-    ``store_if_intermediary`` on individual pipe specs.
+    Pass ``trace=True`` to :meth:`forward` to capture intermediate document
+    state after every step.
     """
 
     pipes: list[Pipe | ResolveSpans | Pipeline] = field(
         default_factory=list
     )
-    store_intermediary: bool = False
-    step_store_if_intermediary: tuple[bool, ...] = field(default_factory=tuple)
 
     @property
     def labels(self) -> set[str]:
@@ -210,38 +210,50 @@ class Pipeline:
         return out
 
     def forward(self, doc: AnnotatedDocument) -> AnnotatedDocument:
-        for pipe in self.pipes:
-            doc = pipe.forward(doc)
-        return doc
+        """Run the pipeline. Conforms to the :class:`Pipe` protocol."""
+        return self.run(doc).final
 
-    def forward_with_trace(
-        self, doc: AnnotatedDocument, path_prefix: str = ""
+    def run(
+        self,
+        doc: AnnotatedDocument,
+        *,
+        trace: bool = False,
+        timing: bool = False,
+        _path_prefix: str = "",
     ) -> PipelineRunResult:
-        """Run the pipeline and collect :class:`~clinical_deid.pipes.trace.PipelineTraceFrame` entries."""
-        trace: list[PipelineTraceFrame] = []
-        flags = self.step_store_if_intermediary
+        """Run the pipeline, optionally collecting trace frames and/or per-step timing.
+
+        *trace* captures document snapshots (deep copy) after each step.
+        *timing* records ``elapsed_ms`` per step and ``total_elapsed_ms`` on the result.
+        Both can be enabled independently.
+        """
+        frames: list[PipelineTraceFrame] = []
+        t_total = time.perf_counter() if timing else 0.0
         for i, pipe in enumerate(self.pipes):
-            step_path = f"{path_prefix}step_{i}" if path_prefix else f"step_{i}"
-            step_flag = self.store_intermediary or (i < len(flags) and flags[i])
+            step_path = f"{_path_prefix}step_{i}" if _path_prefix else f"step_{i}"
 
             if isinstance(pipe, Pipeline):
-                sub = pipe.forward_with_trace(doc, path_prefix=f"{step_path}/")
+                sub = pipe.run(doc, trace=trace, timing=timing, _path_prefix=f"{step_path}/")
                 doc = sub.final
-                trace.extend(sub.trace)
+                frames.extend(sub.trace)
             else:
+                t0 = time.perf_counter() if timing else 0.0
                 doc = pipe.forward(doc)
-                if step_flag:
-                    trace.append(
+                step_ms = (time.perf_counter() - t0) * 1000 if timing else None
+
+                if trace or timing:
+                    frames.append(
                         PipelineTraceFrame(
                             path=step_path,
                             stage="sequential",
                             pipe_type=_pipe_type_label(pipe),
-                            document=snapshot_document(doc),
-                            extra={},
+                            document=snapshot_document(doc) if trace else None,
+                            elapsed_ms=step_ms,
                         )
                     )
 
-        return PipelineRunResult(final=doc, trace=trace)
+        total_ms = (time.perf_counter() - t_total) * 1000 if timing else None
+        return PipelineRunResult(final=doc, trace=frames, total_elapsed_ms=total_ms)
 
     def __call__(self, doc: AnnotatedDocument) -> AnnotatedDocument:
         return self.forward(doc)

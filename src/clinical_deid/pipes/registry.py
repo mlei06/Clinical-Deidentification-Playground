@@ -6,10 +6,9 @@ pairs, plus functions to load/dump entire pipelines from/to JSON.
 JSON schema example::
 
     {
-      "store_intermediary": false,
       "pipes": [
         {"type": "regex_ner", "config": {"label_mapping": {"PHONE": "TEL", "DATE": null}}},
-        {"type": "whitelist", "store_if_intermediary": true},
+        {"type": "whitelist"},
         {"type": "presidio_ner", "config": {"model": "HuggingFace/obi/deid_roberta_i2b2"}},
         {"type": "label_mapper", "config": {"mapping": {"NAME": "PATIENT"}}},
         {"type": "resolve_spans", "config": {"strategy": "longest_non_overlapping"}}
@@ -69,6 +68,10 @@ class PipeCatalogEntry:
     install_hint: str  # human-readable install command
     config_path: str  # "module.path:ConfigClass"
     pipe_path: str  # "module.path:PipeClass"
+    # Optional callable returning (ready: bool, details: dict) for pipes whose
+    # availability depends on runtime state beyond Python imports (e.g. venvs,
+    # downloaded models, embeddings).  ``None`` means "installed == ready".
+    check_ready: str | None = None  # "module.path:function_name"
 
 
 _CATALOG: list[PipeCatalogEntry] = [
@@ -203,10 +206,11 @@ _CATALOG: list[PipeCatalogEntry] = [
         name="neuroner_ner",
         description="Clinical PHI detection via NeuroNER LSTM-CRF (i2b2, MIMIC models; Python 3.7 subprocess)",
         role="detector",
-        extra="neuroner",
-        install_hint="Requires neuroner-cspmc with Python 3.7 venv",
+        extra=None,
+        install_hint="Run ./scripts/setup_neuroner.sh (Python 3.7 venv + models + GloVe embeddings)",
         config_path="clinical_deid.pipes.neuroner_ner.pipe:NeuroNerConfig",
         pipe_path="clinical_deid.pipes.neuroner_ner.pipe:NeuroNerPipe",
+        check_ready="clinical_deid.pipes.neuroner_ner.pipe:check_neuroner_ready",
     ),
 ]
 
@@ -247,19 +251,36 @@ def pipe_availability() -> list[dict[str, Any]]:
     - ``name``, ``description``, ``role``, ``install_hint`` from the catalog
     - ``installed`` (bool): whether the pipe is currently registered
     - ``extra``: pip extra group name, or null
+    - ``ready`` (bool): whether the pipe can actually run (always True when
+      there is no ``check_ready`` hook and the pipe is installed)
+    - ``ready_details`` (dict | null): granular status from ``check_ready``
     """
     registered = set(_REGISTRY)
-    return [
-        {
+    out: list[dict[str, Any]] = []
+    for entry in _CATALOG:
+        installed = entry.name in registered
+        ready = installed
+        ready_details: dict[str, Any] | None = None
+
+        if installed and entry.check_ready is not None:
+            try:
+                check_fn = _import_dotted(entry.check_ready)
+                ready, ready_details = check_fn()
+            except Exception as exc:
+                ready = False
+                ready_details = {"error": str(exc)}
+
+        out.append({
             "name": entry.name,
             "description": entry.description,
             "role": entry.role,
             "extra": entry.extra,
             "install_hint": entry.install_hint,
-            "installed": entry.name in registered,
-        }
-        for entry in _CATALOG
-    ]
+            "installed": installed,
+            "ready": ready,
+            "ready_details": ready_details,
+        })
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -273,45 +294,13 @@ def _load_pipeline_from_dict(spec: dict[str, Any]) -> Any:
     if "pipes" not in spec:
         raise ValueError(f"pipeline spec missing 'pipes': {spec}")
     pipe_list: list[Pipe] = []
-    flags_list: list[bool] = []
     for p in spec["pipes"]:
         result = load_pipe(p)
-        flag = bool(p.get("store_if_intermediary", False))
         if isinstance(result, list):
             pipe_list.extend(result)
-            flags_list.extend(flag for _ in result)
         else:
             pipe_list.append(result)
-            flags_list.append(flag)
-    return Pipeline(
-        pipes=pipe_list,
-        store_intermediary=bool(spec.get("store_intermediary", False)),
-        step_store_if_intermediary=tuple(flags_list),
-    )
-
-
-def pipeline_config_requests_intermediary(cfg: dict[str, Any]) -> bool:
-    """Return True if *cfg* (stored pipeline JSON) enables intermediate trace capture anywhere."""
-
-    if cfg.get("store_intermediary"):
-        return True
-    return _pipes_request_intermediary(cfg.get("pipes", []))
-
-
-def _pipe_spec_requests_intermediary(p: dict[str, Any]) -> bool:
-    if p.get("store_if_intermediary"):
-        return True
-    pt = p.get("type")
-    if pt == "pipeline":
-        return pipeline_config_requests_intermediary(p)
-    return False
-
-
-def _pipes_request_intermediary(pipes: list[Any]) -> bool:
-    for p in pipes:
-        if isinstance(p, dict) and _pipe_spec_requests_intermediary(p):
-            return True
-    return False
+    return Pipeline(pipes=pipe_list)
 
 
 def load_pipe(spec: dict[str, Any]) -> Pipe | list[Pipe]:
@@ -377,16 +366,10 @@ def load_pipeline(source: dict[str, Any] | str | Path) -> Any:
 # ---------------------------------------------------------------------------
 
 def _dump_pipeline_steps(pipeline: Any) -> dict[str, Any]:
-    """Shared helper: serialize a pipeline's steps and flags into a dict."""
+    """Shared helper: serialize a pipeline's steps into a dict."""
     out: dict[str, Any] = {"pipes": []}
-    if pipeline.store_intermediary:
-        out["store_intermediary"] = True
-    flags = pipeline.step_store_if_intermediary
-    for i, p in enumerate(pipeline.pipes):
-        d = dump_pipe(p)
-        if i < len(flags) and flags[i]:
-            d["store_if_intermediary"] = True
-        out["pipes"].append(d)
+    for p in pipeline.pipes:
+        out["pipes"].append(dump_pipe(p))
     return out
 
 
