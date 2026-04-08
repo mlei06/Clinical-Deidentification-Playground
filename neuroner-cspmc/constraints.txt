@@ -1,0 +1,6 @@
+# Pin spaCy C-extension deps to last versions with cp37 pre-built wheels.
+# Without these pins, pip pulls the latest sdist which requires Cython>=3.1
+# (unavailable for Python 3.7) and fails to build.
+murmurhash==1.0.9
+cymem==2.0.8
+preshed==3.0.9

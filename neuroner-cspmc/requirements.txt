@@ -1,0 +1,16 @@
+tensorflow==1.15.0
+tensorflow-estimator==1.15.1
+tensorboard==1.15.0
+protobuf==3.20.3
+pyneuroner==1.0.8
+spacy==2.3.8
+scikit-learn==1.0.2
+scipy==1.7.3
+numpy==1.21.6
+pandas==1.3.5
+matplotlib==3.5.3
+networkx==2.6.3
+pycorenlp==0.3.0
+tqdm==4.67.1
+requests==2.31.0
+faker==18.13.0
