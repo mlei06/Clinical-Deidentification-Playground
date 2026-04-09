@@ -200,8 +200,13 @@ def delete_pipeline_endpoint(pipeline_name: str) -> None:
 
 @router.post("/{pipeline_name}/validate", response_model=ValidatePipelineResponse)
 def validate_pipeline(pipeline_name: str, body: ValidatePipelineRequest) -> ValidatePipelineResponse:
+    pdir = _pipelines_dir()
+    path = pdir / f"{pipeline_name}.json"
+    if not path.exists():
+        raise HTTPException(status_code=404, detail=f"pipeline {pipeline_name!r} not found")
+    config = body.config if body.config else load_pipeline_config(pdir, pipeline_name)
     try:
-        load_pipeline(body.config)
+        load_pipeline(config)
         return ValidatePipelineResponse(valid=True)
     except Exception as exc:
         return ValidatePipelineResponse(valid=False, error=str(exc))

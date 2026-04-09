@@ -9,9 +9,24 @@ No database, no versioning — use git for history.
 from __future__ import annotations
 
 import json
+import logging
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
+
+_SAFE_NAME = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]*$")
+
+
+def _validate_name(name: str) -> None:
+    """Reject names that could escape the target directory."""
+    if not _SAFE_NAME.match(name) or ".." in name:
+        raise ValueError(
+            f"Invalid pipeline name {name!r}: must match {_SAFE_NAME.pattern} "
+            f"and not contain '..'"
+        )
 
 
 @dataclass(frozen=True)
@@ -36,12 +51,14 @@ def list_pipelines(pipelines_dir: Path) -> list[PipelineInfo]:
             config = json.loads(p.read_text(encoding="utf-8"))
             results.append(PipelineInfo(name=p.stem, path=p, config=config))
         except (json.JSONDecodeError, OSError):
-            continue  # skip broken files
+            logger.warning("Skipping broken pipeline file: %s", p)
+            continue
     return results
 
 
 def load_pipeline_config(pipelines_dir: Path, name: str) -> dict[str, Any]:
     """Load a pipeline config by name.  Raises ``FileNotFoundError`` if missing."""
+    _validate_name(name)
     path = pipelines_dir / f"{name}.json"
     if not path.is_file():
         available = [p.stem for p in pipelines_dir.glob("*.json")]
@@ -58,6 +75,7 @@ def save_pipeline_config(
     config: dict[str, Any],
 ) -> Path:
     """Write a pipeline config to ``pipelines/{name}.json``.  Returns the path."""
+    _validate_name(name)
     _ensure_dir(pipelines_dir)
     path = pipelines_dir / f"{name}.json"
     path.write_text(
@@ -69,6 +87,7 @@ def save_pipeline_config(
 
 def delete_pipeline(pipelines_dir: Path, name: str) -> None:
     """Delete a pipeline file.  Raises ``FileNotFoundError`` if missing."""
+    _validate_name(name)
     path = pipelines_dir / f"{name}.json"
     if not path.is_file():
         raise FileNotFoundError(f"Pipeline {name!r} not found in {pipelines_dir}")

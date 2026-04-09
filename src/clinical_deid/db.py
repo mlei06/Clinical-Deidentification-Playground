@@ -8,11 +8,12 @@ from __future__ import annotations
 
 import threading
 
+from sqlalchemy import Engine
 from sqlmodel import SQLModel, create_engine
 
 from clinical_deid.config import get_settings
 
-_engine = None
+_engine: Engine | None = None
 _engine_lock = threading.Lock()
 
 
@@ -23,7 +24,7 @@ def reset_engine() -> None:
         _engine = None
 
 
-def get_engine():
+def get_engine() -> Engine:
     global _engine
     if _engine is not None:
         return _engine

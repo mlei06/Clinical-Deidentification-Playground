@@ -17,7 +17,7 @@ class SurrogateGenerator:
     def __init__(self, seed: int | None = None, *, consistency: bool = True) -> None:
         self._faker = Faker()
         if seed is not None:
-            Faker.seed(seed)
+            self._faker.seed_instance(seed)
             random.seed(seed)
         self._consistency = consistency
         self._map: dict[tuple[str, str], str] = {}

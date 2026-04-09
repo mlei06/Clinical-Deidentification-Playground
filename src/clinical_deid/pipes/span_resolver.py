@@ -95,10 +95,11 @@ def _merge_adjacent_spans(spans: list[PHISpan]) -> list[PHISpan]:
         prev = merged[-1]
         if s.label == prev.label and s.start <= prev.end:
             # Merge: extend the previous span
-            best_conf = max(
-                prev.confidence if prev.confidence is not None else 0.0,
-                s.confidence if s.confidence is not None else 0.0,
-            ) or None
+            prev_conf = prev.confidence if prev.confidence is not None else 0.0
+            s_conf = s.confidence if s.confidence is not None else 0.0
+            best_conf: float | None = max(prev_conf, s_conf)
+            if prev.confidence is None and s.confidence is None:
+                best_conf = None
             merged[-1] = PHISpan(
                 start=prev.start,
                 end=max(prev.end, s.end),

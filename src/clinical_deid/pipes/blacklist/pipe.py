@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from pathlib import Path
 from typing import Literal
@@ -12,6 +13,8 @@ from clinical_deid.domain import AnnotatedDocument, PHISpan
 from clinical_deid.pipes.base import ConfigurablePipe
 from clinical_deid.pipes.ui_schema import field_ui
 from clinical_deid.pipes.whitelist.lists import parse_list_file
+
+logger = logging.getLogger(__name__)
 
 _WORD = re.compile(r"\w+", re.UNICODE)
 
@@ -213,6 +216,7 @@ def blacklist_regions_for_text(
         try:
             rx = re.compile(ps, re.IGNORECASE)
         except re.error:
+            logger.warning("Skipping invalid blacklist regex pattern: %s", ps)
             continue
         for m in rx.finditer(text):
             raw.append((m.start(), m.end()))

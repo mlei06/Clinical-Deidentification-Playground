@@ -5,9 +5,12 @@ from __future__ import annotations
 import csv
 import io
 import json
+import re
 from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import Any
+
+_SAFE_DOC_ID = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]*$")
 
 
 @dataclass
@@ -81,7 +84,8 @@ def write_results(
 
     if fmt == "text":
         for r in results:
-            (output_dir / f"{r.doc_id}.txt").write_text(
+            safe_id = re.sub(r"[^\w.-]", "_", r.doc_id)
+            (output_dir / f"{safe_id}.txt").write_text(
                 r.output_text, encoding="utf-8"
             )
     elif fmt == "jsonl":

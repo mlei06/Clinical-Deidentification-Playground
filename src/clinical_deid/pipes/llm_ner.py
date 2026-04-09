@@ -114,7 +114,7 @@ def _parse_llm_response(raw: str, text_length: int) -> list[dict[str, Any]]:
         if match:
             parsed = json.loads(match.group())
         else:
-            logger.warning("Could not parse LLM response as JSON: %s", cleaned[:200])
+            logger.warning("Could not parse LLM response as JSON (response length: %d chars)", len(cleaned))
             return []
 
     if not isinstance(parsed, list):
@@ -192,7 +192,7 @@ class LlmNerPipe(ConfigurablePipe):
             logger.exception("LLM NER call failed")
             return doc
 
-        parsed = _parse_llm_response(raw_response, len(doc.document.text))
+        parsed = _parse_llm_response(raw_response, len(text))
         allowed_labels = set(self._config.labels)
         spans: list[PHISpan] = []
         for item in parsed:

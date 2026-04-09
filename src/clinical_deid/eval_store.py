@@ -7,10 +7,22 @@ Each eval run produces a JSON file in ``evaluations/`` named
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+_SAFE_ID = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]*$")
+
+
+def _validate_id(result_id: str) -> None:
+    """Reject IDs that could escape the target directory."""
+    if not _SAFE_ID.match(result_id) or ".." in result_id:
+        raise ValueError(
+            f"Invalid eval result ID {result_id!r}: must match {_SAFE_ID.pattern} "
+            f"and not contain '..'"
+        )
 
 
 @dataclass(frozen=True)
@@ -93,6 +105,7 @@ def list_eval_results(
 
 def load_eval_result(evaluations_dir: Path, result_id: str) -> dict[str, Any]:
     """Load a full eval result by ID (filename stem)."""
+    _validate_id(result_id)
     path = evaluations_dir / f"{result_id}.json"
     if not path.is_file():
         raise FileNotFoundError(f"Eval result {result_id!r} not found in {evaluations_dir}")

@@ -55,23 +55,6 @@ _STREET_SUFFIX = (
 )
 
 # ---------------------------------------------------------------------------
-# Clinical measurement disqualifiers — terms that when adjacent to a
-# numeric pattern indicate vitals/labs, not dates or phone numbers.
-# ---------------------------------------------------------------------------
-
-_CLINICAL_DISQUALIFIERS = (
-    r"(?:HR|Heart Rate|BP|SBP|DBP|SVR|ICP|CVP|RR|"
-    r"PEEP|CPAP|PSV|FiO2|SpO2|SaO2|PaO2|PaCO2|"
-    r"TV|Tidal Volume|VT|CKS|INR|BNP|WBC|RBC|Hgb|Hct|"
-    r"cc|mg|mL|mcg|mmHg|cmH2O|L\/min|bpm|"
-    r"dose|doses|drop|drops|units|tabs|capsules|"
-    r"scale|range|grade|stage|level|score|ratio|index)"
-)
-
-# Negative lookbehind: skip matches preceded by clinical term + space
-_NOT_AFTER_CLINICAL = rf"(?<!\b{_CLINICAL_DISQUALIFIERS}\s)"
-
-# ---------------------------------------------------------------------------
 # Built-in patterns
 # ---------------------------------------------------------------------------
 

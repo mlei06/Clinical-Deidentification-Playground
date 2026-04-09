@@ -78,8 +78,10 @@ def get_run(record_id: str) -> AuditLogRecord | None:
         record = session.get(AuditLogRecord, record_id)
         if record:
             return record
-        # Prefix match
-        stmt = select(AuditLogRecord).where(
-            AuditLogRecord.id.startswith(record_id)  # type: ignore[attr-defined]
+        # Prefix match — order by timestamp descending for deterministic results
+        stmt = (
+            select(AuditLogRecord)
+            .where(AuditLogRecord.id.startswith(record_id))  # type: ignore[attr-defined]
+            .order_by(AuditLogRecord.timestamp.desc())  # type: ignore[union-attr]
         )
         return session.exec(stmt).first()

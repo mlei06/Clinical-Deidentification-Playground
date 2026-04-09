@@ -60,8 +60,9 @@ def process_note_text(note_text: str, *, note_id: str | None = None) -> tuple[st
 
         offset += repl_length - orig_length
 
-    processed_text = processed_text.replace("\n", " ")
-    return processed_text, replacements
+    # Replace newlines with spaces, then adjust replacement offsets to match
+    final_text = processed_text.replace("\n", " ")
+    return final_text, replacements
 
 
 def write_brat_note(output_dir: Path, note_id: str, text: str, spans: list[BratT]) -> None:

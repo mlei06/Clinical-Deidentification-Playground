@@ -4,7 +4,7 @@ Four matching modes:
 - **Strict**: exact (start, end, label) match
 - **Exact boundary**: exact (start, end), any label
 - **Partial overlap**: spans overlap AND same label
-- **Token-level**: per-token B/I/O tags compared
+- **Character-level**: per-character B/I/O tags compared
 """
 
 from __future__ import annotations
@@ -153,7 +153,7 @@ def _partial_overlap_match(pred: list[PHISpan], gold: list[PHISpan]) -> MatchRes
 # ---------------------------------------------------------------------------
 
 
-def _spans_to_token_tags(
+def _spans_to_char_tags(
     spans: list[PHISpan], text_length: int
 ) -> list[str]:
     """Convert spans to per-character BIO-like tags.
@@ -172,15 +172,15 @@ def _spans_to_token_tags(
     return tags
 
 
-def _token_level_match(
+def _char_level_match(
     pred: list[PHISpan], gold: list[PHISpan], text_length: int
 ) -> MatchResult:
     """Per-character B/I/O comparison."""
     if text_length == 0:
         return make_match_result(0, 0, 0)
 
-    pred_tags = _spans_to_token_tags(pred, text_length)
-    gold_tags = _spans_to_token_tags(gold, text_length)
+    pred_tags = _spans_to_char_tags(pred, text_length)
+    gold_tags = _spans_to_char_tags(gold, text_length)
 
     tp = fp = fn = 0
     for pt, gt in zip(pred_tags, gold_tags):
@@ -213,7 +213,7 @@ def compute_metrics(
         strict=_strict_match(pred_spans, gold_spans),
         exact_boundary=_exact_boundary_match(pred_spans, gold_spans),
         partial_overlap=_partial_overlap_match(pred_spans, gold_spans),
-        token_level=_token_level_match(pred_spans, gold_spans, len(text)),
+        token_level=_char_level_match(pred_spans, gold_spans, len(text)),
     )
 
 
@@ -232,7 +232,7 @@ def compute_per_label_metrics(
         g = [s for s in gold_spans if s.label == label]
         strict = _strict_match(p, g)
         partial = _partial_overlap_match(p, g)
-        token = _token_level_match(p, g, len(text))
+        token = _char_level_match(p, g, len(text))
         results.append(
             LabelMetrics(
                 label=label,

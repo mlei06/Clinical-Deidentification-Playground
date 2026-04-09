@@ -25,12 +25,12 @@ class AuditLogRecord(SQLModel, table=True):
     user: str = ""
     command: str = ""  # "run", "batch", "eval", "process", "process_batch"
     pipeline_name: str = ""
-    pipeline_config: dict[str, Any] = Field(sa_column=Column(JSON), default={})
+    pipeline_config: dict[str, Any] = Field(sa_column=Column(JSON), default_factory=dict)
     dataset_source: str = ""  # filesystem path or "" for ad-hoc text
     doc_count: int = 0
     error_count: int = 0
     span_count: int = 0
     duration_seconds: float = 0.0
-    metrics: dict[str, Any] = Field(sa_column=Column(JSON), default={})
+    metrics: dict[str, Any] = Field(sa_column=Column(JSON), default_factory=dict)
     source: str = "cli"  # "cli" or "api"
     notes: str = ""

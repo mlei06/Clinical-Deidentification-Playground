@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 
 from pydantic import BaseModel, Field
@@ -9,10 +10,8 @@ from pydantic import BaseModel, Field
 from clinical_deid.domain import AnnotatedDocument, PHISpan
 from clinical_deid.pipes.base import ConfigurablePipe, Pipe
 from clinical_deid.pipes.span_merge import MergeStrategy, apply_resolve_spans
-from clinical_deid.pipes.ui_schema import field_ui
-import time
-
 from clinical_deid.pipes.trace import PipelineRunResult, PipelineTraceFrame, snapshot_document
+from clinical_deid.pipes.ui_schema import field_ui
 
 
 # ---------------------------------------------------------------------------

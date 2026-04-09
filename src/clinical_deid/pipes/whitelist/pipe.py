@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -118,12 +119,16 @@ def _get_dictionary_store():
     return DictionaryStore(get_settings().dictionaries_dir)
 
 
+logger = logging.getLogger(__name__)
+
+
 def _auto_discover_whitelist_terms() -> dict[str, list[str]]:
     """Load all whitelist dictionaries from the store, grouped by label."""
     try:
         store = _get_dictionary_store()
         dicts = store.list_dictionaries(kind="whitelist")
     except Exception:
+        logger.warning("Failed to auto-discover whitelist dictionaries", exc_info=True)
         return {}
     terms_by_label: dict[str, list[str]] = {}
     for d in dicts:
@@ -145,6 +150,7 @@ def _load_named_dictionaries(label: str, names: list[str]) -> list[str]:
         store = _get_dictionary_store()
         return store.load_whitelist_terms(names, label)
     except Exception:
+        logger.warning("Failed to load named whitelist dictionaries %s for label %s", names, label, exc_info=True)
         return []
 
 

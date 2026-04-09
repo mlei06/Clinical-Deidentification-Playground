@@ -1,4 +1,12 @@
-"""Intermediate pipeline outputs for UI / debugging."""
+"""Intermediate pipeline outputs for UI / debugging.
+
+.. warning::
+
+    Trace frames deep-copy the full document including text. When tracing is
+    enabled, PHI is duplicated in memory and will appear in serialized output
+    from :meth:`PipelineRunResult.frames_as_jsonable`.  Do **not** expose
+    trace output to untrusted consumers without access-control review.
+"""
 
 from __future__ import annotations
 

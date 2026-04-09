@@ -352,11 +352,11 @@ def load_pipeline(source: dict[str, Any] | str | Path) -> Any:
     if isinstance(source, Path):
         source = json.loads(source.read_text())
     elif isinstance(source, str):
-        # Distinguish file path from JSON string
-        if not source.lstrip().startswith("{"):
-            source = json.loads(Path(source).read_text())
-        else:
+        stripped = source.lstrip()
+        if stripped.startswith("{") or stripped.startswith("["):
             source = json.loads(source)
+        else:
+            source = json.loads(Path(source).read_text())
 
     return _load_pipeline_from_dict(source)
 
@@ -387,8 +387,13 @@ def dump_pipe(pipe: Pipe) -> dict[str, Any]:
         if isinstance(pipe, pipe_cls):
             if isinstance(pipe, ConfigurablePipe):
                 config = pipe.pipe_config
-            else:
+            elif hasattr(pipe, "_config"):
                 config = pipe._config  # type: ignore[attr-defined]
+            else:
+                raise ValueError(
+                    f"Cannot serialize pipe {type(pipe).__name__}: "
+                    f"not a ConfigurablePipe and has no _config attribute"
+                )
             dumped = config.model_dump()
             # Omit fields that match defaults to keep JSON concise
             defaults = {}
