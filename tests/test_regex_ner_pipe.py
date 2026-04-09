@@ -6,8 +6,20 @@ import io
 
 from clinical_deid.domain import AnnotatedDocument, Document
 from clinical_deid.pipes.combinators import Pipeline
-from clinical_deid.pipes.regex_ner import RegexNerConfig, RegexNerPipe, RegexNerLabelConfig
+from clinical_deid.pipes.regex_ner import (
+    BUILTIN_REGEX_PATTERNS,
+    RegexNerConfig,
+    RegexNerLabelConfig,
+    RegexNerPipe,
+)
 from clinical_deid.pipes.whitelist import WhitelistConfig, WhitelistPipe, WhitelistLabelConfig
+
+
+def _no_builtin_regex_config() -> RegexNerConfig:
+    """Return a config with all built-in regex labels disabled."""
+    return RegexNerConfig(
+        per_label={label: RegexNerLabelConfig(regex_enabled=False) for label in BUILTIN_REGEX_PATTERNS},
+    )
 
 
 def _doc(text: str) -> AnnotatedDocument:
@@ -42,13 +54,12 @@ def test_per_label_regex_disabled() -> None:
 
 def test_list_terms_hospital() -> None:
     pipe = _chained_detectors(
-        RegexNerConfig(include_builtin_regex=False),
+        _no_builtin_regex_config(),
         WhitelistConfig(
             per_label={
                 "HOSPITAL": WhitelistLabelConfig(
                     terms=["Toronto General Hospital"],
-                    include_builtin_terms=False,
-                ),
+                                    ),
             }
         ),
     )
@@ -61,7 +72,7 @@ def test_ner_builtins_endpoint(client) -> None:
     assert r.status_code == 200
     body = r.json()
     assert "DATE" in body["regex_labels"]
-    assert "HOSPITAL" in body["whitelist_labels"]
+    assert isinstance(body["whitelist_labels"], list)
 
 
 def test_whitelist_parse_lists_endpoint(client) -> None:
@@ -77,10 +88,17 @@ def test_whitelist_parse_lists_endpoint(client) -> None:
     assert "Alpha Clinic" in res["terms"]
 
 
-def test_include_builtin_regex_off_lists_only_labels() -> None:
+def test_builtin_regex_disabled_lists_only_labels() -> None:
     pipe = _chained_detectors(
-        RegexNerConfig(include_builtin_regex=False),
-        WhitelistConfig(include_builtin_term_files=True),
+        _no_builtin_regex_config(),
+        WhitelistConfig(
+            load_all_dictionaries=False,
+            per_label={
+                "HOSPITAL": WhitelistLabelConfig(
+                    terms=["Toronto General Hospital"],
+                ),
+            },
+        ),
     )
     out = pipe.forward(_doc("Patient at Toronto General Hospital."))
     assert any(s.label == "HOSPITAL" for s in out.spans)

@@ -40,8 +40,7 @@ def test_run_with_trace_captures_all_steps() -> None:
                     "per_label": {
                         "HOSPITAL": WhitelistLabelConfig(
                             terms=["Zed Clinic"],
-                            include_builtin_terms=False,
-                        ),
+                                                    ),
                     },
                 },
             },
@@ -100,7 +99,7 @@ def test_backward_compat_parallel_flattens_to_sequential() -> None:
                 "strategy": "union",
                 "detectors": [
                     {"type": "regex_ner"},
-                    {"type": "whitelist", "config": {"include_builtin_term_files": False}},
+                    {"type": "whitelist", "config": {"load_all_dictionaries": False}},
                 ],
             }
         ]

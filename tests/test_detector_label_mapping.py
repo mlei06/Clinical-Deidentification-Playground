@@ -59,8 +59,7 @@ def test_whitelist_label_mapping() -> None:
             per_label={
                 "HOSPITAL": WhitelistLabelConfig(
                     terms=["Memorial Hospital"],
-                    include_builtin_terms=False,
-                ),
+                                    ),
             },
             label_mapping={"HOSPITAL": "SITE"},
         )

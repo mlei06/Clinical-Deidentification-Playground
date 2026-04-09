@@ -12,13 +12,13 @@ def _doc(text: str, spans: list[PHISpan]) -> AnnotatedDocument:
 
 
 def test_blacklist_drops_span_with_token_in_notes_common() -> None:
-    """pyDeid-style: token PATIENT is in bundled notes_common."""
+    """Token PATIENT is a common clinical term and should be blacklisted."""
     text = "seen in PATIENT room"
     spans = [
         PHISpan(start=text.index("PATIENT"), end=text.index("PATIENT") + 7, label="FOO"),
     ]
     pipe = BlacklistSpans(
-        BlacklistSpansConfig(include_builtin_notes_common=True, match="any_token")
+        BlacklistSpansConfig(terms=["PATIENT"], load_all_dictionaries=False, match="any_token")
     )
     out = pipe.forward(_doc(text, spans)).spans
     assert len(out) == 0
@@ -29,7 +29,8 @@ def test_blacklist_keeps_when_no_token_match() -> None:
     spans = [PHISpan(start=0, end=5, label="NAME")]
     pipe = BlacklistSpans(
         BlacklistSpansConfig(
-            include_builtin_notes_common=True,
+            terms=["PATIENT"],
+            load_all_dictionaries=False,
             match="any_token",
             apply_to_labels=["NAME"],
         )
@@ -46,7 +47,8 @@ def test_blacklist_apply_to_labels_skips_other_labels() -> None:
     ]
     pipe = BlacklistSpans(
         BlacklistSpansConfig(
-            include_builtin_notes_common=True,
+            terms=["PATIENT"],
+            load_all_dictionaries=False,
             match="any_token",
             apply_to_labels=["NAME"],
         )
@@ -62,7 +64,7 @@ def test_exact_span_drops_only_full_match() -> None:
     pipe = BlacklistSpans(
         BlacklistSpansConfig(
             terms=["PATIENT"],
-            include_builtin_notes_common=False,
+            load_all_dictionaries=False,
             match="exact_span",
         )
     )
@@ -81,7 +83,7 @@ def test_overlap_document_regex_only_regions() -> None:
     ]
     pipe = BlacklistSpans(
         BlacklistSpansConfig(
-            include_builtin_notes_common=False,
+            load_all_dictionaries=False,
             match="overlap_document",
             regex_blacklist_patterns=[r"Bell\s+palsy"],
         )
@@ -100,7 +102,7 @@ def test_overlap_document_drops_when_span_overlaps_region() -> None:
     pipe = BlacklistSpans(
         BlacklistSpansConfig(
             terms=["PATIENT"],
-            include_builtin_notes_common=False,
+            load_all_dictionaries=False,
             match="overlap_document",
         )
     )
@@ -128,11 +130,12 @@ def test_blacklist_load_pipeline() -> None:
     cfg = {
         "pipes": [
             {"type": "regex_ner"},
-            {"type": "whitelist"},
+            {"type": "whitelist", "config": {"load_all_dictionaries": False}},
             {
                 "type": "blacklist",
                 "config": {
-                    "include_builtin_notes_common": True,
+                    "terms": ["PATIENT"],
+                    "load_all_dictionaries": False,
                     "match": "any_token",
                 },
             },
