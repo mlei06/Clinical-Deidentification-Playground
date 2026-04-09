@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     pipelines_dir: Path = Path("pipelines")
     evaluations_dir: Path = Path("evaluations")
     models_dir: Path = Path("models")
+    dictionaries_dir: Path = Path("data/dictionaries")
     cors_origins: list[str] = Field(
         default=["http://localhost:3000", "http://127.0.0.1:3000"],
         description="Allowed CORS origins for the API.",

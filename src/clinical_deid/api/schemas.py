@@ -127,3 +127,29 @@ class BlacklistMergeResponse(BaseModel):
     terms: list[str]
     count: int
     source_files: list[str]
+
+
+# ---------------------------------------------------------------------------
+# Dictionaries
+# ---------------------------------------------------------------------------
+
+
+class DictionaryInfoResponse(BaseModel):
+    kind: str
+    label: str | None
+    name: str
+    filename: str
+    term_count: int
+
+
+class DictionaryTermsResponse(BaseModel):
+    kind: str
+    label: str | None
+    name: str
+    terms: list[str]
+    term_count: int
+
+
+class DictionaryUploadResponse(BaseModel):
+    info: DictionaryInfoResponse
+    message: str

@@ -1,0 +1,115 @@
+"""Dictionary CRUD — upload, list, get, delete term-list files.
+
+Dictionaries are stored under ``dictionaries/`` and referenced by name
+in whitelist / blacklist pipe configs.
+"""
+
+from __future__ import annotations
+
+from typing import Annotated
+
+from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
+
+from clinical_deid.api.schemas import (
+    DictionaryInfoResponse,
+    DictionaryTermsResponse,
+    DictionaryUploadResponse,
+)
+from clinical_deid.config import get_settings
+from clinical_deid.dictionary_store import DictionaryStore, DictKind
+
+router = APIRouter(prefix="/dictionaries", tags=["dictionaries"])
+
+MAX_UPLOAD_BYTES = 2 * 1024 * 1024  # 2 MB
+
+
+def _store() -> DictionaryStore:
+    return DictionaryStore(get_settings().dictionaries_dir)
+
+
+def _info_response(info) -> DictionaryInfoResponse:
+    return DictionaryInfoResponse(
+        kind=info.kind,
+        label=info.label,
+        name=info.name,
+        filename=info.filename,
+        term_count=info.term_count,
+    )
+
+
+@router.get("", response_model=list[DictionaryInfoResponse])
+def list_dictionaries(
+    kind: Annotated[DictKind | None, Query()] = None,
+    label: Annotated[str | None, Query()] = None,
+) -> list[DictionaryInfoResponse]:
+    """List all stored dictionaries, optionally filtered by kind and/or label."""
+    return [_info_response(d) for d in _store().list_dictionaries(kind=kind, label=label)]
+
+
+@router.get("/{kind}/{name}", response_model=DictionaryTermsResponse)
+def get_dictionary(
+    kind: DictKind,
+    name: str,
+    label: Annotated[str | None, Query()] = None,
+) -> DictionaryTermsResponse:
+    """Get a dictionary's terms by kind and name. For whitelist, pass ``?label=HOSPITAL``."""
+    try:
+        terms = _store().get_terms(kind, name, label=label)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return DictionaryTermsResponse(
+        kind=kind,
+        label=label.upper() if label else None,
+        name=name,
+        terms=terms,
+        term_count=len(terms),
+    )
+
+
+@router.post("", response_model=DictionaryUploadResponse, status_code=201)
+async def upload_dictionary(
+    file: Annotated[UploadFile, File()],
+    kind: Annotated[DictKind, Form()],
+    name: Annotated[str, Form()],
+    label: Annotated[str | None, Form()] = None,
+) -> DictionaryUploadResponse:
+    """Upload a dictionary file (txt, csv, or json)."""
+    raw = await file.read()
+    if len(raw) > MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"file exceeds {MAX_UPLOAD_BYTES // 1024} KB limit",
+        )
+    try:
+        content = raw.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise HTTPException(status_code=422, detail="file is not valid UTF-8") from exc
+
+    # Determine extension from uploaded filename
+    filename = file.filename or "upload.txt"
+    ext = "." + filename.rsplit(".", 1)[-1] if "." in filename else ".txt"
+    if ext not in (".txt", ".csv", ".json"):
+        ext = ".txt"
+
+    try:
+        info = _store().save(kind, name, content, label=label, extension=ext)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    return DictionaryUploadResponse(
+        info=_info_response(info),
+        message=f"Saved {info.term_count} terms to {info.kind}/{info.filename}",
+    )
+
+
+@router.delete("/{kind}/{name}", status_code=204)
+def delete_dictionary(
+    kind: DictKind,
+    name: str,
+    label: Annotated[str | None, Query()] = None,
+) -> None:
+    """Delete a dictionary by kind and name."""
+    try:
+        _store().delete(kind, name, label=label)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc

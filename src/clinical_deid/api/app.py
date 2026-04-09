@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from clinical_deid.api.routers import audit, evaluation, models, pipelines, process
+from clinical_deid.api.routers import audit, dictionaries, evaluation, models, pipelines, process
 from clinical_deid.api.schemas import HealthResponse
 from clinical_deid.db import init_db
 
@@ -48,6 +48,7 @@ def create_app() -> FastAPI:
     application.include_router(audit.router)
     application.include_router(evaluation.router)
     application.include_router(models.router)
+    application.include_router(dictionaries.router)
 
     @application.get("/health", response_model=HealthResponse)
     def health() -> HealthResponse:
