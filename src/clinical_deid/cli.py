@@ -35,7 +35,6 @@ def _build_pipeline(
     profile: str,
     config_path: str | None,
     pipeline_name: str | None,
-    custom_lists_dir: str | None,
     redactor: str,
 ) -> tuple[Any, dict[str, Any], str]:
     """Return ``(pipe_chain, config_dict, resolved_pipeline_name)``."""
@@ -69,9 +68,7 @@ def _build_pipeline(
     else:
         from clinical_deid.profiles import get_profile_config
 
-        config = get_profile_config(
-            profile, custom_lists_dir=custom_lists_dir, redactor=redactor
-        )
+        config = get_profile_config(profile, redactor=redactor)
         resolved_name = f"profile:{profile}"
 
     try:
@@ -166,7 +163,6 @@ def main(verbose: bool) -> None:
     default="text",
     show_default=True,
 )
-@click.option("--custom-lists-dir", type=click.Path(exists=True), default=None)
 @click.argument("files", nargs=-1, type=click.Path(exists=True))
 def run(
     profile: str,
@@ -174,7 +170,6 @@ def run(
     pipeline_name: str | None,
     redactor: str,
     output_format: str,
-    custom_lists_dir: str | None,
     files: tuple[str, ...],
 ) -> None:
     """De-identify text from stdin or files.
@@ -187,7 +182,7 @@ def run(
       clinical-deid run --profile fast --redactor surrogate notes.txt
     """
     pipeline, config, resolved_name = _build_pipeline(
-        profile, config_path, pipeline_name, custom_lists_dir, redactor
+        profile, config_path, pipeline_name, redactor
     )
 
     texts: list[tuple[str, str]] = []
@@ -274,7 +269,6 @@ def run(
     show_default=True,
 )
 @click.option("--config", "config_path", type=click.Path(exists=True), default=None)
-@click.option("--custom-lists-dir", type=click.Path(exists=True), default=None)
 def batch(
     input_path: str,
     output_dir: str,
@@ -284,7 +278,6 @@ def batch(
     output_format: str,
     redactor: str,
     config_path: str | None,
-    custom_lists_dir: str | None,
 ) -> None:
     """Process a directory of .txt files or a JSONL file.
 
@@ -295,7 +288,7 @@ def batch(
       clinical-deid batch notes_dir/ -o output/ --pipeline my-pipeline
     """
     pipeline, config, resolved_name = _build_pipeline(
-        profile, config_path, pipeline_name, custom_lists_dir, redactor
+        profile, config_path, pipeline_name, redactor
     )
 
     # Load input documents
@@ -408,7 +401,6 @@ def batch(
     help="Name of a saved pipeline (overrides --profile and --config).",
 )
 @click.option("--config", "config_path", type=click.Path(exists=True), default=None)
-@click.option("--custom-lists-dir", type=click.Path(exists=True), default=None)
 @click.option(
     "--confidence-threshold",
     type=float,
@@ -428,7 +420,6 @@ def eval_cmd(
     profile: str,
     pipeline_name: str | None,
     config_path: str | None,
-    custom_lists_dir: str | None,
     confidence_threshold: float,
     redactor: str,
 ) -> None:
@@ -441,7 +432,6 @@ def eval_cmd(
     Examples:
       clinical-deid eval --corpus data.jsonl --profile fast
       clinical-deid eval --corpus data.jsonl --pipeline my-pipeline
-      clinical-deid eval --corpus data.jsonl --custom-lists-dir my_lists/
     """
     from clinical_deid.eval.risk import HIPAA_IDENTIFIER_NAMES, hipaa_coverage_report
     from clinical_deid.eval.runner import evaluate_pipeline
@@ -463,7 +453,7 @@ def eval_cmd(
     click.echo(f"Evaluating on {len(golds)} document(s)...", err=True)
 
     pipeline, config, resolved_name = _build_pipeline(
-        profile, config_path, pipeline_name, custom_lists_dir, redactor
+        profile, config_path, pipeline_name, redactor
     )
 
     t0 = time.perf_counter()

@@ -12,27 +12,19 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
-def _whitelist_config(custom_lists_dir: str | None) -> dict[str, Any]:
-    cfg: dict[str, Any] = {}
-    if custom_lists_dir:
-        cfg["builtin_terms_dir"] = custom_lists_dir
-    return cfg
-
-
-def fast_profile(*, custom_lists_dir: str | None = None) -> dict[str, Any]:
+def fast_profile() -> dict[str, Any]:
     """Regex + whitelist + blacklist + resolve.  ~10 ms, no ML."""
-    wl = _whitelist_config(custom_lists_dir)
     return {
         "pipes": [
             {"type": "regex_ner"},
-            {"type": "whitelist", "config": wl} if wl else {"type": "whitelist"},
+            {"type": "whitelist"},
             {"type": "blacklist"},
             {"type": "resolve_spans", "config": {"strategy": "longest_non_overlapping"}},
         ],
     }
 
 
-def balanced_profile(*, custom_lists_dir: str | None = None) -> dict[str, Any]:
+def balanced_profile() -> dict[str, Any]:
     """Regex + whitelist + presidio (if installed) + resolve.  Falls back to fast."""
     from clinical_deid.pipes.registry import registered_pipes
 
@@ -41,13 +33,12 @@ def balanced_profile(*, custom_lists_dir: str | None = None) -> dict[str, Any]:
             "presidio not installed — balanced profile falling back to fast "
             "(install with: pip install '.[presidio]')"
         )
-        return fast_profile(custom_lists_dir=custom_lists_dir)
+        return fast_profile()
 
-    wl = _whitelist_config(custom_lists_dir)
     return {
         "pipes": [
             {"type": "regex_ner"},
-            {"type": "whitelist", "config": wl} if wl else {"type": "whitelist"},
+            {"type": "whitelist"},
             {"type": "presidio_ner"},
             {"type": "blacklist"},
             {"type": "resolve_spans", "config": {"strategy": "longest_non_overlapping"}},
@@ -55,7 +46,7 @@ def balanced_profile(*, custom_lists_dir: str | None = None) -> dict[str, Any]:
     }
 
 
-def accurate_profile(*, custom_lists_dir: str | None = None) -> dict[str, Any]:
+def accurate_profile() -> dict[str, Any]:
     """Regex + whitelist + presidio + consistency propagation + span resolution.
 
     Highest quality: chains all detectors, propagates high-confidence
@@ -68,11 +59,10 @@ def accurate_profile(*, custom_lists_dir: str | None = None) -> dict[str, Any]:
             "accurate profile requires presidio — install with: pip install '.[presidio]'"
         )
 
-    wl = _whitelist_config(custom_lists_dir)
     return {
         "pipes": [
             {"type": "regex_ner"},
-            {"type": "whitelist", "config": wl} if wl else {"type": "whitelist"},
+            {"type": "whitelist"},
             {"type": "presidio_ner"},
             {"type": "blacklist"},
             {"type": "consistency_propagator", "config": {"min_confidence": 0.7}},
@@ -91,7 +81,6 @@ _PROFILE_BUILDERS = {
 def get_profile_config(
     name: str,
     *,
-    custom_lists_dir: str | None = None,
     redactor: str = "tag",
 ) -> dict[str, Any]:
     """Build a complete pipeline config dict for the named profile.
@@ -100,8 +89,6 @@ def get_profile_config(
     ----------
     name : str
         One of ``"fast"``, ``"balanced"``, ``"accurate"``.
-    custom_lists_dir : str | None
-        Optional directory of ``<LABEL>.txt`` whitelist files.
     redactor : str
         ``"tag"`` (default, ``[LABEL]`` replacement in CLI output layer) or
         ``"surrogate"`` (appends the surrogate pipe to the pipeline).
@@ -110,7 +97,7 @@ def get_profile_config(
     if builder is None:
         raise ValueError(f"Unknown profile {name!r}. Choose from: {sorted(_PROFILE_BUILDERS)}")
 
-    config = builder(custom_lists_dir=custom_lists_dir)
+    config = builder()
 
     if redactor == "surrogate":
         config["pipes"].append({"type": "surrogate"})
