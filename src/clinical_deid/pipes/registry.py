@@ -77,7 +77,7 @@ class PipeCatalogEntry:
 _CATALOG: list[PipeCatalogEntry] = [
     PipeCatalogEntry(
         name="regex_ner",
-        description="Regex-only PHI detection (pyDeid-style patterns per label)",
+        description="Regex-only PHI detection (built-in clinical patterns per label)",
         role="detector",
         extra=None,
         install_hint="Included by default",
@@ -126,7 +126,7 @@ _CATALOG: list[PipeCatalogEntry] = [
     PipeCatalogEntry(
         name="blacklist",
         description=(
-            "Remove spans matching a benign-term blacklist (pyDeid notes_common-style false-positive filter)"
+            "Remove spans matching a benign-term blacklist (false-positive filter)"
         ),
         role="span_transformer",
         extra=None,

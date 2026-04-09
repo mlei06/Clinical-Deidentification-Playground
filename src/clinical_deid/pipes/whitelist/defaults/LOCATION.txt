@@ -1,4 +1,0 @@
-# Sample place names for list-based matching (extend via UI uploads or per_label.terms)
-Toronto
-Vancouver
-Montreal

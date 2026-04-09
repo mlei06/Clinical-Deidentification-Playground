@@ -1,13 +1,8 @@
-"""Blacklist: drop spans that match a benign / safe-term vocabulary (false-positive filter).
-
-Uses the same idea as pyDeid ``notes_common.txt`` for suppressing name false positives.
-"""
+"""Blacklist: drop spans that match a benign / safe-term vocabulary (false-positive filter)."""
 
 from __future__ import annotations
 
 import re
-from functools import lru_cache
-from importlib import resources
 from pathlib import Path
 from typing import Literal
 
@@ -33,20 +28,34 @@ class BlacklistSpansConfig(BaseModel):
             ui_help="Benign words/phrases; matching policy depends on match mode.",
         ),
     )
-    include_builtin_notes_common: bool = Field(
-        default=True,
-        description="Include packaged ``blacklist/defaults/notes_common.txt`` (pyDeid-aligned).",
+    dictionaries: list[str] = Field(
+        default_factory=list,
+        description="Names of dictionaries in ``data/dictionaries/blacklist/`` to load.",
         json_schema_extra=field_ui(
             ui_group="Terms",
             ui_order=2,
+            ui_widget="multiselect",
+            ui_help="Dictionary names from the dictionaries store.",
+        ),
+    )
+    load_all_dictionaries: bool = Field(
+        default=True,
+        description=(
+            "Auto-discover and load all dictionaries from ``data/dictionaries/blacklist/``."
+            " Set to false to load only explicitly named dictionaries."
+        ),
+        json_schema_extra=field_ui(
+            ui_group="Terms",
+            ui_order=3,
             ui_widget="switch",
+            ui_help="Auto-load all blacklist dictionaries from the store.",
         ),
     )
     extra_wordlist_paths: list[str] = Field(
         default_factory=list,
         json_schema_extra=field_ui(
             ui_group="Terms",
-            ui_order=3,
+            ui_order=4,
             ui_widget="file_paths",
             ui_advanced=True,
         ),
@@ -96,17 +105,43 @@ class BlacklistSpansConfig(BaseModel):
     )
 
 
-@lru_cache
-def _builtin_notes_common_terms() -> frozenset[str]:
+def _get_dictionary_store():
+    """Lazy import to avoid circular deps and allow tests to override settings."""
+    from clinical_deid.config import get_settings
+    from clinical_deid.dictionary_store import DictionaryStore
+
+    return DictionaryStore(get_settings().dictionaries_dir)
+
+
+def _auto_discover_blacklist_terms() -> set[str]:
+    """Load all blacklist dictionaries from the store."""
     try:
-        root = resources.files("clinical_deid.pipes.blacklist.defaults")
-        p = root.joinpath("notes_common.txt")
-        if not p.is_file():
-            return frozenset()
-        text = p.read_text(encoding="utf-8")
-        return frozenset(t.upper() for t in parse_list_file(text, filename="notes_common.txt") if t)
-    except (OSError, ModuleNotFoundError, TypeError):
-        return frozenset()
+        store = _get_dictionary_store()
+        dicts = store.list_dictionaries(kind="blacklist")
+    except Exception:
+        return set()
+    terms: set[str] = set()
+    for d in dicts:
+        try:
+            for t in store.get_terms("blacklist", d.name):
+                u = t.strip().upper()
+                if u:
+                    terms.add(u)
+        except FileNotFoundError:
+            continue
+    return terms
+
+
+def _load_named_dictionaries(names: list[str]) -> set[str]:
+    """Load terms from explicitly named blacklist dictionaries."""
+    if not names:
+        return set()
+    try:
+        store = _get_dictionary_store()
+        terms = store.load_blacklist_terms(names)
+        return {t.strip().upper() for t in terms if t.strip()}
+    except Exception:
+        return set()
 
 
 def _load_path_terms(path: Path) -> set[str]:
@@ -120,8 +155,11 @@ def _build_blacklist_set(config: BlacklistSpansConfig) -> frozenset[str]:
         u = t.strip().upper()
         if u:
             s.add(u)
-    if config.include_builtin_notes_common:
-        s |= _builtin_notes_common_terms()
+    # Auto-discover or load named dictionaries
+    if config.load_all_dictionaries:
+        s |= _auto_discover_blacklist_terms()
+    else:
+        s |= _load_named_dictionaries(config.dictionaries)
     for raw in config.extra_wordlist_paths:
         p = Path(raw).expanduser()
         if p.is_file():

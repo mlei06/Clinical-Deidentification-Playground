@@ -1,4 +1,4 @@
-"""Whitelist: phrase / dictionary PHI detection (bundled defaults + custom term lists)."""
+"""Whitelist: phrase / dictionary PHI detection via inline terms and dictionary store."""
 
 from clinical_deid.pipes.whitelist.lists import (
     load_terms_from_path,
@@ -12,14 +12,12 @@ from clinical_deid.pipes.whitelist.pipe import (
     WhitelistConfig,
     WhitelistLabelConfig,
     WhitelistPipe,
-    bundled_whitelist_label_names,
 )
 
 __all__ = [
     "WhitelistConfig",
     "WhitelistLabelConfig",
     "WhitelistPipe",
-    "bundled_whitelist_label_names",
     "load_terms_from_path",
     "parse_list_csv",
     "parse_list_file",

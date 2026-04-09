@@ -1,11 +1,8 @@
-"""Whitelist: phrase / dictionary PHI detection (bundled ``defaults/<LABEL>.txt``)."""
+"""Whitelist: phrase / dictionary PHI detection via inline terms and dictionary store."""
 
 from __future__ import annotations
 
 import re
-from functools import lru_cache
-from importlib import resources
-from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -18,7 +15,7 @@ from clinical_deid.pipes.detector_label_mapping import (
     effective_detector_labels,
 )
 from clinical_deid.pipes.ui_schema import field_ui
-from clinical_deid.pipes.whitelist.lists import parse_list_file, term_to_list_pattern
+from clinical_deid.pipes.whitelist.lists import term_to_list_pattern
 
 
 class WhitelistLabelConfig(BaseModel):
@@ -33,13 +30,14 @@ class WhitelistLabelConfig(BaseModel):
             ui_help="Phrases to match as spans for this label.",
         ),
     )
-    include_builtin_terms: bool = Field(
-        default=True,
+    dictionaries: list[str] = Field(
+        default_factory=list,
+        description="Names of dictionaries in ``data/dictionaries/whitelist/<LABEL>/`` to load.",
         json_schema_extra=field_ui(
             ui_group="Phrases",
             ui_order=2,
-            ui_widget="switch",
-            ui_help="Include packaged defaults/<LABEL>.txt when present.",
+            ui_widget="multiselect",
+            ui_help="Dictionary names from the dictionaries store for this label.",
         ),
     )
 
@@ -75,24 +73,18 @@ class WhitelistConfig(BaseModel):
         ),
     )
 
-    include_builtin_term_files: bool = Field(
+    load_all_dictionaries: bool = Field(
         default=True,
+        description=(
+            "Auto-discover and load all dictionaries from ``data/dictionaries/whitelist/``."
+            " Each subdirectory becomes a label. Set to false to load only explicitly"
+            " named dictionaries via per_label."
+        ),
         json_schema_extra=field_ui(
-            ui_group="Builtin lists",
+            ui_group="Dictionaries",
             ui_order=3,
             ui_widget="switch",
-            ui_options_source="bundled_whitelist_labels",
-        ),
-    )
-    builtin_terms_dir: str | None = Field(
-        default=None,
-        json_schema_extra=field_ui(
-            ui_group="Builtin lists",
-            ui_order=4,
-            ui_widget="text",
-            ui_placeholder="/path/to/dir",
-            ui_help="Optional directory of <LABEL>.txt files (same format as packaged defaults).",
-            ui_advanced=True,
+            ui_help="Auto-load all whitelist dictionaries from the store.",
         ),
     )
 
@@ -110,69 +102,6 @@ class WhitelistConfig(BaseModel):
     )
 
 
-@lru_cache
-def _builtin_list_dir_files() -> dict[str, list[str]]:
-    out: dict[str, list[str]] = {}
-    try:
-        root = resources.files("clinical_deid.pipes.whitelist.defaults")
-    except ModuleNotFoundError:
-        return out
-    try:
-        if not root.is_dir():
-            return out
-        for p in root.iterdir():
-            if p.name.endswith(".txt"):
-                label = Path(p.name).stem.upper()
-                text = p.read_text(encoding="utf-8")
-                out[label] = parse_list_file(text, filename=p.name)
-    except (OSError, TypeError):
-        pass
-    return out
-
-
-def bundled_whitelist_label_names() -> list[str]:
-    """Labels with packaged ``defaults/<LABEL>.txt`` files."""
-    return sorted(_builtin_list_dir_files().keys())
-
-
-def _filesystem_builtin_lists(custom_dir: str | None) -> dict[str, list[str]]:
-    if not custom_dir:
-        return {}
-    root = Path(custom_dir).expanduser()
-    if not root.is_dir():
-        return {}
-    out: dict[str, list[str]] = {}
-    for path in sorted(root.glob("*.txt")):
-        label = path.stem.upper()
-        try:
-            out[label] = parse_list_file(path.read_text(encoding="utf-8"), filename=path.name)
-        except OSError:
-            continue
-    return out
-
-
-def _merged_builtin_terms(
-    include_bundled: bool,
-    include_fs: str | None,
-) -> dict[str, list[str]]:
-    merged: dict[str, list[str]] = {}
-    if include_bundled:
-        for label, terms in _builtin_list_dir_files().items():
-            merged.setdefault(label, []).extend(terms)
-    for label, terms in _filesystem_builtin_lists(include_fs).items():
-        merged.setdefault(label, []).extend(terms)
-    for label in list(merged.keys()):
-        seen: set[str] = set()
-        deduped: list[str] = []
-        for t in merged[label]:
-            key = t.casefold()
-            if key not in seen:
-                seen.add(key)
-                deduped.append(t)
-        merged[label] = deduped
-    return merged
-
-
 class _ResolvedList:
     __slots__ = ("label", "terms")
 
@@ -181,20 +110,66 @@ class _ResolvedList:
         self.terms = terms
 
 
-def _resolve_list_labels(config: WhitelistConfig) -> list[_ResolvedList]:
-    builtin_terms = _merged_builtin_terms(
-        config.include_builtin_term_files,
-        config.builtin_terms_dir,
-    )
+def _get_dictionary_store():
+    """Lazy import to avoid circular deps and allow tests to override settings."""
+    from clinical_deid.config import get_settings
+    from clinical_deid.dictionary_store import DictionaryStore
 
-    label_keys: set[str] = set(builtin_terms.keys()) | set(config.per_label.keys())
+    return DictionaryStore(get_settings().dictionaries_dir)
+
+
+def _auto_discover_whitelist_terms() -> dict[str, list[str]]:
+    """Load all whitelist dictionaries from the store, grouped by label."""
+    try:
+        store = _get_dictionary_store()
+        dicts = store.list_dictionaries(kind="whitelist")
+    except Exception:
+        return {}
+    terms_by_label: dict[str, list[str]] = {}
+    for d in dicts:
+        if d.label is None:
+            continue
+        try:
+            terms = store.get_terms("whitelist", d.name, label=d.label)
+            terms_by_label.setdefault(d.label, []).extend(terms)
+        except FileNotFoundError:
+            continue
+    return terms_by_label
+
+
+def _load_named_dictionaries(label: str, names: list[str]) -> list[str]:
+    """Load terms from explicitly named dictionaries for a label."""
+    if not names:
+        return []
+    try:
+        store = _get_dictionary_store()
+        return store.load_whitelist_terms(names, label)
+    except Exception:
+        return []
+
+
+def _resolve_list_labels(config: WhitelistConfig) -> list[_ResolvedList]:
+    # Auto-discover all dictionaries in the store
+    auto_terms: dict[str, list[str]] = {}
+    if config.load_all_dictionaries:
+        auto_terms = _auto_discover_whitelist_terms()
+
+    label_keys: set[str] = set(auto_terms.keys()) | set(config.per_label.keys())
 
     resolved: list[_ResolvedList] = []
     for label in sorted(label_keys):
         sub = config.per_label.get(label, WhitelistLabelConfig())
         terms: list[str] = []
-        if sub.include_builtin_terms and label in builtin_terms:
-            terms.extend(builtin_terms[label])
+
+        # Auto-discovered terms (from all dictionaries for this label)
+        if config.load_all_dictionaries and label in auto_terms:
+            terms.extend(auto_terms[label])
+
+        # Explicitly named dictionaries (even if load_all_dictionaries is off)
+        if not config.load_all_dictionaries:
+            terms.extend(_load_named_dictionaries(label, sub.dictionaries))
+
+        # Inline terms
         terms.extend(sub.terms)
 
         seen: set[str] = set()

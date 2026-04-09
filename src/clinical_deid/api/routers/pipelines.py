@@ -29,10 +29,10 @@ from clinical_deid.pipeline_store import (
     load_pipeline_config,
     save_pipeline_config,
 )
+from clinical_deid.dictionary_store import DictionaryStore
 from clinical_deid.pipes.regex_ner import builtin_regex_label_names
 from clinical_deid.pipes.registry import load_pipeline, pipe_availability, registered_pipes
 from clinical_deid.pipes.ui_schema import pipe_config_json_schema
-from clinical_deid.pipes.whitelist import bundled_whitelist_label_names
 from clinical_deid.pipes.whitelist.lists import parse_list_file
 
 router = APIRouter(prefix="/pipelines", tags=["pipelines"])
@@ -87,9 +87,12 @@ def list_pipe_types() -> list[PipeTypeInfo]:
 
 @router.get("/ner/builtins", response_model=NerBuiltinInfo)
 def ner_builtins() -> NerBuiltinInfo:
+    store = DictionaryStore(get_settings().dictionaries_dir)
+    wl_dicts = store.list_dictionaries(kind="whitelist")
+    whitelist_labels = sorted({d.label for d in wl_dicts if d.label})
     return NerBuiltinInfo(
         regex_labels=builtin_regex_label_names(),
-        whitelist_labels=bundled_whitelist_label_names(),
+        whitelist_labels=whitelist_labels,
     )
 
 

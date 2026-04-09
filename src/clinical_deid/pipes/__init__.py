@@ -48,7 +48,7 @@ from clinical_deid.pipes.registry import (
 )
 from clinical_deid.pipes.trace import PipelineRunResult, PipelineTraceFrame, snapshot_document
 from clinical_deid.pipes.span_merge import apply_resolve_spans
-from clinical_deid.pipes.whitelist import WhitelistConfig, WhitelistPipe, WhitelistLabelConfig, bundled_whitelist_label_names
+from clinical_deid.pipes.whitelist import WhitelistConfig, WhitelistPipe, WhitelistLabelConfig
 
 __all__ = [
     # Base
@@ -92,7 +92,6 @@ __all__ = [
     "WhitelistConfig",
     "WhitelistPipe",
     "builtin_regex_label_names",
-    "bundled_whitelist_label_names",
     # Registry / serialization
     "dump_pipeline",
     "dump_pipeline_json",
@@ -121,7 +120,7 @@ try:
 except ImportError:
     pass
 
-# Optional: pyDeid pipe — available when pyDeid is cloned into project root
+# Optional: pyDeid pipe — available when pyDeid is installed
 try:
     from clinical_deid.pipes.pydeid_ner import PyDeidNerConfig, PyDeidNerPipe
 
