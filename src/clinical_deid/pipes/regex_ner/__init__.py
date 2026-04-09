@@ -1,4 +1,4 @@
-"""Regex-only PHI detection (pyDeid-derived patterns per label)."""
+"""Regex-only PHI detection with built-in clinical patterns per label."""
 
 from clinical_deid.pipes.regex_ner.pipe import (
     BUILTIN_REGEX_PATTERNS,
