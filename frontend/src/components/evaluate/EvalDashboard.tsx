@@ -1,14 +1,32 @@
 import MetricsCards from './MetricsCards';
 import PerLabelTable from './PerLabelTable';
 import ConfusionMatrix from './ConfusionMatrix';
-import type { EvalRunDetail } from '../../api/types';
+import type { EvalRunDetail, LabelMetricsDetail, MatchMetrics } from '../../api/types';
 
 interface EvalDashboardProps {
   run: EvalRunDetail;
 }
 
 export default function EvalDashboard({ run }: EvalDashboardProps) {
-  const { metrics } = run;
+  const metrics = run.metrics ?? {};
+  const overall =
+    metrics.overall && typeof metrics.overall === 'object'
+      ? (metrics.overall as Record<string, MatchMetrics>)
+      : {};
+  const perLabel =
+    metrics.per_label && typeof metrics.per_label === 'object'
+      ? (metrics.per_label as Record<string, LabelMetricsDetail>)
+      : ({} as Record<string, LabelMetricsDetail>);
+  const riskWeightedRecall =
+    (typeof metrics.risk_weighted_recall === 'number'
+      ? metrics.risk_weighted_recall
+      : run.risk_weighted_recall) ?? 0;
+  const labelConfusion =
+    metrics.label_confusion && typeof metrics.label_confusion === 'object'
+      ? (metrics.label_confusion as Record<string, Record<string, number>>)
+      : undefined;
+
+  const hasOverallMetrics = Object.keys(overall).length > 0;
 
   return (
     <div className="flex flex-col gap-4">
@@ -27,15 +45,19 @@ export default function EvalDashboard({ run }: EvalDashboardProps) {
         </span>
       </div>
 
-      <MetricsCards
-        metrics={metrics.overall}
-        riskWeightedRecall={metrics.risk_weighted_recall}
-      />
+      {!hasOverallMetrics && (
+        <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+          No overall metrics in this run file (older or incomplete format). Summary scores may still
+          appear in the list view.
+        </div>
+      )}
 
-      <PerLabelTable perLabel={metrics.per_label} />
+      <MetricsCards metrics={overall} riskWeightedRecall={riskWeightedRecall} />
 
-      {metrics.label_confusion && Object.keys(metrics.label_confusion).length > 0 && (
-        <ConfusionMatrix confusion={metrics.label_confusion} />
+      <PerLabelTable perLabel={perLabel} />
+
+      {labelConfusion && Object.keys(labelConfusion).length > 0 && (
+        <ConfusionMatrix confusion={labelConfusion} />
       )}
     </div>
   );
