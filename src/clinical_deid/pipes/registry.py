@@ -161,16 +161,6 @@ _CATALOG: list[PipeCatalogEntry] = [
         pipe_path="clinical_deid.pipes.presidio_anonymizer.pipe:PresidioAnonymizerPipe",
     ),
     PipeCatalogEntry(
-        name="pydeid_ner",
-        description="Clinical PHI detection via pyDeid (names, dates, IDs, contacts, locations)",
-        role="detector",
-        extra="pydeid",
-        install_hint="pip install '.[pydeid]'",
-        config_path="clinical_deid.pipes.pydeid_ner.pipe:PyDeidNerConfig",
-        pipe_path="clinical_deid.pipes.pydeid_ner.pipe:PyDeidNerPipe",
-        default_base_labels_fn="clinical_deid.pipes.pydeid_ner.pipe:default_base_labels",
-    ),
-    PipeCatalogEntry(
         name="surrogate",
         description="Replace PHI with realistic fake data (Faker-based surrogate generation)",
         role="redactor",

@@ -120,14 +120,3 @@ try:
     ]
 except ImportError:
     pass
-
-# Optional: pyDeid pipe — available when pyDeid is installed
-try:
-    from clinical_deid.pipes.pydeid_ner import PyDeidNerConfig, PyDeidNerPipe
-
-    __all__ += [
-        "PyDeidNerConfig",
-        "PyDeidNerPipe",
-    ]
-except ImportError:
-    pass
