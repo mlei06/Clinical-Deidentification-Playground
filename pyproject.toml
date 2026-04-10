@@ -39,9 +39,6 @@ presidio = [
 ner = [
     "spacy>=3.5.0",
 ]
-pydeid = [
-    "pyDeid @ git+https://github.com/GEMINI-Medicine/pyDeid.git",
-]
 llm = [
     "httpx>=0.27.0",
 ]
@@ -50,7 +47,7 @@ parquet = [
 ]
 # Everything
 all = [
-    "clinical-deid-playground[dev,presidio,ner,pydeid,llm,parquet]",
+    "clinical-deid-playground[dev,presidio,ner,llm,parquet]",
 ]
 
 [project.scripts]
