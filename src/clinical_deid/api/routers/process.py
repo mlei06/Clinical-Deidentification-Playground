@@ -94,6 +94,24 @@ def _process_single(
         for s in result.spans
     ]
 
+    # Redactors like SurrogatePipe consume spans (offsets invalid in new
+    # text) but stash them in metadata so the UI can still annotate the
+    # original text.
+    if not span_responses:
+        pre = result.document.metadata.get("pre_redaction_spans")
+        if pre and isinstance(pre, list):
+            span_responses = [
+                PHISpanResponse(
+                    start=s["start"],
+                    end=s["end"],
+                    label=s["label"],
+                    text=text[s["start"] : s["end"]],
+                    confidence=s.get("confidence"),
+                    source=s.get("source"),
+                )
+                for s in pre
+            ]
+
     if result.document.text != text:
         redacted = result.document.text
     else:

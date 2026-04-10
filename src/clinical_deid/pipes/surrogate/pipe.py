@@ -2,15 +2,34 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from clinical_deid.domain import AnnotatedDocument, Document
 from clinical_deid.pipes.base import ConfigurablePipe
 from clinical_deid.pipes.ui_schema import field_ui
 
+SURROGATE_STRATEGIES: dict[str, list[str]] = {
+    "Name": ["NAME", "PATIENT", "PERSON", "STAFF", "HCW", "DOCTOR"],
+    "Date": ["DATE", "DATE_TIME"],
+    "Phone": ["PHONE", "PHONE_NUMBER", "FAX"],
+    "Email": ["EMAIL", "EMAIL_ADDRESS"],
+    "ID": ["ID", "MRN", "SSN", "SIN", "OHIP", "IDNUM"],
+    "Address": ["LOCATION", "ADDRESS", "LOCATION_OTHER"],
+    "Postal Code": ["POSTAL_CODE_CA"],
+    "Organization": ["HOSPITAL", "ORGANIZATION"],
+    "Age": ["AGE"],
+    "Country": ["COUNTRY"],
+    "State": ["STATE"],
+    "URL": ["URL"],
+}
+
 
 class SurrogateConfig(BaseModel):
     """Configuration for the surrogate replacement pipe."""
+
+    model_config = ConfigDict(
+        json_schema_extra={"ui_surrogate_strategies": SURROGATE_STRATEGIES},
+    )
 
     seed: int | None = Field(
         default=None,
@@ -57,11 +76,15 @@ class SurrogatePipe(ConfigurablePipe):
             replacement = gen.replace(span.label, original)
             result_text = result_text[: span.start] + replacement + result_text[span.end :]
 
+        metadata = {
+            **doc.document.metadata,
+            "pre_redaction_spans": [s.model_dump() for s in doc.spans],
+        }
         return AnnotatedDocument(
             document=Document(
                 id=doc.document.id,
                 text=result_text,
-                metadata=doc.document.metadata,
+                metadata=metadata,
             ),
-            spans=[],  # spans consumed — offsets no longer valid
+            spans=[],  # offsets no longer valid in redacted text
         )

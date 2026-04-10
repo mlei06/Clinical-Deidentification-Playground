@@ -6,6 +6,13 @@ import random
 
 from faker import Faker
 
+from clinical_deid.pipes.surrogate.pipe import SURROGATE_STRATEGIES
+
+_LABEL_TO_STRATEGY: dict[str, str] = {}
+for _strat, _labels in SURROGATE_STRATEGIES.items():
+    for _lbl in _labels:
+        _LABEL_TO_STRATEGY[_lbl] = _strat
+
 
 class SurrogateGenerator:
     """Generate consistent fake replacements within a document scope.
@@ -39,36 +46,35 @@ class SurrogateGenerator:
         self._map.clear()
 
     # ------------------------------------------------------------------
-    # Label dispatch
+    # Label dispatch — strategy names come from SURROGATE_STRATEGIES
     # ------------------------------------------------------------------
 
     def _generate(self, label: str, original_text: str) -> str:
-        up = label.upper()
-        if up in ("NAME", "PATIENT", "PERSON", "STAFF", "HCW", "DOCTOR"):
+        strategy = _LABEL_TO_STRATEGY.get(label.upper())
+        if strategy == "Name":
             return self._gen_name(original_text)
-        if up in ("DATE", "DATE_TIME"):
+        if strategy == "Date":
             return self._gen_date(original_text)
-        if up in ("PHONE", "PHONE_NUMBER", "FAX"):
+        if strategy == "Phone":
             return self._faker.phone_number()
-        if up in ("EMAIL", "EMAIL_ADDRESS"):
+        if strategy == "Email":
             return self._faker.email()
-        if up in ("ID", "MRN", "SSN", "SIN", "OHIP", "IDNUM"):
+        if strategy == "ID":
             return self._gen_id(original_text)
-        if up in ("LOCATION", "ADDRESS", "LOCATION_OTHER"):
+        if strategy == "Address":
             return self._faker.street_address()
-        if up in ("POSTAL_CODE_CA",):
+        if strategy == "Postal Code":
             return self._faker.postalcode()
-        if up in ("HOSPITAL", "ORGANIZATION"):
+        if strategy == "Organization":
             return self._faker.company()
-        if up in ("AGE",):
+        if strategy == "Age":
             return str(random.randint(20, 89))
-        if up in ("COUNTRY",):
+        if strategy == "Country":
             return self._faker.country()
-        if up in ("STATE",):
+        if strategy == "State":
             return self._faker.state()
-        if up in ("URL",):
+        if strategy == "URL":
             return self._faker.url()
-        # Fallback: same-length asterisks
         return "*" * len(original_text)
 
     def _gen_name(self, original: str) -> str:
