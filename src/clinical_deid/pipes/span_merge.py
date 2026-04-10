@@ -95,9 +95,13 @@ def merge_consensus(span_groups: list[list[PHISpan]], threshold: int) -> list[PH
 
 
 def merge_max_confidence(span_groups: list[list[PHISpan]]) -> list[PHISpan]:
-    """Greedily keep highest-confidence spans; skip any overlap with an already kept span."""
+    """Greedily keep highest-confidence spans; skip any overlap with an already kept span.
+
+    Spans with ``confidence=None`` are treated as 1.0 (fully confident),
+    since rule-based detectors produce deterministic matches.
+    """
     all_spans = [s for group in span_groups for s in group]
-    all_spans.sort(key=lambda s: (s.confidence or 0.0), reverse=True)
+    all_spans.sort(key=lambda s: (s.confidence if s.confidence is not None else 1.0), reverse=True)
 
     kept: list[PHISpan] = []
     for span in all_spans:

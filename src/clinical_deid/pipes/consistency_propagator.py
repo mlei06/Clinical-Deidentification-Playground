@@ -62,11 +62,12 @@ class ConsistencyPropagatorPipe(ConfigurablePipe):
         allowed_labels = set(cfg.labels) if cfg.labels else None
 
         # Collect high-confidence spans eligible for propagation.
-        # Spans with unknown confidence (None) are excluded — only spans that
-        # explicitly meet the threshold are used as seeds.
+        # Spans with confidence=None are treated as 1.0 (deterministic match),
+        # so rule-based detector spans are always eligible as seeds.
         seed_spans: list[PHISpan] = []
         for s in doc.spans:
-            if s.confidence is None or s.confidence < cfg.min_confidence:
+            effective = s.confidence if s.confidence is not None else 1.0
+            if effective < cfg.min_confidence:
                 continue
             if allowed_labels and s.label not in allowed_labels:
                 continue

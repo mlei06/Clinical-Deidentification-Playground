@@ -13,18 +13,14 @@ import json
 import logging
 import os
 import re
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
 from clinical_deid.domain import AnnotatedDocument, PHISpan
 from clinical_deid.pipes.base import ConfigurablePipe
-from clinical_deid.pipes.detector_label_mapping import (
-    accumulate_spans,
-    apply_detector_label_mapping,
-    detector_label_mapping_field,
-    effective_detector_labels,
-)
+from clinical_deid.pipes.detector_label_mapping import accumulate_spans
+from clinical_deid.pipes.ui_schema import field_ui
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +49,22 @@ Clinical text:
 ---
 """
 
+KnownLlmModel = Literal[
+    "gpt-4o",
+    "gpt-4o-mini",
+    "gpt-4-turbo",
+    "gpt-3.5-turbo",
+    "o3-mini",
+]
+
+_MODEL_DESCRIPTIONS: dict[str, str] = {
+    "gpt-4o": "GPT-4o — fast, high accuracy, good for production use.",
+    "gpt-4o-mini": "GPT-4o Mini — cheapest, good accuracy for structured extraction.",
+    "gpt-4-turbo": "GPT-4 Turbo — high accuracy, 128k context window.",
+    "gpt-3.5-turbo": "GPT-3.5 Turbo — fastest and cheapest, lower accuracy.",
+    "o3-mini": "o3-mini — reasoning model, high accuracy on complex cases.",
+}
+
 
 def default_base_labels() -> list[str]:
     """Default label space for the llm_ner detector."""
@@ -62,45 +74,104 @@ def default_base_labels() -> list[str]:
 class LlmNerConfig(BaseModel):
     """Configuration for LLM-based NER."""
 
-    model: str = Field(
+    model: KnownLlmModel = Field(
         default="gpt-4o-mini",
-        description="Model name for the LLM API.",
-    )
-    base_url: str | None = Field(
-        default=None,
-        description="Base URL for the OpenAI-compatible API. None uses settings default.",
-    )
-    api_key_env: str = Field(
-        default="OPENAI_API_KEY",
-        description="Environment variable name holding the API key (not the key itself).",
-    )
-    labels: list[str] = Field(
-        default_factory=lambda: list(_DEFAULT_LABELS),
-        description="Entity labels the LLM should detect.",
+        description="OpenAI model to use.",
+        json_schema_extra=field_ui(
+            ui_group="Model",
+            ui_order=1,
+            ui_widget="described_select",
+            ui_enum_descriptions=_MODEL_DESCRIPTIONS,
+        ),
     )
     temperature: float = Field(
         default=0.0,
         ge=0.0,
         le=2.0,
-        description="Sampling temperature for the LLM.",
+        description="Sampling temperature (0 = deterministic).",
+        json_schema_extra={
+            "multipleOf": 0.05,
+            **field_ui(
+                ui_group="Model",
+                ui_order=2,
+                ui_widget="slider",
+            ),
+        },
     )
-    prompt_template: str | None = Field(
-        default=None,
-        description="Custom prompt template with {text} and {labels} placeholders.",
+    labels: list[str] = Field(
+        default_factory=lambda: list(_DEFAULT_LABELS),
+        description="Entity labels injected into the prompt. The LLM will only detect these.",
+        json_schema_extra={
+            "default": list(_DEFAULT_LABELS),
+            **field_ui(
+                ui_group="Labels",
+                ui_order=1,
+                ui_widget="tag_list",
+            ),
+        },
     )
-    source_name: str = Field(
-        default="llm_ner",
-        description="Source tag for detected spans.",
+    prompt_template: str = Field(
+        default=_DEFAULT_PROMPT_TEMPLATE,
+        description="Prompt template sent to the LLM. Use {text} and {labels} placeholders.",
+        json_schema_extra={
+            "default": _DEFAULT_PROMPT_TEMPLATE,
+            **field_ui(
+                ui_group="Prompt",
+                ui_order=1,
+                ui_widget="textarea",
+                ui_rows=14,
+            ),
+        },
     )
     max_text_length: int = Field(
         default=30_000,
         description="Truncate input text beyond this length to avoid token limits.",
+        json_schema_extra=field_ui(
+            ui_group="Advanced",
+            ui_order=1,
+            ui_widget="number",
+            ui_advanced=True,
+        ),
     )
-    label_mapping: dict[str, str | None] = detector_label_mapping_field()
-
+    base_url: str | None = Field(
+        default=None,
+        description="Base URL for an OpenAI-compatible API. None uses the default.",
+        json_schema_extra=field_ui(
+            ui_group="Advanced",
+            ui_order=2,
+            ui_widget="text",
+            ui_advanced=True,
+        ),
+    )
+    api_key_env: str = Field(
+        default="OPENAI_API_KEY",
+        description="Environment variable name holding the API key.",
+        json_schema_extra=field_ui(
+            ui_group="Advanced",
+            ui_order=3,
+            ui_widget="text",
+            ui_advanced=True,
+        ),
+    )
+    source_name: str = Field(
+        default="llm_ner",
+        description="Source tag for detected spans.",
+        json_schema_extra=field_ui(
+            ui_group="Advanced",
+            ui_order=4,
+            ui_widget="text",
+            ui_advanced=True,
+        ),
+    )
     skip_overlapping: bool = Field(
         default=False,
         description="Drop new spans that overlap any existing span in the document.",
+        json_schema_extra=field_ui(
+            ui_group="Advanced",
+            ui_order=99,
+            ui_widget="switch",
+            ui_advanced=True,
+        ),
     )
 
 
@@ -162,12 +233,8 @@ class LlmNerPipe(ConfigurablePipe):
         return set(self._config.labels)
 
     @property
-    def label_mapping(self) -> dict[str, str | None]:
-        return dict(self._config.label_mapping)
-
-    @property
     def labels(self) -> set[str]:
-        return effective_detector_labels(self.base_labels, self._config.label_mapping)
+        return set(self._config.labels)
 
     def _get_client(self):
         from clinical_deid.synthesis.client import OpenAICompatibleChatClient
@@ -192,11 +259,8 @@ class LlmNerPipe(ConfigurablePipe):
         if not text.strip():
             return doc
 
-        # Truncate if too long — use the truncated length for prompt and
-        # validation so span offsets are always relative to the same string.
         llm_text = text
-        truncated = len(text) > self._config.max_text_length
-        if truncated:
+        if len(text) > self._config.max_text_length:
             llm_text = text[: self._config.max_text_length]
             logger.info(
                 "LLM NER: truncated text from %d to %d chars", len(text), len(llm_text)
@@ -234,5 +298,4 @@ class LlmNerPipe(ConfigurablePipe):
                 )
             )
 
-        spans = apply_detector_label_mapping(spans, self._config.label_mapping)
         return accumulate_spans(doc, spans, skip_overlapping=self._config.skip_overlapping)

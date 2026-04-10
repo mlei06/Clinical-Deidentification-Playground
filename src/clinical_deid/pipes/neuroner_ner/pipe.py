@@ -494,7 +494,7 @@ class NeuroNerPipe(ConfigurablePipe):
                         start=start,
                         end=end,
                         label=label,
-                        confidence=None,
+                        confidence=1.0,
                         source=self._config.source_name,
                     )
                 )

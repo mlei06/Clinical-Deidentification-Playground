@@ -22,25 +22,28 @@ from clinical_deid.pipes.base import ConfigurablePipe
 from clinical_deid.pipes.ui_schema import field_ui
 
 
+_OPERATOR_DESCRIPTIONS: dict[str, str] = {
+    "replace": "Replace entity text with a fixed value (default: the entity type tag).",
+    "redact": "Remove entity text entirely, leaving no trace in the output.",
+    "mask": "Mask entity text with a repeated character (e.g. ****).",
+    "hash": "Replace entity text with a cryptographic hash (SHA-256 or SHA-512).",
+    "encrypt": "Encrypt entity text with an AES key (reversible).",
+    "keep": "Leave entity text unchanged (useful for testing).",
+}
+
+
 class PresidioAnonymizerConfig(BaseModel):
-    """Configuration for the Presidio Anonymizer redactor pipe.
-
-    One operator is applied uniformly to every detected entity.
-
-    Supported operators and their extra fields:
-
-    - ``replace``:  ``new_value`` (str, default ``"<ENTITY_TYPE>"``).
-    - ``redact``:   no extra fields — removes entity text entirely.
-    - ``mask``:     ``masking_char`` (str, default ``"*"``),
-      ``chars_to_mask`` (int, default ``100``), ``from_end`` (bool, default ``false``).
-    - ``hash``:     ``hash_type`` (``"sha256"`` | ``"sha512"``, default ``"sha256"``).
-    - ``encrypt``:  ``key`` (str, 16/24/32 bytes).
-    - ``keep``:     no extra fields — leaves entity text unchanged.
-    """
+    """Configuration for the Presidio Anonymizer redactor pipe."""
 
     operator: Literal["replace", "redact", "mask", "hash", "encrypt", "keep"] = Field(
         default="replace",
-        json_schema_extra=field_ui(ui_group="Operator", ui_order=1, ui_widget="select"),
+        description="How to anonymize detected entities.",
+        json_schema_extra=field_ui(
+            ui_group="Operator",
+            ui_order=1,
+            ui_widget="described_select",
+            ui_enum_descriptions=_OPERATOR_DESCRIPTIONS,
+        ),
     )
 
     # replace
