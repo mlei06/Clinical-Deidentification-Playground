@@ -8,7 +8,7 @@ High-level flow:
 2. **Configure & compose** — Define pipes (detectors, span transforms, redactors) and merge strategies; persist named pipelines as JSON files in `pipelines/`.
 3. **Infer & audit** — Call `POST /process/{pipeline_name}` (or batch); responses include `request_id`, detected spans, redacted text, `processing_time_ms`, and `intermediary_trace` when the pipeline config enables step capture. All calls are logged to a unified SQLite audit trail.
 4. **Evaluate** — Run `clinical-deid eval --corpus data.jsonl` or `POST /eval/run` to compute strict, partial, token-level, and risk-weighted metrics against gold data.
-5. **Playground (planned)** — A web UI to try a chosen pipeline on pasted or uploaded text and evaluate pipelines with drag-and-drop gold files.
+5. **Playground UI** — A React (Vite + TypeScript) frontend for building pipelines visually, running inference with live span highlighting, evaluating against gold corpora, and managing whitelist/blacklist dictionaries.
 
 **Design priority:** keep **registering new pipes** as low-friction as possible — Pydantic config, `forward` implementation, and **`register()`**; optional catalog line and `ui_*` hints only when needed.
 
@@ -18,6 +18,7 @@ Architecture detail and roadmap: [DESIGN_PLAN.md](./DESIGN_PLAN.md) and [PROJECT
 
 | Path | Purpose |
 |------|---------|
+| `frontend/` | React (Vite + TypeScript) playground UI |
 | `pipelines/` | Named pipeline configs (JSON files, git-versioned) |
 | `evaluations/` | Eval result JSON files |
 | `models/` | Trained model artifacts (see [`models/README.md`](./models/README.md)) |
@@ -38,7 +39,7 @@ pip install -e ".[dev]"
 clinical-deid setup          # verify deps, download spaCy model, init DB
 ```
 
-Optional extras for specific pipes: `pip install -e ".[presidio]"`, `pip install -e ".[pydeid]"`, `pip install -e ".[llm]"`, etc. (see `pyproject.toml`).
+Optional extras for specific pipes: `pip install -e ".[presidio]"`, `pip install -e ".[ner]"`, `pip install -e ".[llm]"`, etc. (see `pyproject.toml`).
 
 ## CLI
 
@@ -67,6 +68,18 @@ clinical-deid serve --port 8000 --reload
 
 All commands support `--profile` (fast/balanced/accurate), `--pipeline` (saved pipeline by name), `--config` (custom JSON file), and `--redactor` (tag/surrogate).
 
+## Frontend (Playground UI)
+
+The frontend is a React + TypeScript app (Vite, Tailwind CSS) for visual pipeline building, inference testing, evaluation dashboards, and dictionary management.
+
+```bash
+cd frontend
+npm install
+npm run dev          # dev server on localhost:5173
+```
+
+The frontend expects the API at `localhost:8000` (run `clinical-deid serve` first).
+
 ## Run the API
 
 ```bash
@@ -83,6 +96,7 @@ Default SQLite database: `./var/dev.sqlite` (audit log only). Override with `CLI
 |------|--------|------|-------------|
 | Core | `GET` | `/health` | Liveness |
 | Pipelines | `GET` | `/pipelines/pipe-types` | Pipe catalog, install hints, JSON Schema for configs |
+| Pipelines | `POST` | `/pipelines/pipe-types/{name}/labels` | Compute label space for a detector given config |
 | Pipelines | `GET` | `/pipelines/ner/builtins` | Bundled regex / whitelist label names |
 | Pipelines | `POST` | `/pipelines/whitelist/parse-lists` | Parse uploaded list files for whitelist config |
 | Pipelines | `POST` | `/pipelines/blacklist/parse-wordlists` | Merge uploads into blacklist terms |
@@ -92,6 +106,12 @@ Default SQLite database: `./var/dev.sqlite` (audit log only). Override with `CLI
 | Pipelines | `PUT` | `/pipelines/{name}` | Update pipeline config |
 | Pipelines | `DELETE` | `/pipelines/{name}` | Delete pipeline |
 | Pipelines | `POST` | `/pipelines/{name}/validate` | Validate config without saving |
+| Dictionaries | `GET` | `/dictionaries` | List all uploaded dictionaries |
+| Dictionaries | `GET` | `/dictionaries/{kind}/{name}` | Dictionary metadata |
+| Dictionaries | `GET` | `/dictionaries/{kind}/{name}/preview` | Preview first N terms |
+| Dictionaries | `GET` | `/dictionaries/{kind}/{name}/terms` | Full term list |
+| Dictionaries | `POST` | `/dictionaries` | Upload a new dictionary file |
+| Dictionaries | `DELETE` | `/dictionaries/{kind}/{name}` | Delete a dictionary |
 | Process | `POST` | `/process/{pipeline_name}` | Run pipeline on text |
 | Process | `POST` | `/process/{pipeline_name}/batch` | Batch variant |
 | Eval | `POST` | `/eval/run` | Run evaluation against dataset |
@@ -107,22 +127,16 @@ Default SQLite database: `./var/dev.sqlite` (audit log only). Override with `CLI
 
 ## Example pipeline config
 
-Pipelines are JSON documents — sequential steps with optional `parallel` blocks and merge strategies:
+Pipelines are JSON documents — sequential steps with detectors feeding into span transformers:
 
 ```json
 {
   "pipes": [
-    {
-      "type": "parallel",
-      "strategy": "union",
-      "detectors": [
-        {"type": "regex_ner"},
-        {"type": "whitelist"},
-        {"type": "presidio_ner"}
-      ]
-    },
+    {"type": "regex_ner"},
+    {"type": "whitelist"},
+    {"type": "presidio_ner"},
     {"type": "blacklist"},
-    {"type": "span_resolver", "config": {"strategy": "highest_confidence", "merge_adjacent": true}}
+    {"type": "resolve_spans", "config": {"strategy": "longest_non_overlapping"}}
   ]
 }
 ```

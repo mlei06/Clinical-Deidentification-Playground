@@ -14,7 +14,7 @@ clinical-deid serve           # start API on localhost:8000
 pytest                        # run tests
 ```
 
-Optional extras: `.[presidio]`, `.[ner]`, `.[pydeid]`, `.[llm]`, `.[scripts]`, `.[parquet]`, `.[all]`.
+Optional extras: `.[presidio]`, `.[ner]`, `.[llm]`, `.[scripts]`, `.[parquet]`, `.[all]`.
 
 ## Architecture
 
@@ -52,20 +52,20 @@ Adding a new pipe is 3 steps:
 
 ### Pipeline composition
 
-Pipelines are JSON documents with sequential steps and optional parallel fan-out:
+Pipelines are JSON documents with sequential steps — detectors chained into span transformers:
 
 ```json
 {
   "pipes": [
-    {"type": "parallel", "strategy": "union", "detectors": [
-      {"type": "regex_ner"},
-      {"type": "presidio_ner"}
-    ]},
+    {"type": "regex_ner"},
+    {"type": "presidio_ner"},
     {"type": "blacklist"},
-    {"type": "span_resolver", "config": {"strategy": "highest_confidence"}}
+    {"type": "resolve_spans", "config": {"strategy": "longest_non_overlapping"}}
   ]
 }
 ```
+
+> **Note:** The older `"type": "parallel"` block syntax is deprecated. Chain detectors sequentially instead and use `resolve_spans` to handle overlaps.
 
 ### Three built-in profiles
 
@@ -76,25 +76,38 @@ Pipelines are JSON documents with sequential steps and optional parallel fan-out
 ## Key directories
 
 ```
+frontend/                # Vite + React + TypeScript playground UI
+  src/components/
+    create/              # Visual pipeline builder (drag-and-drop canvas)
+    inference/           # Text input, span highlighting, trace timeline
+    evaluate/            # Eval dashboard, metrics, confusion matrix, comparison
+    dictionaries/        # Dictionary upload / browse / manage
+    layout/              # Shell layout
+    shared/              # Reusable components (SpanHighlighter, LabelBadge, etc.)
+
 src/clinical_deid/
   domain.py              # Document, PHISpan, AnnotatedDocument
   pipes/                 # All pipe implementations + registry + combinators
     registry.py          # Central registry, JSON load/dump, pipe catalog
     base.py              # Pipe protocol definitions
-    combinators.py       # Pipeline, ParallelDetectors, ResolveSpans, LabelMapper
+    combinators.py       # Pipeline, ResolveSpans, LabelMapper, LabelFilter
+    span_merge.py        # Shared span merge / resolution strategies
+    trace.py             # Pipeline tracing (PipelineRunResult, PipelineTraceFrame)
+    ui_schema.py         # UI schema hints for frontend config forms
+    detector_label_mapping.py  # Configurable label mapping for detectors
     regex_ner/           # Regex-based detection
     whitelist/           # Dictionary/phrase matching
     blacklist/           # False-positive filtering
     presidio_ner/        # Presidio wrapper (optional)
     presidio_anonymizer/ # Presidio redaction (optional)
-    pydeid_ner/          # pyDeid wrapper (optional)
+    neuroner_ner/        # NeuroNER LSTM-CRF wrapper (Python 3.7 subprocess)
     llm_ner.py           # LLM-prompted detection (optional)
-    span_resolver.py     # Overlap resolution
+    span_resolver.py     # Overlap resolution (deprecated, use resolve_spans)
     consistency_propagator.py  # Document-level span propagation
     surrogate/           # Realistic fake data replacement (optional)
   api/
     app.py               # FastAPI application
-    routers/             # pipelines, process, evaluation, audit, models
+    routers/             # pipelines, process, evaluation, audit, models, dictionaries
     schemas.py           # Pydantic request/response models
   eval/
     matching.py          # 4 matching modes (strict, exact boundary, partial, token-level)
@@ -119,13 +132,23 @@ All pipeline routes use **name-based** paths (not UUIDs):
 | Method | Path | Description |
 |--------|------|-------------|
 | `GET` | `/health` | Liveness |
+| `GET` | `/pipelines/pipe-types` | Pipe catalog with JSON Schema |
+| `POST` | `/pipelines/pipe-types/{name}/labels` | Compute label space for a detector |
+| `GET` | `/pipelines/ner/builtins` | Bundled regex / whitelist label names |
+| `POST` | `/pipelines/whitelist/parse-lists` | Parse uploaded list files for whitelist config |
+| `POST` | `/pipelines/blacklist/parse-wordlists` | Merge uploads into blacklist terms |
 | `POST` | `/pipelines` | Create pipeline |
 | `GET` | `/pipelines` | List pipelines |
 | `GET` | `/pipelines/{name}` | Get pipeline config |
 | `PUT` | `/pipelines/{name}` | Update pipeline config |
 | `DELETE` | `/pipelines/{name}` | Delete pipeline |
 | `POST` | `/pipelines/{name}/validate` | Validate config |
-| `GET` | `/pipelines/pipe-types` | Pipe catalog with JSON Schema |
+| `GET` | `/dictionaries` | List uploaded dictionaries |
+| `GET` | `/dictionaries/{kind}/{name}` | Dictionary metadata |
+| `GET` | `/dictionaries/{kind}/{name}/preview` | Preview first N terms |
+| `GET` | `/dictionaries/{kind}/{name}/terms` | Full term list |
+| `POST` | `/dictionaries` | Upload a dictionary |
+| `DELETE` | `/dictionaries/{kind}/{name}` | Delete a dictionary |
 | `POST` | `/process/{pipeline_name}` | Run pipeline on text |
 | `POST` | `/process/{pipeline_name}/batch` | Batch process |
 | `POST` | `/eval/run` | Run evaluation |
@@ -136,6 +159,7 @@ All pipeline routes use **name-based** paths (not UUIDs):
 | `GET` | `/audit/logs/{id}` | Audit detail |
 | `GET` | `/audit/stats` | Aggregate stats |
 | `GET` | `/models` | List models |
+| `GET` | `/models/{framework}/{name}` | Model manifest details |
 | `POST` | `/models/refresh` | Re-scan models directory |
 
 ## CLI commands
@@ -160,25 +184,25 @@ Also computes: risk-weighted recall (HIPAA severity weights), per-label breakdow
 
 ## What's built
 
-- Full pipe system with 11 registered pipe types
-- Pipeline composition (sequential + parallel with 5 merge strategies)
+- Full pipe system with 13 cataloged pipe types (including 2 deprecated aliases)
+- Pipeline composition (sequential chaining with 7 span merge/resolution strategies)
 - CLI with all subcommands
-- FastAPI with all routes (pipelines, process, eval, audit, models)
+- FastAPI with all routes (pipelines, process, eval, audit, models, dictionaries)
+- **Playground UI** — Vite + React + TypeScript frontend with visual pipeline builder, inference view with span highlighting and trace timeline, eval dashboard with metrics/confusion matrix/comparison, and dictionary management
 - Multi-mode evaluation with HIPAA coverage
 - Filesystem-backed pipeline and eval storage
 - Unified audit trail (CLI + API write to same SQLite table)
 - Data ingestion (JSONL, BRAT, ASQ-PHI, MIMIC, PhysioNet)
 - LLM synthesis for generating training data
-- 25 test files
+- NeuroNER LSTM-CRF integration (Python 3.7 subprocess bridge)
+- 27 test files
 
 ## What's not built yet
 
-- **Playground UI** (htmx + Jinja2) — try pipelines on text, run eval with drag-and-drop uploads
 - **Audit/log viewer UI** — browse audit trail in browser
 - **Training data export** — AnnotatedDocument to spaCy DocBin / HuggingFace JSONL / CoNLL
 - **Training runner CLI** — wrapper for spaCy/HF training
 - **Custom NER pipe** — load trained models from `models/` by name
-- **Eval corpus upload** — multipart upload for browser-based eval
 - **Dataset HTTP API** — import/list/analytics via API (library + scripts exist)
 
 ## Conventions
