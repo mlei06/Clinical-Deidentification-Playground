@@ -11,6 +11,8 @@ Standard keys (all optional):
 - ``ui_placeholder`` / ``ui_help``: Short strings for inputs and tooltips.
 - ``ui_visible_when``: Conditional display, e.g.
   ``{"field": "operator", "equals": "mask"}``.
+- ``ui_allow_custom_labels``: When false (default for ``label_space`` / output mapping),
+  hide the “add custom label” row; true for regex_ner and whitelist label editors.
 - ``ui_options_source``: Token for dynamic enums (e.g. ``builtin_regex_labels``).
 
 These appear on each property in :func:`pipe_config_json_schema` output (alongside

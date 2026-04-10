@@ -8,7 +8,8 @@ import { useLabelSpace } from '../../../hooks/useLabelSpace';
  * Label-space-aware editor for ``label_mapping: dict[str, str | None]``.
  *
  * Shows every known label for the detector with a toggle (on/off) and an
- * optional remap text field.  Users can also add custom labels.
+ * optional remap text field.  Extra labels are only offered when the schema sets
+ * ``ui_allow_custom_labels: true`` (not used for output label mapping).
  *
  * Reads ``pipeType``, ``baseLabels``, and ``config`` from rjsf ``formContext``.
  */
@@ -31,8 +32,6 @@ export default function LabelSpaceField(props: FieldProps) {
   );
 
   const [newLabel, setNewLabel] = useState('');
-
-  const isBaseLabel = (label: string) => allLabels.includes(label);
 
   const isEnabled = (label: string) => mapping[label] !== null;
 
@@ -89,6 +88,9 @@ export default function LabelSpaceField(props: FieldProps) {
     (schema as Record<string, unknown>).title as string | undefined;
   const help =
     (schema as Record<string, unknown>).ui_help as string | undefined;
+
+  /** Only regex_ner / whitelist-style label editors need this; label *mapping* does not. */
+  const allowCustom = schemaAny.ui_allow_custom_labels === true;
 
   const customLabels = Object.keys(mapping).filter(
     (k) => !allLabels.includes(k),
@@ -196,27 +198,29 @@ export default function LabelSpaceField(props: FieldProps) {
       )}
 
       {/* Add custom label */}
-      <div className="flex items-center gap-1.5">
-        <input
-          className="flex-1 rounded border border-gray-300 px-2 py-1 text-xs"
-          value={newLabel}
-          onChange={(e) => setNewLabel(e.target.value)}
-          placeholder="Add custom label..."
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') {
-              e.preventDefault();
-              addCustomLabel();
-            }
-          }}
-        />
-        <button
-          type="button"
-          onClick={addCustomLabel}
-          className="rounded p-1 text-gray-500 hover:bg-blue-50 hover:text-blue-600"
-        >
-          <Plus size={14} />
-        </button>
-      </div>
+      {allowCustom && (
+        <div className="flex items-center gap-1.5">
+          <input
+            className="flex-1 rounded border border-gray-300 px-2 py-1 text-xs"
+            value={newLabel}
+            onChange={(e) => setNewLabel(e.target.value)}
+            placeholder="Add custom label..."
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                addCustomLabel();
+              }
+            }}
+          />
+          <button
+            type="button"
+            onClick={addCustomLabel}
+            className="rounded p-1 text-gray-500 hover:bg-blue-50 hover:text-blue-600"
+          >
+            <Plus size={14} />
+          </button>
+        </div>
+      )}
 
       {help && <p className="text-xs text-gray-400">{help}</p>}
     </div>

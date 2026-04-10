@@ -23,6 +23,7 @@ def detector_label_mapping_field(**ui: Any) -> Any:
         json_schema_extra=field_ui(
             ui_group="Output labels",
             ui_widget="label_space",
+            ui_allow_custom_labels=False,
             **ui,
         ),
     )

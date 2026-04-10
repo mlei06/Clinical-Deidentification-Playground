@@ -41,6 +41,7 @@ export default function UnifiedLabelField(props: FieldProps) {
   const builtinPatterns: Record<string, string> =
     (schemaAny.ui_builtin_patterns as Record<string, string>) || {};
   const config: Record<string, unknown> = formContext?.config ?? {};
+  const allowCustomLabels = schemaAny.ui_allow_custom_labels !== false;
 
   const { labels: allLabels, isLoading } = useLabelSpace(
     pipeType,
@@ -293,28 +294,29 @@ export default function UnifiedLabelField(props: FieldProps) {
         <p className="text-xs text-gray-400">No labels available.</p>
       )}
 
-      {/* Add custom label */}
-      <div className="flex items-center gap-1.5">
-        <input
-          className="flex-1 rounded border border-gray-300 px-2 py-1 text-xs"
-          value={newLabel}
-          onChange={(e) => setNewLabel(e.target.value)}
-          placeholder="Add custom label…"
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') {
-              e.preventDefault();
-              addCustomLabel();
-            }
-          }}
-        />
-        <button
-          type="button"
-          onClick={addCustomLabel}
-          className="rounded p-1 text-gray-500 hover:bg-blue-50 hover:text-blue-600"
-        >
-          <Plus size={14} />
-        </button>
-      </div>
+      {allowCustomLabels && (
+        <div className="flex items-center gap-1.5">
+          <input
+            className="flex-1 rounded border border-gray-300 px-2 py-1 text-xs"
+            value={newLabel}
+            onChange={(e) => setNewLabel(e.target.value)}
+            placeholder="Add custom label…"
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                addCustomLabel();
+              }
+            }}
+          />
+          <button
+            type="button"
+            onClick={addCustomLabel}
+            className="rounded p-1 text-gray-500 hover:bg-blue-50 hover:text-blue-600"
+          >
+            <Plus size={14} />
+          </button>
+        </div>
+      )}
     </div>
   );
 }

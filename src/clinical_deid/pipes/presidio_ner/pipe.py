@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -55,6 +55,28 @@ DEFAULT_MODEL_TO_PRESIDIO: dict[str, str] = {
 }
 
 SUPPORTED_MODEL_FAMILIES = ("spacy", "stanza", "huggingface", "flair")
+
+KNOWN_MODELS = Literal[
+    "spacy/en_core_web_sm",
+    "spacy/en_core_web_md",
+    "spacy/en_core_web_lg",
+    "spacy/en_core_web_trf",
+    "huggingface/obi/deid_roberta_i2b2",
+    "huggingface/StanfordAIMI/stanford-deidentifier-base",
+    "stanza/en",
+    "flair/ner-english-large",
+]
+
+_MODEL_DESCRIPTIONS: dict[str, str] = {
+    "spacy/en_core_web_sm": "spaCy small — fast, lower accuracy. Good for prototyping.",
+    "spacy/en_core_web_md": "spaCy medium — balanced speed and accuracy.",
+    "spacy/en_core_web_lg": "spaCy large — good general-purpose NER.",
+    "spacy/en_core_web_trf": "spaCy transformer — highest accuracy, slower (requires GPU for speed).",
+    "huggingface/obi/deid_roberta_i2b2": "RoBERTa fine-tuned on i2b2 clinical de-identification data.",
+    "huggingface/StanfordAIMI/stanford-deidentifier-base": "Stanford AIMI clinical de-identifier (BERT-based).",
+    "stanza/en": "Stanza English — Stanford NLP pipeline with BiLSTM NER.",
+    "flair/ner-english-large": "Flair large NER — high accuracy, stacked embeddings.",
+}
 
 
 def default_base_labels() -> list[str]:
@@ -170,29 +192,28 @@ def _build_analyzer(
 
 
 class PresidioNerConfig(BaseModel):
-    """Configuration for the Presidio-based NER pipe.
-
-    ``model`` accepts a ``'family/model_path'`` string, mirroring the convention
-    used in *neuroner-cspmc*.  Examples::
-
-        "spacy/en_core_web_lg"
-        "HuggingFace/obi/deid_roberta_i2b2"
-        "HuggingFace/StanfordAIMI/stanford-deidentifier-base"
-        "stanza/en"
-        "flair/ner-english-large"
-    """
+    """Configuration for the Presidio-based NER pipe."""
 
     model_config = ConfigDict(protected_namespaces=())
 
-    model: str = Field(
+    model: KNOWN_MODELS = Field(
         default="spacy/en_core_web_lg",
-        description="NLP model in ``'family/model_path'`` format.",
+        description="NLP model to use for NER.",
         json_schema_extra=field_ui(
             ui_group="Model",
             ui_order=1,
-            ui_widget="text",
-            ui_placeholder="spacy/en_core_web_lg",
-            ui_help="Prefix with spacy/, huggingface/, stanza/, or flair/ when needed.",
+            ui_widget="described_select",
+            ui_enum_descriptions=_MODEL_DESCRIPTIONS,
+        ),
+    )
+
+    score_threshold: float = Field(
+        default=0.35,
+        description="Minimum Presidio score to keep a result.",
+        json_schema_extra=field_ui(
+            ui_group="Model",
+            ui_order=2,
+            ui_widget="slider",
         ),
     )
 
@@ -200,8 +221,8 @@ class PresidioNerConfig(BaseModel):
         default=None,
         description="Presidio entity types to detect. ``None`` means all supported entities.",
         json_schema_extra=field_ui(
-            ui_group="Model",
-            ui_order=2,
+            ui_group="Advanced",
+            ui_order=1,
             ui_widget="multiselect",
             ui_advanced=True,
         ),
@@ -209,16 +230,11 @@ class PresidioNerConfig(BaseModel):
 
     language: str = Field(
         default="en",
-        json_schema_extra=field_ui(ui_group="Model", ui_order=3, ui_widget="text"),
-    )
-
-    score_threshold: float = Field(
-        default=0.35,
-        description="Minimum Presidio score to keep a result.",
         json_schema_extra=field_ui(
-            ui_group="Thresholds",
-            ui_order=1,
-            ui_widget="slider",
+            ui_group="Advanced",
+            ui_order=2,
+            ui_widget="text",
+            ui_advanced=True,
         ),
     )
 
@@ -226,8 +242,8 @@ class PresidioNerConfig(BaseModel):
         default=None,
         description="Override the NER label → Presidio entity mapping. ``None`` uses the default.",
         json_schema_extra=field_ui(
-            ui_group="Entities & mapping",
-            ui_order=1,
+            ui_group="Advanced",
+            ui_order=3,
             ui_widget="key_value",
             ui_advanced=True,
         ),
@@ -239,16 +255,18 @@ class PresidioNerConfig(BaseModel):
             "Map Presidio entity names to project PHI labels. Unmapped entities pass through as-is."
         ),
         json_schema_extra=field_ui(
-            ui_group="Entities & mapping",
-            ui_order=2,
+            ui_group="Advanced",
+            ui_order=4,
             ui_widget="key_value",
+            ui_advanced=True,
         ),
     )
 
     source_name: str = Field(
         default="presidio_ner",
         json_schema_extra=field_ui(
-            ui_group="General",
+            ui_group="Advanced",
+            ui_order=5,
             ui_widget="text",
             ui_advanced=True,
         ),
@@ -260,7 +278,7 @@ class PresidioNerConfig(BaseModel):
         default=False,
         description="Drop new spans that overlap any existing span in the document.",
         json_schema_extra=field_ui(
-            ui_group="General",
+            ui_group="Advanced",
             ui_order=99,
             ui_widget="switch",
             ui_advanced=True,

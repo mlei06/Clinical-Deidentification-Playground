@@ -64,6 +64,7 @@ class WhitelistConfig(BaseModel):
             ui_group="Labels",
             ui_order=2,
             ui_widget="whitelist_label",
+            ui_allow_custom_labels=True,
         ),
     )
 
@@ -254,7 +255,7 @@ class WhitelistPipe(ConfigurablePipe):
                             start=m.start(),
                             end=m.end(),
                             label=label,
-                            confidence=None,
+                            confidence=1.0,
                             source=self._config.source_name,
                         )
                     )

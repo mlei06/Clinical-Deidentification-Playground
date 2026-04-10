@@ -210,6 +210,7 @@ class RegexNerConfig(BaseModel):
             ui_group="Labels",
             ui_order=2,
             ui_widget="unified_label",
+            ui_allow_custom_labels=True,
         ),
     )
 
@@ -300,7 +301,7 @@ class RegexNerPipe(ConfigurablePipe):
                             start=m.start(),
                             end=m.end(),
                             label=r.label,
-                            confidence=None,
+                            confidence=1.0,
                             source=self._config.source_name,
                         )
                     )

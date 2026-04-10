@@ -91,6 +91,7 @@ export default function LabelRegexField(props: FieldProps) {
 
   const title = schemaAny.title as string | undefined;
   const description = schema.description as string | undefined;
+  const allowCustomLabels = schemaAny.ui_allow_custom_labels === true;
 
   const customLabels = [
     ...Object.keys(patterns).filter((k) => !allLabels.includes(k)),
@@ -197,27 +198,29 @@ export default function LabelRegexField(props: FieldProps) {
         <p className="text-xs text-gray-400">No labels available.</p>
       )}
 
-      <div className="flex items-center gap-1.5">
-        <input
-          className="flex-1 rounded border border-gray-300 px-2 py-1 text-xs"
-          value={newLabel}
-          onChange={(e) => setNewLabel(e.target.value)}
-          placeholder="Add pattern for new label…"
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') {
-              e.preventDefault();
-              addCustomLabel();
-            }
-          }}
-        />
-        <button
-          type="button"
-          onClick={addCustomLabel}
-          className="rounded p-1 text-gray-500 hover:bg-blue-50 hover:text-blue-600"
-        >
-          <Plus size={14} />
-        </button>
-      </div>
+      {allowCustomLabels && (
+        <div className="flex items-center gap-1.5">
+          <input
+            className="flex-1 rounded border border-gray-300 px-2 py-1 text-xs"
+            value={newLabel}
+            onChange={(e) => setNewLabel(e.target.value)}
+            placeholder="Add pattern for new label…"
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                addCustomLabel();
+              }
+            }}
+          />
+          <button
+            type="button"
+            onClick={addCustomLabel}
+            className="rounded p-1 text-gray-500 hover:bg-blue-50 hover:text-blue-600"
+          >
+            <Plus size={14} />
+          </button>
+        </div>
+      )}
     </div>
   );
 }

@@ -1,8 +1,46 @@
 import { useMemo } from 'react';
-import { X, Trash2 } from 'lucide-react';
+import { X, Trash2, Info } from 'lucide-react';
 import { usePipelineEditorStore } from '../../stores/pipelineEditorStore';
+import { labelColor } from '../../lib/labelColors';
 import SchemaForm from './SchemaForm';
 import type { SchemaFormContext } from './SchemaForm';
+
+function SurrogateStrategies({ strategies }: { strategies: Record<string, string[]> }) {
+  return (
+    <div className="mt-4 rounded-lg border border-gray-150 bg-gray-50/50 p-3">
+      <div className="mb-2.5 flex items-center gap-1.5 text-xs font-semibold text-gray-700">
+        <Info size={12} className="text-gray-400" />
+        Supported Labels
+      </div>
+      <div className="space-y-2">
+        {Object.entries(strategies).map(([strategy, labels]) => (
+          <div key={strategy}>
+            <div className="mb-1 text-[10px] font-medium uppercase tracking-wide text-gray-400">
+              {strategy}
+            </div>
+            <div className="flex flex-wrap gap-1">
+              {labels.map((lbl) => {
+                const c = labelColor(lbl);
+                return (
+                  <span
+                    key={lbl}
+                    className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium leading-tight"
+                    style={{ backgroundColor: c.bg, color: c.text }}
+                  >
+                    {lbl}
+                  </span>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="mt-2.5 text-[10px] italic text-gray-400">
+        Unrecognized labels fall back to *** masking
+      </div>
+    </div>
+  );
+}
 
 export default function PipeConfigPanel() {
   const { nodes, selectedNodeId, updatePipeConfig, removePipe, selectNode } =
@@ -23,6 +61,14 @@ export default function PipeConfigPanel() {
     }),
     [data?.pipeType, data?.baseLabels, data?.config],
   );
+
+  const surrogateStrategies = useMemo(() => {
+    const raw = (data?.configSchema as Record<string, unknown>)?.ui_surrogate_strategies;
+    if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+      return raw as Record<string, string[]>;
+    }
+    return null;
+  }, [data?.configSchema]);
 
   if (!node || !data) return null;
 
@@ -49,7 +95,7 @@ export default function PipeConfigPanel() {
         </div>
       )}
 
-      {/* Config form */}
+      {/* Config form + strategies */}
       <div className="flex-1 overflow-y-auto p-4">
         {data.configSchema ? (
           <SchemaForm
@@ -60,6 +106,10 @@ export default function PipeConfigPanel() {
           />
         ) : (
           <div className="text-xs text-gray-400">No configuration options</div>
+        )}
+
+        {surrogateStrategies && (
+          <SurrogateStrategies strategies={surrogateStrategies} />
         )}
       </div>
 

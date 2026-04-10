@@ -69,9 +69,29 @@ function unwrapNullable(prop: any): any {
   return prop;
 }
 
-export function schemaToUiSchema(jsonSchema: Record<string, any>): UiSchema {
+/**
+ * Check whether a ``ui_visible_when`` condition is satisfied by the
+ * current form data.  Supports ``equals`` (single value or array of
+ * accepted values).
+ */
+function isConditionMet(
+  condition: { field: string; equals: string | string[] },
+  formData: Record<string, unknown>,
+): boolean {
+  const current = formData[condition.field];
+  if (Array.isArray(condition.equals)) {
+    return condition.equals.includes(current as string);
+  }
+  return current === condition.equals;
+}
+
+export function schemaToUiSchema(
+  jsonSchema: Record<string, any>,
+  formData?: Record<string, unknown>,
+): UiSchema {
   const uiSchema: UiSchema = {};
   const properties = jsonSchema.properties ?? {};
+  const data = formData ?? {};
 
   const ordered: [string, number][] = [];
 
@@ -83,6 +103,16 @@ export function schemaToUiSchema(jsonSchema: Record<string, any>): UiSchema {
       uiSchema[field] = ui;
       ordered.push([field, schema.ui_order ?? 999]);
       continue;
+    }
+
+    // Conditional visibility: hide when the controlling field doesn't match
+    if (schema.ui_visible_when) {
+      if (!isConditionMet(schema.ui_visible_when, data)) {
+        ui['ui:widget'] = 'hidden';
+        uiSchema[field] = ui;
+        ordered.push([field, schema.ui_order ?? 999]);
+        continue;
+      }
     }
 
     if (schema.ui_widget) {
@@ -97,6 +127,9 @@ export function schemaToUiSchema(jsonSchema: Record<string, any>): UiSchema {
 
     if (schema.ui_help) ui['ui:help'] = schema.ui_help;
     if (schema.ui_placeholder) ui['ui:placeholder'] = schema.ui_placeholder;
+    if (schema.ui_rows) {
+      ui['ui:options'] = { ...(ui['ui:options'] as Record<string, unknown> ?? {}), rows: schema.ui_rows };
+    }
 
     if (Object.keys(ui).length > 0) {
       uiSchema[field] = ui;
