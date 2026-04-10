@@ -82,6 +82,23 @@ class BatchProcessResponse(BaseModel):
     total_processing_time_ms: float
 
 
+class SaveInferenceSnapshotRequest(ProcessResponse):
+    """Same shape as :class:`ProcessResponse`; persisted under ``inference_runs/``."""
+
+
+class SavedInferenceRunSummary(BaseModel):
+    id: str
+    pipeline_name: str
+    saved_at: str
+    text_preview: str
+    span_count: int
+
+
+class SavedInferenceRunDetail(SaveInferenceSnapshotRequest):
+    id: str
+    saved_at: str
+
+
 # ---------------------------------------------------------------------------
 # Pipe catalog
 # ---------------------------------------------------------------------------

@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./var/dev.sqlite"
     pipelines_dir: Path = Path("pipelines")
     evaluations_dir: Path = Path("evaluations")
+    inference_runs_dir: Path = Path("inference_runs")
     models_dir: Path = Path("models")
     dictionaries_dir: Path = Path("data/dictionaries")
     cors_origins: list[str] = Field(

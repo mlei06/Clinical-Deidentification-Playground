@@ -40,6 +40,19 @@ export interface ProcessResponse {
   intermediary_trace: TraceFrame[] | null;
 }
 
+export interface SavedInferenceRunSummary {
+  id: string;
+  pipeline_name: string;
+  saved_at: string;
+  text_preview: string;
+  span_count: number;
+}
+
+export interface SavedInferenceRunDetail extends ProcessResponse {
+  id: string;
+  saved_at: string;
+}
+
 // Pipelines
 export interface PipeStep {
   type: string;

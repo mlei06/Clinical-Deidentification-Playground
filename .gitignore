@@ -27,6 +27,9 @@ data/synthetic/*
 !data/synthetic/.gitkeep
 data/evaluations/*
 !data/evaluations/.gitkeep
+# Saved inference snapshots (JSON); keep directory
+inference_runs/*
+!inference_runs/.gitkeep
 # Model directory — keep layout, ignore model files
 models/spacy/*
 !models/spacy/.gitkeep
