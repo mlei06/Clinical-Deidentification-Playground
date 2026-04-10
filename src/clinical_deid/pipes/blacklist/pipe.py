@@ -7,7 +7,7 @@ import re
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from clinical_deid.domain import AnnotatedDocument, PHISpan
 from clinical_deid.pipes.base import ConfigurablePipe
@@ -43,23 +43,44 @@ class BlacklistSpansConfig(BaseModel):
     match: Literal[
         "any_token",
         "whole_span",
-        "exact_span",
         "substring",
         "overlap_document",
     ] = Field(
         default="any_token",
-        description=(
-            "any_token: remove if any word in the span is in the blacklist. "
-            "whole_span / exact_span: remove only if the entire span text matches. "
-            "substring: remove if any blacklist term appears within the span. "
-            "overlap_document: scan full document and remove spans overlapping blacklist regions."
-        ),
+        description="How span text is compared against the blacklist.",
         json_schema_extra=field_ui(
             ui_group="Matching",
             ui_order=2,
-            ui_widget="select",
+            ui_widget="described_select",
+            ui_enum_descriptions={
+                "any_token": (
+                    "Drop the span if any single word token in it "
+                    "matches a blacklist term."
+                ),
+                "whole_span": (
+                    "Drop only if the full span text (whitespace-normalized) "
+                    "matches a blacklist entry exactly."
+                ),
+                "substring": (
+                    "Drop if any blacklist term appears as a substring "
+                    "within the span text."
+                ),
+                "overlap_document": (
+                    "Scan the full document for blacklist regions "
+                    "(literal terms + regex patterns) and drop any span "
+                    "that overlaps a matched region."
+                ),
+            },
         ),
     )
+
+    @field_validator("match", mode="before")
+    @classmethod
+    def _migrate_exact_span(cls, v: str) -> str:
+        """exact_span was identical to whole_span; accept it for backward compat."""
+        if v == "exact_span":
+            return "whole_span"
+        return v
 
     apply_to_labels: list[str] | None = Field(
         default=None,
@@ -319,7 +340,7 @@ class BlacklistSpans(ConfigurablePipe):
         if not self._blacklist:
             return False
         snippet = text[start:end]
-        if mode in ("whole_span", "exact_span"):
+        if mode == "whole_span":
             key = " ".join(snippet.split()).upper()
             return key in self._blacklist
         if mode == "substring":

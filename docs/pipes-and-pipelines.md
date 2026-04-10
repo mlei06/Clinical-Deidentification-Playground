@@ -194,10 +194,9 @@ Removes detected spans that match benign vocabulary (common words, medical terms
 | Mode | Behaviour |
 |------|-----------|
 | `any_token` | Remove span if any whitespace-delimited token matches a term |
-| `whole_span` | Remove span only if the entire text matches a term |
-| `exact_span` | Case-sensitive whole-span match |
+| `whole_span` | Remove span only if the entire text (whitespace-normalized) matches a term |
 | `substring` | Remove span if any term appears as a substring |
-| `overlap_document` | Remove spans overlapping regex matches in the full document text |
+| `overlap_document` | Remove spans overlapping blacklist regions (literal terms + regex patterns) in the full document text |
 
 Ships with a bundled `notes_common.txt` blacklist. Per-label filtering is also supported:
 

@@ -58,14 +58,14 @@ def test_blacklist_apply_to_labels_skips_other_labels() -> None:
     assert out[0].label == "OTHER"
 
 
-def test_exact_span_drops_only_full_match() -> None:
+def test_whole_span_drops_only_full_match() -> None:
     text = "PATIENTFOO"
     spans = [PHISpan(start=0, end=10, label="X")]
     pipe = BlacklistSpans(
         BlacklistSpansConfig(
             terms=["PATIENT"],
             load_all_dictionaries=False,
-            match="exact_span",
+            match="whole_span",
         )
     )
     assert len(pipe.forward(_doc(text, spans)).spans) == 1
@@ -73,6 +73,16 @@ def test_exact_span_drops_only_full_match() -> None:
     text2 = "PATIENT"
     spans2 = [PHISpan(start=0, end=7, label="X")]
     assert len(pipe.forward(_doc(text2, spans2)).spans) == 0
+
+
+def test_exact_span_migrates_to_whole_span() -> None:
+    """exact_span was redundant; the validator silently migrates it."""
+    cfg = BlacklistSpansConfig(
+        terms=["PATIENT"],
+        load_all_dictionaries=False,
+        match="exact_span",
+    )
+    assert cfg.match == "whole_span"
 
 
 def test_overlap_document_regex_only_regions() -> None:
