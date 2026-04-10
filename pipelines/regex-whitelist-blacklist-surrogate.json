@@ -1,0 +1,70 @@
+{
+  "pipes": [
+    {
+      "type": "regex_ner",
+      "config": {
+        "source_name": "regex_ner",
+        "skip_overlapping": false,
+        "labels": {
+          "ADDRESS": {
+            "enabled": true,
+            "remap": "LOCATION",
+            "custom_pattern": null
+          },
+          "POSTAL_CODE_CA": {
+            "enabled": true,
+            "remap": "LOCATION",
+            "custom_pattern": null
+          },
+          "ZIP_CODE_US": {
+            "enabled": true,
+            "remap": "LOCATION",
+            "custom_pattern": null
+          }
+        }
+      }
+    },
+    {
+      "type": "whitelist",
+      "config": {
+        "source_name": "whitelist",
+        "skip_overlapping": false,
+        "labels": {
+          "FIRST_NAME": {
+            "enabled": true,
+            "remap": "NAME",
+            "terms": [],
+            "disabled_dictionaries": []
+          },
+          "LAST_NAME": {
+            "enabled": true,
+            "remap": "NAME",
+            "terms": [],
+            "disabled_dictionaries": []
+          }
+        }
+      }
+    },
+    {
+      "type": "blacklist",
+      "config": {
+        "dict_config": {
+          "disabled_dictionaries": [
+            "common_words",
+            "sno_edited"
+          ]
+        },
+        "match": "any_token",
+        "apply_to_labels": null,
+        "load_all_dictionaries": true
+      }
+    },
+    {
+      "type": "surrogate",
+      "config": {
+        "seed": null,
+        "consistency": true
+      }
+    }
+  ]
+}
