@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
@@ -42,10 +42,13 @@ class EvalMetricsResponse(BaseModel):
     risk_weighted_recall: float
 
 
+DatasetFormat = Literal["jsonl", "brat-dir", "brat-corpus"]
+
+
 class EvalRunRequest(BaseModel):
     pipeline_name: str
-    dataset_path: str  # local path to JSONL or BRAT corpus
-    dataset_format: str = "jsonl"  # "jsonl", "brat-dir", "brat-corpus"
+    dataset_path: str
+    dataset_format: DatasetFormat = "jsonl"
 
 
 class EvalRunSummary(BaseModel):
@@ -155,18 +158,24 @@ def run_evaluation(session: SessionDep, body: EvalRunRequest) -> EvalRunDetail:
             status_code=500, detail=f"failed to build pipeline: {exc}"
         ) from exc
 
-    # Load dataset
-    corpus_path = Path(body.dataset_path)
+    # Load dataset — resolve and validate path to prevent traversal attacks.
+    corpus_path = Path(body.dataset_path).resolve()
+    allowed_roots = [Path.cwd().resolve()]
+    if settings.evaluations_dir.is_absolute():
+        allowed_roots.append(settings.evaluations_dir.resolve())
+    if not any(corpus_path == root or root in corpus_path.parents for root in allowed_roots):
+        raise HTTPException(
+            status_code=403,
+            detail="dataset_path must be within the project working directory",
+        )
     if not corpus_path.exists():
         raise HTTPException(status_code=404, detail=f"dataset path not found: {body.dataset_path}")
 
-    fmt_map = {
+    fmt_map: dict[DatasetFormat, dict[str, Path]] = {
         "jsonl": {"jsonl": corpus_path},
         "brat-dir": {"brat_dir": corpus_path},
         "brat-corpus": {"brat_corpus": corpus_path},
     }
-    if body.dataset_format not in fmt_map:
-        raise HTTPException(status_code=422, detail=f"unknown format: {body.dataset_format}")
 
     try:
         documents = load_annotated_corpus(**fmt_map[body.dataset_format])

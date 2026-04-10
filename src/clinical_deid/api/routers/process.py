@@ -18,7 +18,7 @@ from clinical_deid.api.schemas import (
     ProcessResponse,
 )
 from clinical_deid.config import get_settings
-from clinical_deid.domain import AnnotatedDocument, Document
+from clinical_deid.domain import AnnotatedDocument, Document, tag_replace
 from clinical_deid.pipeline_store import load_pipeline_config
 from clinical_deid.pipes.base import Pipe
 from clinical_deid.pipes.combinators import Pipeline
@@ -46,11 +46,12 @@ def _load_pipe_chain(pipeline_name: str) -> tuple[Pipe, dict[str, Any]]:
 
 
 def _redact_text(text: str, spans: list[PHISpanResponse]) -> str:
-    sorted_spans = sorted(spans, key=lambda s: s.start, reverse=True)
-    result = text
-    for span in sorted_spans:
-        result = result[: span.start] + f"[{span.label}]" + result[span.end :]
-    return result
+    from clinical_deid.domain import PHISpan
+
+    phi_spans = [
+        PHISpan(start=s.start, end=s.end, label=s.label) for s in spans
+    ]
+    return tag_replace(text, phi_spans)
 
 
 def _process_single(
@@ -124,13 +125,13 @@ def _log_audit(
         total_ms = sum(r.processing_time_ms for r in responses)
         record = AuditLogRecord(
             user=getpass.getuser(),
-            command="process" if source == "api" else "process_batch",
+            command="process" if len(responses) == 1 else "process_batch",
             pipeline_name=pipeline_name,
             pipeline_config=pipeline_config,
             doc_count=len(responses),
             span_count=total_spans,
             duration_seconds=total_ms / 1000,
-            source="api",
+            source=source,
         )
         session.add(record)
     except Exception:

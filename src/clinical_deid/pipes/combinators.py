@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
 from clinical_deid.domain import AnnotatedDocument, PHISpan
 from clinical_deid.pipes.base import ConfigurablePipe, Pipe
-from clinical_deid.pipes.span_merge import MergeStrategy, apply_resolve_spans
+from clinical_deid.pipes.span_merge import DEFAULT_LABEL_PRIORITY, MergeStrategy, apply_resolve_spans
 from clinical_deid.pipes.trace import PipelineRunResult, PipelineTraceFrame, snapshot_document
 from clinical_deid.pipes.ui_schema import field_ui
 
@@ -19,41 +20,67 @@ from clinical_deid.pipes.ui_schema import field_ui
 # ---------------------------------------------------------------------------
 
 
+ResolutionStrategy = Literal[
+    "exact_dedupe",
+    "longest_non_overlapping",
+    "max_confidence",
+    "consensus",
+    "left_to_right",
+    "label_priority",
+]
+
+_STRATEGY_DESCRIPTIONS: dict[str, str] = {
+    "exact_dedupe": "Remove exact-duplicate spans (same start, end, and label).",
+    "longest_non_overlapping": "Keep the longest span when overlaps occur; drop shorter overlapping spans.",
+    "max_confidence": "Keep the highest-confidence span when overlaps occur.",
+    "consensus": "Keep spans that multiple detectors agree on (requires consensus threshold).",
+    "left_to_right": "Process spans in document order — the leftmost span wins on overlap.",
+    "label_priority": "Highest-risk label wins on overlap, using a configurable priority ranking.",
+}
+
+
 class ResolveSpansConfig(BaseModel):
-    """Merge / dedupe / arbitrate overlapping spans.
+    """Handle overlapping and duplicate spans produced by upstream detectors."""
 
-    Passes ``[doc.spans]`` to the resolution logic, so accumulated spans from
-    multiple detectors can be collapsed (e.g. ``longest_non_overlapping``).
-
-    Strategies match :func:`~clinical_deid.pipes.span_merge.apply_resolve_spans`:
-
-    - ``union``: sort and concatenate (no overlap handling).
-    - ``exact_dedupe``: drop identical (start, end, label) only.
-    - ``consensus``: requires multiple *groups*; with a single detector use threshold ``1``.
-    - ``max_confidence``: greedy keep by confidence, no overlaps.
-    - ``longest_non_overlapping``: greedy keep by span length, no overlaps (any label).
-    """
-
-    strategy: MergeStrategy = Field(
-        default="union",
-        description="How to merge span groups (here: a single group doc.spans).",
+    strategy: ResolutionStrategy = Field(
+        default="exact_dedupe",
+        title="Strategy",
+        description="How to handle overlapping spans.",
         json_schema_extra=field_ui(
-            ui_group="Merge",
+            ui_group="Resolution",
             ui_order=1,
-            ui_widget="select",
-            ui_help="Same strategies as parallel detector merge.",
+            ui_widget="described_select",
+            ui_enum_descriptions=_STRATEGY_DESCRIPTIONS,
         ),
     )
     consensus_threshold: int = Field(
         default=2,
         ge=1,
-        description="For consensus: minimum agreeing groups; use 1 when resolving one detector list.",
+        title="Consensus Threshold",
+        description="Minimum number of detectors that must agree on a span.",
         json_schema_extra=field_ui(
-            ui_group="Merge",
+            ui_group="Resolution",
             ui_order=2,
             ui_widget="number",
-            ui_help="Only used when strategy is consensus.",
+            ui_visible_when={"field": "strategy", "equals": "consensus"},
         ),
+    )
+    label_priority: list[str] = Field(
+        default_factory=lambda: list(DEFAULT_LABEL_PRIORITY),
+        title="Label Priority",
+        description=(
+            "Ordered list of labels (first = highest risk). "
+            "Pre-populated with the built-in HIPAA risk ranking — reorder, remove, or add labels as needed."
+        ),
+        json_schema_extra={
+            "default": list(DEFAULT_LABEL_PRIORITY),
+            **field_ui(
+                ui_group="Resolution",
+                ui_order=3,
+                ui_widget="tag_list",
+                ui_visible_when={"field": "strategy", "equals": "label_priority"},
+            ),
+        },
     )
 
 
@@ -68,6 +95,7 @@ class ResolveSpans(ConfigurablePipe):
             [list(doc.spans)],
             strategy=self._config.strategy,
             consensus_threshold=self._config.consensus_threshold,
+            label_priority=self._config.label_priority or None,
         )
         return doc.with_spans(merged)
 

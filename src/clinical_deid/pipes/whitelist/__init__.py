@@ -11,12 +11,14 @@ from clinical_deid.pipes.whitelist.lists import (
 from clinical_deid.pipes.whitelist.pipe import (
     WhitelistConfig,
     WhitelistLabelConfig,
+    WhitelistLabelSettings,
     WhitelistPipe,
 )
 
 __all__ = [
     "WhitelistConfig",
     "WhitelistLabelConfig",
+    "WhitelistLabelSettings",
     "WhitelistPipe",
     "load_terms_from_path",
     "parse_list_csv",

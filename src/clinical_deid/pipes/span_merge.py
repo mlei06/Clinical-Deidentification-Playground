@@ -123,6 +123,68 @@ def merge_longest_non_overlapping(span_groups: list[list[PHISpan]]) -> list[PHIS
     return kept
 
 
+def merge_left_to_right(span_groups: list[list[PHISpan]]) -> list[PHISpan]:
+    """Greedily keep spans in document order; leftmost span wins on overlap.
+
+    Ties at the same start position are broken by longest span first.
+    """
+    all_spans = [s for group in span_groups for s in group]
+    all_spans.sort(key=lambda s: (s.start, -(s.end - s.start)))
+
+    kept: list[PHISpan] = []
+    for span in all_spans:
+        if not has_overlap_with_kept(span, kept):
+            _insort_by_start(kept, span)
+
+    kept.sort(key=lambda s: (s.start, s.end, s.label))
+    return kept
+
+
+DEFAULT_LABEL_PRIORITY: list[str] = [
+    "NAME", "PATIENT", "FIRST_NAME", "LAST_NAME",
+    "SSN", "MRN", "ID",
+    "DATE", "DOB",
+    "PHONE", "FAX", "EMAIL",
+    "ADDRESS", "STREET", "CITY", "STATE", "ZIP", "COUNTRY",
+    "HOSPITAL", "ORGANIZATION",
+    "AGE", "URL", "IP",
+    "DEVICE", "PLATE", "VIN", "ACCOUNT",
+]
+
+
+def merge_label_priority(
+    span_groups: list[list[PHISpan]],
+    label_priority: list[str] | None = None,
+) -> list[PHISpan]:
+    """Greedily keep spans with the highest-priority label first.
+
+    *label_priority* is an ordered list where index 0 is the most important
+    label.  Labels not in the list are assigned lowest priority.  Ties within
+    the same priority level are broken by longest span, then leftmost.
+
+    Falls back to :data:`DEFAULT_LABEL_PRIORITY` when *label_priority* is
+    ``None`` or empty.
+    """
+    ranking = label_priority or DEFAULT_LABEL_PRIORITY
+    priority_map = {label: i for i, label in enumerate(ranking)}
+    default_rank = len(ranking)
+
+    all_spans = [s for group in span_groups for s in group]
+    all_spans.sort(key=lambda s: (
+        priority_map.get(s.label, default_rank),
+        -(s.end - s.start),
+        s.start,
+    ))
+
+    kept: list[PHISpan] = []
+    for span in all_spans:
+        if not has_overlap_with_kept(span, kept):
+            _insort_by_start(kept, span)
+
+    kept.sort(key=lambda s: (s.start, s.end, s.label))
+    return kept
+
+
 def _insort_by_start(lst: list[PHISpan], span: PHISpan) -> None:
     """Insert *span* into *lst* keeping it sorted by ``start``."""
     lo, hi = 0, len(lst)
@@ -143,6 +205,8 @@ MergeStrategy = (
         "consensus",
         "max_confidence",
         "longest_non_overlapping",
+        "left_to_right",
+        "label_priority",
     ]
     | MergeFunc
 )
@@ -151,6 +215,7 @@ MergeStrategy = (
 def resolve_merge_strategy(
     strategy: MergeStrategy,
     consensus_threshold: int,
+    label_priority: list[str] | None = None,
 ) -> MergeFunc:
     if callable(strategy) and not isinstance(strategy, str):
         return strategy
@@ -164,6 +229,10 @@ def resolve_merge_strategy(
         return merge_max_confidence
     if strategy == "longest_non_overlapping":
         return merge_longest_non_overlapping
+    if strategy == "left_to_right":
+        return merge_left_to_right
+    if strategy == "label_priority":
+        return lambda groups: merge_label_priority(groups, label_priority)
     raise ValueError(f"Unknown span resolve strategy: {strategy!r}")
 
 
@@ -171,7 +240,8 @@ def apply_resolve_spans(
     span_groups: list[list[PHISpan]],
     strategy: MergeStrategy = "union",
     consensus_threshold: int = 2,
+    label_priority: list[str] | None = None,
 ) -> list[PHISpan]:
     """Run the chosen merge over one or more span lists."""
-    merge = resolve_merge_strategy(strategy, consensus_threshold)
+    merge = resolve_merge_strategy(strategy, consensus_threshold, label_priority)
     return merge(span_groups)

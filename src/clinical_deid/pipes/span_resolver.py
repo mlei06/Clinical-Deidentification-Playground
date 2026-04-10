@@ -1,5 +1,10 @@
 """SpanResolver — overlap and conflict resolution pipe.
 
+.. deprecated::
+    Use :class:`~clinical_deid.pipes.combinators.ResolveSpans` (registered as
+    ``resolve_spans``) instead.  It supports all the same strategies plus
+    ``left_to_right`` and ``label_priority``.
+
 Resolves overlapping, nested, and boundary-disagreement spans using configurable
 strategies: longest span wins, highest confidence wins, or label-priority ordering.
 Optionally merges adjacent same-label spans.

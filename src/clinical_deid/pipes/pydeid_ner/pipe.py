@@ -65,6 +65,11 @@ _DEFAULT_KEYWORD_RULES: list[tuple[str, str]] = [
 ]
 
 
+def default_base_labels() -> list[str]:
+    """Default label space for the pydeid_ner detector."""
+    return sorted({label for _, label in _DEFAULT_KEYWORD_RULES})
+
+
 class PyDeidNerConfig(BaseModel):
     """Configuration for the pyDeid detector pipe."""
 

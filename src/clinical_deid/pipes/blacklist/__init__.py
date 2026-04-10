@@ -1,6 +1,7 @@
 """Blacklist: drop spans that match a benign / safe-term vocabulary (false-positive filter)."""
 
 from clinical_deid.pipes.blacklist.pipe import (
+    BlacklistDictConfig,
     BlacklistSpans,
     BlacklistSpansConfig,
     blacklist_regions_for_terms,
@@ -8,6 +9,7 @@ from clinical_deid.pipes.blacklist.pipe import (
 )
 
 __all__ = [
+    "BlacklistDictConfig",
     "BlacklistSpans",
     "BlacklistSpansConfig",
     "blacklist_regions_for_terms",

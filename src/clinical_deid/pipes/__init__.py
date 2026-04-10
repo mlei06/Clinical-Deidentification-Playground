@@ -31,8 +31,8 @@ from clinical_deid.pipes.combinators import (
 )
 from clinical_deid.pipes.regex_ner import (
     BUILTIN_REGEX_PATTERNS,
+    RegexLabelSettings,
     RegexNerConfig,
-    RegexNerLabelConfig,
     RegexNerPipe,
     builtin_regex_label_names,
 )
@@ -48,7 +48,7 @@ from clinical_deid.pipes.registry import (
 )
 from clinical_deid.pipes.trace import PipelineRunResult, PipelineTraceFrame, snapshot_document
 from clinical_deid.pipes.span_merge import apply_resolve_spans
-from clinical_deid.pipes.whitelist import WhitelistConfig, WhitelistPipe, WhitelistLabelConfig
+from clinical_deid.pipes.whitelist import WhitelistConfig, WhitelistPipe, WhitelistLabelConfig, WhitelistLabelSettings
 
 __all__ = [
     # Base
@@ -85,10 +85,11 @@ __all__ = [
     "blacklist_regions_for_text",
     # Detectors
     "BUILTIN_REGEX_PATTERNS",
-    "RegexNerLabelConfig",
+    "RegexLabelSettings",
     "RegexNerConfig",
     "RegexNerPipe",
     "WhitelistLabelConfig",
+    "WhitelistLabelSettings",
     "WhitelistConfig",
     "WhitelistPipe",
     "builtin_regex_label_names",

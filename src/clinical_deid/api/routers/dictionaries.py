@@ -12,6 +12,8 @@ from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
 
 from clinical_deid.api.schemas import (
     DictionaryInfoResponse,
+    DictionaryPreviewResponse,
+    DictionaryTermsPageResponse,
     DictionaryTermsResponse,
     DictionaryUploadResponse,
 )
@@ -64,6 +66,37 @@ def get_dictionary(
         terms=terms,
         term_count=len(terms),
     )
+
+
+@router.get("/{kind}/{name}/preview", response_model=DictionaryPreviewResponse)
+def get_dictionary_preview(
+    kind: DictKind,
+    name: str,
+    label: Annotated[str | None, Query()] = None,
+) -> DictionaryPreviewResponse:
+    """Get a dictionary preview with sample terms and metadata."""
+    try:
+        data = _store().get_preview(kind, name, label=label)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return DictionaryPreviewResponse(**data)
+
+
+@router.get("/{kind}/{name}/terms", response_model=DictionaryTermsPageResponse)
+def get_dictionary_terms_paginated(
+    kind: DictKind,
+    name: str,
+    label: Annotated[str | None, Query()] = None,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=500)] = 50,
+    search: Annotated[str | None, Query()] = None,
+) -> DictionaryTermsPageResponse:
+    """Get paginated terms from a dictionary with optional text search."""
+    try:
+        data = _store().get_terms_paginated(kind, name, label=label, offset=offset, limit=limit, search=search)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return DictionaryTermsPageResponse(**data)
 
 
 @router.post("", response_model=DictionaryUploadResponse, status_code=201)

@@ -19,50 +19,27 @@ logger = logging.getLogger(__name__)
 _WORD = re.compile(r"\w+", re.UNICODE)
 
 
+class BlacklistDictConfig(BaseModel):
+    """Dictionary and term settings for the blacklist pipe."""
+
+    disabled_dictionaries: list[str] = Field(default_factory=list)
+    terms: list[str] = Field(default_factory=list)
+
+
 class BlacklistSpansConfig(BaseModel):
     """Spans are removed when they match the blacklist policy (see *match*)."""
 
-    terms: list[str] = Field(
-        default_factory=list,
+    dict_config: BlacklistDictConfig = Field(
+        default_factory=BlacklistDictConfig,
+        title="Dictionaries & Safe Terms",
+        description="Toggle dictionaries, upload new ones, and add inline safe terms.",
         json_schema_extra=field_ui(
             ui_group="Terms",
             ui_order=1,
-            ui_widget="multiselect",
-            ui_help="Benign words/phrases; matching policy depends on match mode.",
+            ui_widget="blacklist_dicts",
         ),
     )
-    dictionaries: list[str] = Field(
-        default_factory=list,
-        description="Names of dictionaries in ``data/dictionaries/blacklist/`` to load.",
-        json_schema_extra=field_ui(
-            ui_group="Terms",
-            ui_order=2,
-            ui_widget="multiselect",
-            ui_help="Dictionary names from the dictionaries store.",
-        ),
-    )
-    load_all_dictionaries: bool = Field(
-        default=True,
-        description=(
-            "Auto-discover and load all dictionaries from ``data/dictionaries/blacklist/``."
-            " Set to false to load only explicitly named dictionaries."
-        ),
-        json_schema_extra=field_ui(
-            ui_group="Terms",
-            ui_order=3,
-            ui_widget="switch",
-            ui_help="Auto-load all blacklist dictionaries from the store.",
-        ),
-    )
-    extra_wordlist_paths: list[str] = Field(
-        default_factory=list,
-        json_schema_extra=field_ui(
-            ui_group="Terms",
-            ui_order=4,
-            ui_widget="file_paths",
-            ui_advanced=True,
-        ),
-    )
+
     match: Literal[
         "any_token",
         "whole_span",
@@ -72,40 +49,79 @@ class BlacklistSpansConfig(BaseModel):
     ] = Field(
         default="any_token",
         description=(
-            "any_token: remove if any \\w+ token in the span text is in the blacklist set. "
-            "whole_span / exact_span: remove only if normalized span text equals a blacklist term. "
-            "substring: remove if any blacklist term is a substring of the span text. "
-            "overlap_document: scan the full document and remove spans overlapping matched regions."
-        ),
-        json_schema_extra=field_ui(
-            ui_group="Matching",
-            ui_order=1,
-            ui_widget="select",
-        ),
-    )
-    apply_to_labels: list[str] | None = Field(
-        default=None,
-        json_schema_extra=field_ui(
-            ui_group="Scope",
-            ui_order=1,
-            ui_widget="multiselect",
-            ui_help="If set, only these span labels are filtered; others pass through.",
-        ),
-    )
-    regex_blacklist_patterns: list[str] = Field(
-        default_factory=list,
-        description=(
-            "Extra regex patterns (case-insensitive) defining blacklist regions when "
-            "``match`` is ``overlap_document``."
+            "any_token: remove if any word in the span is in the blacklist. "
+            "whole_span / exact_span: remove only if the entire span text matches. "
+            "substring: remove if any blacklist term appears within the span. "
+            "overlap_document: scan full document and remove spans overlapping blacklist regions."
         ),
         json_schema_extra=field_ui(
             ui_group="Matching",
             ui_order=2,
-            ui_widget="regex",
-            ui_visible_when={"field": "match", "equals": "overlap_document"},
-            ui_help="Used with overlap_document to mark document regions as blacklist.",
+            ui_widget="select",
         ),
     )
+
+    apply_to_labels: list[str] | None = Field(
+        default=None,
+        json_schema_extra=field_ui(
+            ui_group="Scope",
+            ui_order=3,
+            ui_widget="multiselect",
+            ui_help="If set, only these span labels are filtered; others pass through.",
+            ui_advanced=True,
+        ),
+    )
+
+    regex_blacklist_patterns: list[str] = Field(
+        default_factory=list,
+        description="Extra regex patterns for overlap_document mode.",
+        json_schema_extra=field_ui(
+            ui_group="Matching",
+            ui_order=4,
+            ui_widget="regex",
+            ui_advanced=True,
+        ),
+    )
+
+    extra_wordlist_paths: list[str] = Field(
+        default_factory=list,
+        json_schema_extra=field_ui(ui_advanced=True, ui_order=999),
+    )
+
+    # ------------------------------------------------------------------
+    # Deprecated fields — backward compatibility with saved configs
+    # ------------------------------------------------------------------
+    terms: list[str] = Field(
+        default_factory=list,
+        exclude=True,
+        json_schema_extra=field_ui(ui_advanced=True, ui_order=999),
+    )
+    dictionaries: list[str] = Field(
+        default_factory=list,
+        exclude=True,
+        json_schema_extra=field_ui(ui_advanced=True, ui_order=999),
+    )
+    load_all_dictionaries: bool = Field(
+        default=True,
+        exclude=True,
+        json_schema_extra=field_ui(ui_advanced=True, ui_order=999),
+    )
+
+    @property
+    def _effective_terms(self) -> list[str]:
+        """Merge dict_config.terms with deprecated top-level terms."""
+        seen: set[str] = set()
+        merged: list[str] = []
+        for t in [*self.dict_config.terms, *self.terms]:
+            u = t.strip().upper()
+            if u and u not in seen:
+                seen.add(u)
+                merged.append(t.strip())
+        return merged
+
+    @property
+    def _effective_disabled(self) -> set[str]:
+        return set(self.dict_config.disabled_dictionaries)
 
 
 def _get_dictionary_store():
@@ -154,15 +170,26 @@ def _load_path_terms(path: Path) -> set[str]:
 
 def _build_blacklist_set(config: BlacklistSpansConfig) -> frozenset[str]:
     s: set[str] = set()
-    for t in config.terms:
+    for t in config._effective_terms:
         u = t.strip().upper()
         if u:
             s.add(u)
-    # Auto-discover or load named dictionaries
-    if config.load_all_dictionaries:
-        s |= _auto_discover_blacklist_terms()
-    else:
-        s |= _load_named_dictionaries(config.dictionaries)
+    disabled = config._effective_disabled
+    try:
+        store = _get_dictionary_store()
+        dicts = store.list_dictionaries(kind="blacklist")
+    except Exception:
+        dicts = []
+    for d in dicts:
+        if d.name in disabled:
+            continue
+        try:
+            for t in store.get_terms("blacklist", d.name):
+                u = t.strip().upper()
+                if u:
+                    s.add(u)
+        except FileNotFoundError:
+            continue
     for raw in config.extra_wordlist_paths:
         p = Path(raw).expanduser()
         if p.is_file():
@@ -224,8 +251,25 @@ def blacklist_regions_for_text(
 
 
 def _interval_overlaps_regions(s: int, e: int, regions: list[tuple[int, int]]) -> bool:
-    for a, b in regions:
-        if not (e <= a or s >= b):
+    """Check if [s, e) overlaps any region using binary search.
+
+    Requires *regions* to be sorted and merged (as produced by ``_merge_intervals``).
+    """
+    import bisect
+
+    if not regions:
+        return False
+    # Find the first region whose start is >= e; check it and the one before.
+    idx = bisect.bisect_left(regions, (e,))
+    # Check the region at idx-1 (the last one starting before e).
+    if idx > 0:
+        a, b = regions[idx - 1]
+        if a < e and s < b:
+            return True
+    # Also check at idx in case of exact boundary match.
+    if idx < len(regions):
+        a, b = regions[idx]
+        if a < e and s < b:
             return True
     return False
 

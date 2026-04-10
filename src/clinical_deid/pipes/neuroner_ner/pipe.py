@@ -110,6 +110,11 @@ DEFAULT_ENTITY_MAP: dict[str, str] = {
 }
 
 
+def default_base_labels() -> list[str]:
+    """Default label space for the neuroner_ner detector."""
+    return sorted(set(DEFAULT_ENTITY_MAP.values()))
+
+
 class NeuroNerConfig(BaseModel):
     """Configuration for the NeuroNER LSTM-CRF detector pipe.
 

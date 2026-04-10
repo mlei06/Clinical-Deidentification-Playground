@@ -34,9 +34,11 @@ def test_apply_detector_label_mapping_drop() -> None:
 
 
 def test_regex_ner_label_mapping_rename() -> None:
+    from clinical_deid.pipes.regex_ner import RegexLabelSettings
+
     pipe = RegexNerPipe(
         RegexNerConfig(
-            label_mapping={"PHONE": "TELEPHONE"},
+            labels={"PHONE": RegexLabelSettings(remap="TELEPHONE")},
         )
     )
     assert "PHONE" in pipe.base_labels
@@ -48,9 +50,13 @@ def test_regex_ner_label_mapping_rename() -> None:
 
 
 def test_regex_ner_label_mapping_null_drops() -> None:
-    pipe = RegexNerPipe(RegexNerConfig(label_mapping={"PHONE": None}))
+    from clinical_deid.pipes.regex_ner import RegexLabelSettings
+
+    pipe = RegexNerPipe(
+        RegexNerConfig(labels={"PHONE": RegexLabelSettings(enabled=False)})
+    )
     out = pipe.forward(_doc("Call 555-123-4567."))
-    assert len(out.spans) == 0
+    assert not any(s.label == "PHONE" for s in out.spans)
 
 
 def test_whitelist_label_mapping() -> None:
@@ -84,9 +90,17 @@ def test_label_mapper_null_drops() -> None:
 
 
 def test_pipeline_json_roundtrip_label_mapping() -> None:
+    from clinical_deid.pipes.regex_ner import RegexLabelSettings
     from clinical_deid.pipes.registry import dump_pipe, load_pipe
 
-    p1 = RegexNerPipe(RegexNerConfig(label_mapping={"DATE": None, "PHONE": "TEL"}))
+    p1 = RegexNerPipe(
+        RegexNerConfig(
+            labels={
+                "DATE": RegexLabelSettings(enabled=False),
+                "PHONE": RegexLabelSettings(remap="TEL"),
+            }
+        )
+    )
     spec = dump_pipe(p1)
     p2 = load_pipe(spec)
     assert isinstance(p2, RegexNerPipe)

@@ -7,7 +7,6 @@ Writes to the main SQLite database (same as the API uses).  Both
 from __future__ import annotations
 
 import getpass
-import json
 from typing import Any
 
 from clinical_deid.tables import AuditLogRecord

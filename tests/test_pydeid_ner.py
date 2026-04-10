@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import pytest
+
 from clinical_deid.domain import AnnotatedDocument, Document
 from clinical_deid.pipes.pydeid_ner import PyDeidNerConfig, PyDeidNerPipe
+
+pydeid = pytest.importorskip("pyDeid", reason="pyDeid not installed")
 
 
 def _make_doc(text: str, doc_id: str = "test") -> AnnotatedDocument:

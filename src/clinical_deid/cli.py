@@ -11,24 +11,10 @@ from typing import Any
 
 import click
 
-from clinical_deid.domain import AnnotatedDocument, Document, PHISpan
+from clinical_deid.domain import AnnotatedDocument, Document, PHISpan, tag_replace
 from clinical_deid.export import ProcessedResult
 
 logger = logging.getLogger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
-def _tag_replace(text: str, spans: list[PHISpan]) -> str:
-    """Replace spans with ``[LABEL]`` tags, right-to-left to preserve offsets."""
-    sorted_spans = sorted(spans, key=lambda s: s.start, reverse=True)
-    result = text
-    for s in sorted_spans:
-        result = result[: s.start] + f"[{s.label}]" + result[s.end :]
-    return result
 
 
 def _build_pipeline(
@@ -93,7 +79,7 @@ def _process_doc(
     if out.document.text != text:
         output_text = out.document.text
     else:
-        output_text = _tag_replace(text, out.spans)
+        output_text = tag_replace(text, out.spans)
 
     return ProcessedResult(
         doc_id=doc_id,
@@ -298,13 +284,14 @@ def batch(
         for f in sorted(inp.glob("*.txt")):
             texts.append((f.stem, f.read_text(encoding="utf-8")))
     elif inp.suffix == ".jsonl":
-        for i, line in enumerate(inp.read_text(encoding="utf-8").splitlines()):
-            if not line.strip():
-                continue
-            obj = json.loads(line)
-            doc_id = obj.get("id") or obj.get("document", {}).get("id") or f"line_{i}"
-            text = obj.get("text") or obj.get("document", {}).get("text", "")
-            texts.append((str(doc_id), text))
+        with open(inp, encoding="utf-8") as fh:
+            for i, line in enumerate(fh):
+                if not line.strip():
+                    continue
+                obj = json.loads(line)
+                doc_id = obj.get("id") or obj.get("document", {}).get("id") or f"line_{i}"
+                text = obj.get("text") or obj.get("document", {}).get("text", "")
+                texts.append((str(doc_id), text))
     else:
         texts.append((inp.stem, inp.read_text(encoding="utf-8")))
 

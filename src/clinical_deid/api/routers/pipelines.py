@@ -12,6 +12,8 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
 from clinical_deid.api.schemas import (
     BlacklistMergeResponse,
+    ComputeLabelsRequest,
+    ComputeLabelsResponse,
     CreatePipelineRequest,
     NerBuiltinInfo,
     ParseListFileResult,
@@ -31,7 +33,7 @@ from clinical_deid.pipeline_store import (
 )
 from clinical_deid.dictionary_store import DictionaryStore
 from clinical_deid.pipes.regex_ner import builtin_regex_label_names
-from clinical_deid.pipes.registry import load_pipeline, pipe_availability, registered_pipes
+from clinical_deid.pipes.registry import compute_base_labels, load_pipeline, pipe_availability, registered_pipes
 from clinical_deid.pipes.ui_schema import pipe_config_json_schema
 from clinical_deid.pipes.whitelist.lists import parse_list_file
 
@@ -81,8 +83,76 @@ def list_pipe_types() -> list[PipeTypeInfo]:
         config_cls = reg.get(entry["name"])
         if config_cls is not None:
             config_schema = pipe_config_json_schema(config_cls)
+        base_labels = entry.get("base_labels")
+        if config_schema and base_labels:
+            _inject_base_labels(config_schema, base_labels, entry["name"])
+        if config_schema:
+            _inject_dict_info(config_schema)
         result.append(PipeTypeInfo(**entry, config_schema=config_schema))
     return result
+
+
+_LABEL_AWARE_WIDGETS = {"label_space", "label_regex", "unified_label", "whitelist_label"}
+
+
+def _inject_base_labels(
+    config_schema: dict, base_labels: list[str], pipe_type: str
+) -> None:
+    """Embed ``ui_base_labels``, ``ui_pipe_type``, and (for unified_label)
+    ``ui_builtin_patterns`` into any label-aware property schema so the
+    frontend widget can read them directly."""
+    from clinical_deid.pipes.regex_ner import BUILTIN_REGEX_PATTERNS
+
+    for prop in config_schema.get("properties", {}).values():
+        if not isinstance(prop, dict):
+            continue
+        widget = prop.get("ui_widget")
+        if widget not in _LABEL_AWARE_WIDGETS:
+            continue
+        prop["ui_base_labels"] = base_labels
+        prop["ui_pipe_type"] = pipe_type
+        if widget == "unified_label":
+            prop["ui_builtin_patterns"] = {
+                label: pat for label, pat in BUILTIN_REGEX_PATTERNS.items()
+            }
+        if widget == "whitelist_label":
+            store = DictionaryStore(get_settings().dictionaries_dir)
+            wl_dicts = store.list_dictionaries(kind="whitelist")
+            dicts_by_label: dict[str, list[dict]] = {}
+            for d in wl_dicts:
+                if d.label:
+                    dicts_by_label.setdefault(d.label, []).append({
+                        "name": d.name,
+                        "filename": d.filename,
+                        "term_count": d.term_count,
+                    })
+            prop["ui_dictionaries_by_label"] = dicts_by_label
+
+
+def _inject_dict_info(config_schema: dict) -> None:
+    """Inject dictionary metadata into blacklist_dicts widgets."""
+    for prop in config_schema.get("properties", {}).values():
+        if not isinstance(prop, dict):
+            continue
+        if prop.get("ui_widget") == "blacklist_dicts":
+            store = DictionaryStore(get_settings().dictionaries_dir)
+            bl_dicts = store.list_dictionaries(kind="blacklist")
+            prop["ui_blacklist_dicts"] = [
+                {
+                    "name": d.name,
+                    "filename": d.filename,
+                    "term_count": d.term_count,
+                }
+                for d in bl_dicts
+            ]
+
+
+@router.post("/pipe-types/{name}/labels", response_model=ComputeLabelsResponse)
+def compute_pipe_labels(name: str, body: ComputeLabelsRequest | None = None) -> ComputeLabelsResponse:
+    """Compute the effective base labels for a pipe type given optional config."""
+    config = body.config if body else None
+    labels = compute_base_labels(name, config)
+    return ComputeLabelsResponse(labels=labels)
 
 
 @router.get("/ner/builtins", response_model=NerBuiltinInfo)

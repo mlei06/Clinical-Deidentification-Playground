@@ -8,8 +8,8 @@ from clinical_deid.domain import AnnotatedDocument, Document
 from clinical_deid.pipes.combinators import Pipeline
 from clinical_deid.pipes.regex_ner import (
     BUILTIN_REGEX_PATTERNS,
+    RegexLabelSettings,
     RegexNerConfig,
-    RegexNerLabelConfig,
     RegexNerPipe,
 )
 from clinical_deid.pipes.whitelist import WhitelistConfig, WhitelistPipe, WhitelistLabelConfig
@@ -18,7 +18,7 @@ from clinical_deid.pipes.whitelist import WhitelistConfig, WhitelistPipe, Whitel
 def _no_builtin_regex_config() -> RegexNerConfig:
     """Return a config with all built-in regex labels disabled."""
     return RegexNerConfig(
-        per_label={label: RegexNerLabelConfig(regex_enabled=False) for label in BUILTIN_REGEX_PATTERNS},
+        labels={label: RegexLabelSettings(enabled=False) for label in BUILTIN_REGEX_PATTERNS},
     )
 
 
@@ -41,11 +41,9 @@ def test_builtin_patterns_match_phone_and_date() -> None:
     assert "DATE" in labels
 
 
-def test_per_label_regex_disabled() -> None:
+def test_label_disabled_via_settings() -> None:
     cfg = RegexNerConfig(
-        per_label={
-            "PHONE": RegexNerLabelConfig(regex_enabled=False),
-        }
+        labels={"PHONE": RegexLabelSettings(enabled=False)}
     )
     pipe = _chained_detectors(cfg, WhitelistConfig())
     out = pipe.forward(_doc("Call 555-123-4567."))

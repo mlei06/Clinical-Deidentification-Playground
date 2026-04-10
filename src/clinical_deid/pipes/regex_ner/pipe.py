@@ -4,14 +4,13 @@ from __future__ import annotations
 
 import re
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field
 
 from clinical_deid.domain import AnnotatedDocument, PHISpan
 from clinical_deid.pipes.base import ConfigurablePipe
 from clinical_deid.pipes.detector_label_mapping import (
     accumulate_spans,
     apply_detector_label_mapping,
-    detector_label_mapping_field,
     effective_detector_labels,
 )
 from clinical_deid.pipes.ui_schema import field_ui
@@ -170,22 +169,12 @@ BUILTIN_REGEX_PATTERNS: dict[str, str] = {
 }
 
 
-class RegexNerLabelConfig(BaseModel):
-    """Per-label regex settings."""
+class RegexLabelSettings(BaseModel):
+    """Per-label settings for the regex NER detector."""
 
-    regex_enabled: bool = Field(
-        default=True,
-        json_schema_extra=field_ui(ui_group="Patterns", ui_order=1, ui_widget="switch"),
-    )
-    pattern: str | None = Field(
-        default=None,
-        json_schema_extra=field_ui(
-            ui_group="Patterns",
-            ui_order=2,
-            ui_widget="regex",
-            ui_placeholder="(?i)...",
-        ),
-    )
+    enabled: bool = True
+    remap: str | None = None
+    custom_pattern: str | None = None
 
 
 class RegexNerConfig(BaseModel):
@@ -210,28 +199,19 @@ class RegexNerConfig(BaseModel):
         ),
     )
 
-    per_label: dict[str, RegexNerLabelConfig] = Field(
+    labels: dict[str, RegexLabelSettings] = Field(
         default_factory=dict,
+        title="Labels",
+        description=(
+            "Configure each detection label: toggle on/off, "
+            "view or override regex patterns, and remap output labels."
+        ),
         json_schema_extra=field_ui(
-            ui_group="Patterns",
+            ui_group="Labels",
             ui_order=2,
-            ui_widget="nested_dict",
-            ui_help="Per-label enable flags and custom patterns.",
+            ui_widget="unified_label",
         ),
     )
-    patterns: dict[str, str] = Field(
-        default_factory=dict,
-        description="Legacy: map label -> regex string; folded into ``per_label``.",
-        json_schema_extra=field_ui(
-            ui_group="Legacy",
-            ui_order=3,
-            ui_widget="key_value",
-            ui_advanced=True,
-            ui_help="Prefer per_label for new configs.",
-        ),
-    )
-
-    label_mapping: dict[str, str | None] = detector_label_mapping_field()
 
     skip_overlapping: bool = Field(
         default=False,
@@ -240,26 +220,27 @@ class RegexNerConfig(BaseModel):
             ui_group="General",
             ui_order=99,
             ui_widget="switch",
-            ui_advanced=True,
         ),
     )
 
-    @model_validator(mode="after")
-    def _fold_top_level_patterns(self) -> RegexNerConfig:
-        if not self.patterns:
-            return self
-        pl = dict(self.per_label)
-        for label, pat in self.patterns.items():
-            prev = pl.get(label, RegexNerLabelConfig())
-            pl[label] = RegexNerLabelConfig(
-                regex_enabled=prev.regex_enabled,
-                pattern=pat,
-            )
-        object.__setattr__(self, "per_label", pl)
-        return self
+    @property
+    def label_mapping(self) -> dict[str, str | None]:
+        """Derived label mapping for the DetectorWithLabelMapping protocol."""
+        mapping: dict[str, str | None] = {}
+        for label, s in self.labels.items():
+            if not s.enabled:
+                mapping[label] = None
+            elif s.remap:
+                mapping[label] = s.remap
+        return mapping
 
 
 def builtin_regex_label_names() -> list[str]:
+    return sorted(BUILTIN_REGEX_PATTERNS.keys())
+
+
+def default_base_labels() -> list[str]:
+    """Default label space for the regex_ner detector."""
     return sorted(BUILTIN_REGEX_PATTERNS.keys())
 
 
@@ -272,22 +253,14 @@ class _ResolvedRegex:
 
 
 def _resolve_regex(config: RegexNerConfig) -> list[_ResolvedRegex]:
-    label_keys: set[str] = set(BUILTIN_REGEX_PATTERNS.keys())
-    label_keys |= set(config.per_label.keys())
-    label_keys |= set(config.patterns.keys())
+    label_keys = set(BUILTIN_REGEX_PATTERNS) | set(config.labels)
 
     out: list[_ResolvedRegex] = []
     for label in sorted(label_keys):
-        sub = config.per_label.get(label, RegexNerLabelConfig())
-        if not sub.regex_enabled:
+        settings = config.labels.get(label, RegexLabelSettings())
+        if not settings.enabled:
             continue
-        pat: str | None = None
-        if sub.pattern is not None:
-            pat = sub.pattern
-        elif label in config.patterns:
-            pat = config.patterns[label]
-        elif label in BUILTIN_REGEX_PATTERNS:
-            pat = BUILTIN_REGEX_PATTERNS[label]
+        pat = settings.custom_pattern or BUILTIN_REGEX_PATTERNS.get(label)
         if not pat:
             continue
         out.append(_ResolvedRegex(label, re.compile(pat, re.IGNORECASE)))

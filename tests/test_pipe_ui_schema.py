@@ -22,17 +22,19 @@ def test_pipe_config_json_schema_matches_model_json_schema() -> None:
     assert pipe_config_json_schema(LabelMapperConfig) == LabelMapperConfig.model_json_schema()
 
 
-def test_label_mapping_field_has_ui_widget() -> None:
+def test_unified_labels_field_has_ui_widget() -> None:
     schema = RegexNerConfig.model_json_schema()
-    lm = schema["properties"]["label_mapping"]
-    assert lm.get("ui_widget") == "label_mapping"
-    assert lm.get("ui_group") == "Output labels"
+    lm = schema["properties"]["labels"]
+    assert lm.get("ui_widget") == "unified_label"
+    assert lm.get("ui_group") == "Labels"
 
 
 def test_resolve_spans_strategy_has_ui_hints() -> None:
     p = ResolveSpansConfig.model_json_schema()["properties"]["strategy"]
-    assert p.get("ui_widget") == "select"
-    assert p.get("ui_group") == "Merge"
+    assert p.get("ui_widget") == "described_select"
+    assert p.get("ui_group") == "Resolution"
+    assert isinstance(p.get("ui_enum_descriptions"), dict)
+    assert "exact_dedupe" in p["ui_enum_descriptions"]
 
 
 def test_label_mapper_mapping_has_ui_hints() -> None:
@@ -73,14 +75,14 @@ def test_registered_builtin_configs_expose_ui_metadata(name: str) -> None:
 def test_whitelist_nested_schema_has_ui() -> None:
     schema = WhitelistConfig.model_json_schema()
     defs = schema.get("$defs", {})
-    assert "WhitelistLabelConfig" in defs
-    terms = defs["WhitelistLabelConfig"]["properties"]["terms"]
-    assert terms.get("ui_widget") == "multiselect"
+    assert "WhitelistLabelSettings" in defs
+    props = schema["properties"]
+    assert props["labels"].get("ui_widget") == "whitelist_label"
 
 
 def test_blacklist_regex_patterns_conditional_meta() -> None:
     p = BlacklistSpansConfig.model_json_schema()["properties"]["regex_blacklist_patterns"]
-    assert p.get("ui_visible_when") == {"field": "match", "equals": "overlap_document"}
+    assert p.get("ui_advanced") is True
 
 
 def test_presidio_anonymizer_operator_params_conditional() -> None:

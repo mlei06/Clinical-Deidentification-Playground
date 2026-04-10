@@ -104,6 +104,49 @@ class TestDictionaryStore:
         terms = store.get_terms("whitelist", "hospitals_csv", label="HOSPITAL")
         assert terms == ["Hospital A", "Hospital B"]
 
+    def test_get_preview(self, tmp_path):
+        store = DictionaryStore(tmp_path)
+        store.save("blacklist", "words", "alpha\nbeta\ngamma\ndelta\n")
+        preview = store.get_preview("blacklist", "words")
+        assert preview["kind"] == "blacklist"
+        assert preview["name"] == "words"
+        assert preview["term_count"] == 4
+        assert preview["sample_terms"] == ["alpha", "beta", "gamma", "delta"]
+        assert preview["file_size_bytes"] > 0
+
+    def test_get_preview_sample_limit(self, tmp_path):
+        store = DictionaryStore(tmp_path)
+        terms = "\n".join(f"term_{i}" for i in range(50))
+        store.save("blacklist", "big", terms)
+        preview = store.get_preview("blacklist", "big", sample_size=5)
+        assert len(preview["sample_terms"]) == 5
+
+    def test_get_preview_not_found(self, tmp_path):
+        store = DictionaryStore(tmp_path)
+        with pytest.raises(FileNotFoundError):
+            store.get_preview("blacklist", "missing")
+
+    def test_get_terms_paginated(self, tmp_path):
+        store = DictionaryStore(tmp_path)
+        store.save("blacklist", "paged", "a\nb\nc\nd\ne\n")
+        page = store.get_terms_paginated("blacklist", "paged", offset=1, limit=2)
+        assert page["terms"] == ["b", "c"]
+        assert page["total"] == 5
+        assert page["offset"] == 1
+        assert page["limit"] == 2
+
+    def test_get_terms_paginated_search(self, tmp_path):
+        store = DictionaryStore(tmp_path)
+        store.save("blacklist", "searchable", "apple\nbanana\napricot\ncherry\n")
+        page = store.get_terms_paginated("blacklist", "searchable", search="ap")
+        assert page["terms"] == ["apple", "apricot"]
+        assert page["total"] == 2
+
+    def test_get_terms_paginated_not_found(self, tmp_path):
+        store = DictionaryStore(tmp_path)
+        with pytest.raises(FileNotFoundError):
+            store.get_terms_paginated("blacklist", "missing")
+
 
 # ---------------------------------------------------------------------------
 # API endpoint tests
@@ -192,6 +235,60 @@ def test_delete_dictionary(client):
 
 def test_delete_dictionary_not_found(client):
     r = client.delete("/dictionaries/blacklist/nonexistent")
+    assert r.status_code == 404
+
+
+def test_get_dictionary_preview(client):
+    client.post(
+        "/dictionaries",
+        files=[("file", ("test.txt", io.BytesIO(b"Alpha\nBeta\nGamma\n"), "text/plain"))],
+        data={"kind": "blacklist", "name": "preview_test"},
+    )
+    r = client.get("/dictionaries/blacklist/preview_test/preview")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["name"] == "preview_test"
+    assert body["term_count"] == 3
+    assert body["sample_terms"] == ["Alpha", "Beta", "Gamma"]
+    assert body["file_size_bytes"] > 0
+
+
+def test_get_dictionary_preview_not_found(client):
+    r = client.get("/dictionaries/blacklist/nonexistent/preview")
+    assert r.status_code == 404
+
+
+def test_get_dictionary_terms_paginated(client):
+    terms = "\n".join(f"term_{i}" for i in range(20))
+    client.post(
+        "/dictionaries",
+        files=[("file", ("test.txt", io.BytesIO(terms.encode()), "text/plain"))],
+        data={"kind": "blacklist", "name": "paged_test"},
+    )
+    r = client.get("/dictionaries/blacklist/paged_test/terms?offset=5&limit=3")
+    assert r.status_code == 200
+    body = r.json()
+    assert len(body["terms"]) == 3
+    assert body["total"] == 20
+    assert body["offset"] == 5
+    assert body["limit"] == 3
+
+
+def test_get_dictionary_terms_paginated_search(client):
+    client.post(
+        "/dictionaries",
+        files=[("file", ("test.txt", io.BytesIO(b"apple\nbanana\napricot\ncherry\n"), "text/plain"))],
+        data={"kind": "blacklist", "name": "search_test"},
+    )
+    r = client.get("/dictionaries/blacklist/search_test/terms?search=ap")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["terms"] == ["apple", "apricot"]
+    assert body["total"] == 2
+
+
+def test_get_dictionary_terms_paginated_not_found(client):
+    r = client.get("/dictionaries/blacklist/nonexistent/terms")
     assert r.status_code == 404
 
 

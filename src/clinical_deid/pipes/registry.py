@@ -23,11 +23,14 @@ import json
 import warnings
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel
 
 from clinical_deid.pipes.base import ConfigurablePipe, Pipe
+
+if TYPE_CHECKING:
+    from clinical_deid.pipes.combinators import Pipeline
 
 # ---------------------------------------------------------------------------
 # Registry
@@ -72,6 +75,10 @@ class PipeCatalogEntry:
     # availability depends on runtime state beyond Python imports (e.g. venvs,
     # downloaded models, embeddings).  ``None`` means "installed == ready".
     check_ready: str | None = None  # "module.path:function_name"
+    # Zero-arg callable returning ``list[str]`` of default base labels.
+    # Only meaningful for detector-role entries.
+    default_base_labels_fn: str | None = None  # "module.path:function_name"
+    deprecated: bool = False
 
 
 _CATALOG: list[PipeCatalogEntry] = [
@@ -83,6 +90,7 @@ _CATALOG: list[PipeCatalogEntry] = [
         install_hint="Included by default",
         config_path="clinical_deid.pipes.regex_ner.pipe:RegexNerConfig",
         pipe_path="clinical_deid.pipes.regex_ner.pipe:RegexNerPipe",
+        default_base_labels_fn="clinical_deid.pipes.regex_ner.pipe:default_base_labels",
     ),
     PipeCatalogEntry(
         name="whitelist",
@@ -92,6 +100,7 @@ _CATALOG: list[PipeCatalogEntry] = [
         install_hint="Included by default",
         config_path="clinical_deid.pipes.whitelist.pipe:WhitelistConfig",
         pipe_path="clinical_deid.pipes.whitelist.pipe:WhitelistPipe",
+        default_base_labels_fn="clinical_deid.pipes.whitelist.pipe:default_base_labels",
     ),
     PipeCatalogEntry(
         name="label_mapper",
@@ -101,6 +110,7 @@ _CATALOG: list[PipeCatalogEntry] = [
         install_hint="Included by default",
         config_path="clinical_deid.pipes.combinators:LabelMapperConfig",
         pipe_path="clinical_deid.pipes.combinators:LabelMapper",
+        deprecated=True,
     ),
     PipeCatalogEntry(
         name="label_filter",
@@ -113,10 +123,7 @@ _CATALOG: list[PipeCatalogEntry] = [
     ),
     PipeCatalogEntry(
         name="resolve_spans",
-        description=(
-            "Merge/dedupe/arbitrate overlapping spans (union, exact_dedupe, consensus, "
-            "max_confidence, longest_non_overlapping); use after one or more detectors"
-        ),
+        description="Resolve overlapping or duplicate spans from upstream detectors.",
         role="span_transformer",
         extra=None,
         install_hint="Included by default",
@@ -142,6 +149,7 @@ _CATALOG: list[PipeCatalogEntry] = [
         install_hint="pip install '.[presidio]'",
         config_path="clinical_deid.pipes.presidio_ner.pipe:PresidioNerConfig",
         pipe_path="clinical_deid.pipes.presidio_ner.pipe:PresidioNerPipe",
+        default_base_labels_fn="clinical_deid.pipes.presidio_ner.pipe:default_base_labels",
     ),
     PipeCatalogEntry(
         name="presidio_anonymizer",
@@ -160,6 +168,7 @@ _CATALOG: list[PipeCatalogEntry] = [
         install_hint="pip install '.[pydeid]'",
         config_path="clinical_deid.pipes.pydeid_ner.pipe:PyDeidNerConfig",
         pipe_path="clinical_deid.pipes.pydeid_ner.pipe:PyDeidNerPipe",
+        default_base_labels_fn="clinical_deid.pipes.pydeid_ner.pipe:default_base_labels",
     ),
     PipeCatalogEntry(
         name="surrogate",
@@ -181,6 +190,7 @@ _CATALOG: list[PipeCatalogEntry] = [
         install_hint="Included by default",
         config_path="clinical_deid.pipes.span_resolver:SpanResolverConfig",
         pipe_path="clinical_deid.pipes.span_resolver:SpanResolverPipe",
+        deprecated=True,
     ),
     PipeCatalogEntry(
         name="consistency_propagator",
@@ -201,6 +211,7 @@ _CATALOG: list[PipeCatalogEntry] = [
         install_hint="pip install '.[llm]'",
         config_path="clinical_deid.pipes.llm_ner:LlmNerConfig",
         pipe_path="clinical_deid.pipes.llm_ner:LlmNerPipe",
+        default_base_labels_fn="clinical_deid.pipes.llm_ner:default_base_labels",
     ),
     PipeCatalogEntry(
         name="neuroner_ner",
@@ -211,6 +222,7 @@ _CATALOG: list[PipeCatalogEntry] = [
         config_path="clinical_deid.pipes.neuroner_ner.pipe:NeuroNerConfig",
         pipe_path="clinical_deid.pipes.neuroner_ner.pipe:NeuroNerPipe",
         check_ready="clinical_deid.pipes.neuroner_ner.pipe:check_neuroner_ready",
+        default_base_labels_fn="clinical_deid.pipes.neuroner_ner.pipe:default_base_labels",
     ),
 ]
 
@@ -244,6 +256,39 @@ def pipe_catalog() -> list[PipeCatalogEntry]:
     return list(_CATALOG)
 
 
+def compute_base_labels(pipe_name: str, config: dict[str, Any] | None = None) -> list[str]:
+    """Compute the base label space for a detector given optional config.
+
+    Instantiates the config class (using defaults if *config* is ``None``),
+    then builds a temporary pipe to read ``base_labels``.  Falls back to the
+    catalog's static ``default_base_labels_fn`` on any error.
+    """
+    entry_map = {e.name: e for e in _CATALOG}
+    cat = entry_map.get(pipe_name)
+    if cat is None:
+        return []
+
+    reg = _REGISTRY.get(pipe_name)
+    if reg is not None:
+        config_cls, pipe_cls = reg
+        try:
+            cfg = config_cls.model_validate(config or {})
+            pipe = pipe_cls(cfg)
+            if hasattr(pipe, "base_labels"):
+                return sorted(pipe.base_labels)
+        except Exception:
+            pass
+
+    if cat.default_base_labels_fn is not None:
+        try:
+            fn = _import_dotted(cat.default_base_labels_fn)
+            return fn()
+        except Exception:
+            pass
+
+    return []
+
+
 def pipe_availability() -> list[dict[str, Any]]:
     """Return each known pipe type with its install status.
 
@@ -270,6 +315,14 @@ def pipe_availability() -> list[dict[str, Any]]:
                 ready = False
                 ready_details = {"error": str(exc)}
 
+        base_labels: list[str] | None = None
+        if entry.default_base_labels_fn is not None:
+            try:
+                labels_fn = _import_dotted(entry.default_base_labels_fn)
+                base_labels = labels_fn()
+            except Exception:
+                base_labels = None
+
         out.append({
             "name": entry.name,
             "description": entry.description,
@@ -279,6 +332,8 @@ def pipe_availability() -> list[dict[str, Any]]:
             "installed": installed,
             "ready": ready,
             "ready_details": ready_details,
+            "base_labels": base_labels,
+            "deprecated": entry.deprecated,
         })
     return out
 
@@ -287,9 +342,9 @@ def pipe_availability() -> list[dict[str, Any]]:
 # Load
 # ---------------------------------------------------------------------------
 
-def _load_pipeline_from_dict(spec: dict[str, Any]) -> Any:
+def _load_pipeline_from_dict(spec: dict[str, Any]) -> Pipeline:
     """Build :class:`~clinical_deid.pipes.combinators.Pipeline` from a dict with ``pipes``."""
-    from clinical_deid.pipes.combinators import Pipeline
+    from clinical_deid.pipes.combinators import Pipeline as PipelineCls
 
     if "pipes" not in spec:
         raise ValueError(f"pipeline spec missing 'pipes': {spec}")
@@ -300,7 +355,7 @@ def _load_pipeline_from_dict(spec: dict[str, Any]) -> Any:
             pipe_list.extend(result)
         else:
             pipe_list.append(result)
-    return Pipeline(pipes=pipe_list)
+    return PipelineCls(pipes=pipe_list)
 
 
 def load_pipe(spec: dict[str, Any]) -> Pipe | list[Pipe]:
@@ -347,7 +402,7 @@ def load_pipe(spec: dict[str, Any]) -> Pipe | list[Pipe]:
     return pipe_cls(config)
 
 
-def load_pipeline(source: dict[str, Any] | str | Path) -> Any:
+def load_pipeline(source: dict[str, Any] | str | Path) -> Pipeline:
     """Build a ``Pipeline`` from a JSON dict, JSON string, or file path."""
     if isinstance(source, Path):
         source = json.loads(source.read_text())
@@ -365,7 +420,7 @@ def load_pipeline(source: dict[str, Any] | str | Path) -> Any:
 # Dump
 # ---------------------------------------------------------------------------
 
-def _dump_pipeline_steps(pipeline: Any) -> dict[str, Any]:
+def _dump_pipeline_steps(pipeline: Pipeline) -> dict[str, Any]:
     """Shared helper: serialize a pipeline's steps into a dict."""
     out: dict[str, Any] = {"pipes": []}
     for p in pipeline.pipes:
@@ -413,17 +468,17 @@ def dump_pipe(pipe: Pipe) -> dict[str, Any]:
     raise ValueError(f"Cannot serialize pipe {type(pipe).__name__}: not in registry")
 
 
-def dump_pipeline(pipeline: Any) -> dict[str, Any]:
+def dump_pipeline(pipeline: Pipeline) -> dict[str, Any]:
     """Serialize a ``Pipeline`` to a JSON-compatible dict (top-level, no ``type`` key)."""
     return _dump_pipeline_steps(pipeline)
 
 
-def dump_pipeline_json(pipeline: Any, indent: int = 2) -> str:
+def dump_pipeline_json(pipeline: Pipeline, indent: int = 2) -> str:
     """Serialize a ``Pipeline`` to a JSON string."""
     return json.dumps(dump_pipeline(pipeline), indent=indent)
 
 
-def save_pipeline(pipeline: Any, path: str | Path) -> None:
+def save_pipeline(pipeline: Pipeline, path: str | Path) -> None:
     """Write a ``Pipeline`` to a JSON file."""
     Path(path).write_text(dump_pipeline_json(pipeline) + "\n")
 

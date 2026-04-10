@@ -198,6 +198,66 @@ class DictionaryStore:
         text = path.read_text(encoding="utf-8")
         return parse_list_file(text, filename=path.name)
 
+    # -- preview / paginated browse ------------------------------------------
+
+    def get_preview(
+        self,
+        kind: DictKind,
+        name: str,
+        label: str | None = None,
+        sample_size: int = 20,
+    ) -> dict:
+        """Return metadata and a sample of terms for a dictionary.
+
+        Returns dict with keys: kind, label, name, term_count, sample_terms, file_size_bytes.
+        Raises ``FileNotFoundError`` if the dictionary does not exist.
+        """
+        path = self._resolve_path(kind, name, label)
+        if path is None:
+            loc = f"{kind}/{label}/{name}" if label else f"{kind}/{name}"
+            raise FileNotFoundError(f"dictionary not found: {loc}")
+        terms = self._load_terms(path)
+        return {
+            "kind": kind,
+            "label": label.upper() if label else None,
+            "name": name,
+            "term_count": len(terms),
+            "sample_terms": terms[:sample_size],
+            "file_size_bytes": path.stat().st_size,
+        }
+
+    def get_terms_paginated(
+        self,
+        kind: DictKind,
+        name: str,
+        label: str | None = None,
+        offset: int = 0,
+        limit: int = 50,
+        search: str | None = None,
+    ) -> dict:
+        """Return a page of terms with optional text filter.
+
+        Returns dict with keys: terms, total, offset, limit, search.
+        Raises ``FileNotFoundError`` if the dictionary does not exist.
+        """
+        path = self._resolve_path(kind, name, label)
+        if path is None:
+            loc = f"{kind}/{label}/{name}" if label else f"{kind}/{name}"
+            raise FileNotFoundError(f"dictionary not found: {loc}")
+        terms = self._load_terms(path)
+        if search:
+            needle = search.casefold()
+            terms = [t for t in terms if needle in t.casefold()]
+        total = len(terms)
+        page = terms[offset : offset + limit]
+        return {
+            "terms": page,
+            "total": total,
+            "offset": offset,
+            "limit": limit,
+            "search": search,
+        }
+
     # -- bulk load for pipes -------------------------------------------------
 
     def load_whitelist_terms(self, names: list[str], label: str) -> list[str]:

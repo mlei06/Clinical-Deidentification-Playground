@@ -43,8 +43,32 @@ class AnnotatedDocument(BaseModel):
         return AnnotatedDocument(document=self.document, spans=spans)
 
 
-def validate_against_text(text: str, spans: list[PHISpan]) -> None:
-    n = len(text)
-    for s in spans:
-        if s.start < 0 or s.end > n or s.start >= s.end:
-            raise ValueError(f"invalid span [{s.start}:{s.end}) for text length {n}")
+def tag_replace(text: str, spans: list[PHISpan]) -> str:
+    """Replace spans with ``[LABEL]`` tags, handling overlaps.
+
+    When spans overlap, the longest span wins.  Ties are broken by earliest
+    start, then alphabetical label.  Fully or partially covered spans are
+    dropped so replacements never corrupt each other.
+    """
+    if not spans:
+        return text
+
+    # Dedupe and pick winners: longest span first, then earliest start
+    sorted_spans = sorted(
+        spans,
+        key=lambda s: (-(s.end - s.start), s.start, s.label),
+    )
+
+    # Greedily select non-overlapping spans
+    selected: list[PHISpan] = []
+    for s in sorted_spans:
+        if any(s.start < sel.end and s.end > sel.start for sel in selected):
+            continue
+        selected.append(s)
+
+    # Replace right-to-left to preserve offsets
+    selected.sort(key=lambda s: s.start, reverse=True)
+    result = text
+    for s in selected:
+        result = result[: s.start] + f"[{s.label}]" + result[s.end :]
+    return result

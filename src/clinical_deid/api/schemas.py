@@ -87,6 +87,14 @@ class BatchProcessResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+class ComputeLabelsRequest(BaseModel):
+    config: dict[str, Any] | None = None
+
+
+class ComputeLabelsResponse(BaseModel):
+    labels: list[str]
+
+
 class PipeTypeInfo(BaseModel):
     name: str
     description: str
@@ -95,6 +103,8 @@ class PipeTypeInfo(BaseModel):
     install_hint: str
     installed: bool
     config_schema: dict[str, Any] | None = None
+    base_labels: list[str] | None = None
+    deprecated: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -148,6 +158,23 @@ class DictionaryTermsResponse(BaseModel):
     name: str
     terms: list[str]
     term_count: int
+
+
+class DictionaryPreviewResponse(BaseModel):
+    kind: str
+    label: str | None
+    name: str
+    term_count: int
+    sample_terms: list[str]
+    file_size_bytes: int
+
+
+class DictionaryTermsPageResponse(BaseModel):
+    terms: list[str]
+    total: int
+    offset: int
+    limit: int
+    search: str | None
 
 
 class DictionaryUploadResponse(BaseModel):

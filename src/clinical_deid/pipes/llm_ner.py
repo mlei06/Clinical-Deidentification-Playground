@@ -19,7 +19,12 @@ from pydantic import BaseModel, Field
 
 from clinical_deid.domain import AnnotatedDocument, PHISpan
 from clinical_deid.pipes.base import ConfigurablePipe
-from clinical_deid.pipes.detector_label_mapping import accumulate_spans
+from clinical_deid.pipes.detector_label_mapping import (
+    accumulate_spans,
+    apply_detector_label_mapping,
+    detector_label_mapping_field,
+    effective_detector_labels,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +52,11 @@ Clinical text:
 {text}
 ---
 """
+
+
+def default_base_labels() -> list[str]:
+    """Default label space for the llm_ner detector."""
+    return sorted(_DEFAULT_LABELS)
 
 
 class LlmNerConfig(BaseModel):
@@ -86,6 +96,8 @@ class LlmNerConfig(BaseModel):
         default=30_000,
         description="Truncate input text beyond this length to avoid token limits.",
     )
+    label_mapping: dict[str, str | None] = detector_label_mapping_field()
+
     skip_overlapping: bool = Field(
         default=False,
         description="Drop new spans that overlap any existing span in the document.",
@@ -146,8 +158,16 @@ class LlmNerPipe(ConfigurablePipe):
         self._config = config or LlmNerConfig()
 
     @property
-    def labels(self) -> set[str]:
+    def base_labels(self) -> set[str]:
         return set(self._config.labels)
+
+    @property
+    def label_mapping(self) -> dict[str, str | None]:
+        return dict(self._config.label_mapping)
+
+    @property
+    def labels(self) -> set[str]:
+        return effective_detector_labels(self.base_labels, self._config.label_mapping)
 
     def _get_client(self):
         from clinical_deid.synthesis.client import OpenAICompatibleChatClient
@@ -172,13 +192,19 @@ class LlmNerPipe(ConfigurablePipe):
         if not text.strip():
             return doc
 
-        # Truncate if too long
-        if len(text) > self._config.max_text_length:
-            text = text[: self._config.max_text_length]
+        # Truncate if too long — use the truncated length for prompt and
+        # validation so span offsets are always relative to the same string.
+        llm_text = text
+        truncated = len(text) > self._config.max_text_length
+        if truncated:
+            llm_text = text[: self._config.max_text_length]
+            logger.info(
+                "LLM NER: truncated text from %d to %d chars", len(text), len(llm_text)
+            )
 
         template = self._config.prompt_template or _DEFAULT_PROMPT_TEMPLATE
         labels_str = ", ".join(self._config.labels)
-        prompt = template.format(text=text, labels=labels_str)
+        prompt = template.format(text=llm_text, labels=labels_str)
 
         client = self._get_client()
         messages = [ChatMessage(role="user", content=prompt)]
@@ -192,7 +218,7 @@ class LlmNerPipe(ConfigurablePipe):
             logger.exception("LLM NER call failed")
             return doc
 
-        parsed = _parse_llm_response(raw_response, len(text))
+        parsed = _parse_llm_response(raw_response, len(llm_text))
         allowed_labels = set(self._config.labels)
         spans: list[PHISpan] = []
         for item in parsed:
@@ -208,4 +234,5 @@ class LlmNerPipe(ConfigurablePipe):
                 )
             )
 
+        spans = apply_detector_label_mapping(spans, self._config.label_mapping)
         return accumulate_spans(doc, spans, skip_overlapping=self._config.skip_overlapping)

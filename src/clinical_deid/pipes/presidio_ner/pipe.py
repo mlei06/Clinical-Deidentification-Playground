@@ -57,6 +57,11 @@ DEFAULT_MODEL_TO_PRESIDIO: dict[str, str] = {
 SUPPORTED_MODEL_FAMILIES = ("spacy", "stanza", "huggingface", "flair")
 
 
+def default_base_labels() -> list[str]:
+    """Default label space for the presidio_ner detector."""
+    return sorted(set(DEFAULT_ENTITY_MAP.values()))
+
+
 def _parse_model_spec(model: str) -> tuple[str, str]:
     """Parse a ``'family/model_path'`` string into ``(family, model_path)``.
 
