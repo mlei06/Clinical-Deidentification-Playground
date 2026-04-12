@@ -47,7 +47,8 @@ DatasetFormat = Literal["jsonl", "brat-dir", "brat-corpus"]
 
 class EvalRunRequest(BaseModel):
     pipeline_name: str
-    dataset_path: str
+    dataset_path: str | None = None
+    dataset_name: str | None = None
     dataset_format: DatasetFormat = "jsonl"
 
 
@@ -130,6 +131,35 @@ def _eval_metrics_to_dict(em) -> dict[str, Any]:
     }
 
 
+def _redaction_metrics_to_dict(rm) -> dict[str, Any]:
+    return {
+        "gold_phi_count": rm.gold_phi_count,
+        "leaked_phi_count": rm.leaked_phi_count,
+        "leakage_rate": rm.leakage_rate,
+        "redaction_recall": rm.redaction_recall,
+        "over_redaction_chars": rm.over_redaction_chars,
+        "original_length": rm.original_length,
+        "redacted_length": rm.redacted_length,
+        "per_label": [
+            {
+                "label": ll.label,
+                "gold_count": ll.gold_count,
+                "leaked_count": ll.leaked_count,
+                "leakage_rate": ll.leakage_rate,
+            }
+            for ll in rm.per_label
+        ],
+        "leaked_spans": [
+            {
+                "label": ls.label,
+                "original_text": ls.original_text,
+                "found_at": ls.found_at,
+            }
+            for ls in rm.leaked_spans
+        ],
+    }
+
+
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
@@ -158,31 +188,48 @@ def run_evaluation(session: SessionDep, body: EvalRunRequest) -> EvalRunDetail:
             status_code=500, detail=f"failed to build pipeline: {exc}"
         ) from exc
 
-    # Load dataset — resolve and validate path to prevent traversal attacks.
-    corpus_path = Path(body.dataset_path).resolve()
-    allowed_roots = [Path.cwd().resolve()]
-    if settings.evaluations_dir.is_absolute():
-        allowed_roots.append(settings.evaluations_dir.resolve())
-    if not any(corpus_path == root or root in corpus_path.parents for root in allowed_roots):
+    # Load dataset — either from a registered dataset name or a raw path.
+    dataset_source: str
+    if body.dataset_name:
+        from clinical_deid.dataset_store import load_dataset_documents
+
+        try:
+            documents = load_dataset_documents(settings.datasets_dir, body.dataset_name)
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except Exception as exc:
+            raise HTTPException(status_code=422, detail=f"failed to load dataset: {exc}") from exc
+        dataset_source = f"dataset:{body.dataset_name}"
+    elif body.dataset_path:
+        corpus_path = Path(body.dataset_path).resolve()
+        allowed_roots = [Path.cwd().resolve()]
+        if settings.evaluations_dir.is_absolute():
+            allowed_roots.append(settings.evaluations_dir.resolve())
+        if not any(corpus_path == root or root in corpus_path.parents for root in allowed_roots):
+            raise HTTPException(
+                status_code=403,
+                detail="dataset_path must be within the project working directory",
+            )
+        if not corpus_path.exists():
+            raise HTTPException(status_code=404, detail=f"dataset path not found: {body.dataset_path}")
+
+        fmt_map: dict[DatasetFormat, dict[str, Path]] = {
+            "jsonl": {"jsonl": corpus_path},
+            "brat-dir": {"brat_dir": corpus_path},
+            "brat-corpus": {"brat_corpus": corpus_path},
+        }
+
+        try:
+            documents = load_annotated_corpus(**fmt_map[body.dataset_format])
+        except Exception as exc:
+            raise HTTPException(
+                status_code=422, detail=f"failed to load dataset: {exc}"
+            ) from exc
+        dataset_source = body.dataset_path
+    else:
         raise HTTPException(
-            status_code=403,
-            detail="dataset_path must be within the project working directory",
+            status_code=422, detail="Provide either dataset_name or dataset_path"
         )
-    if not corpus_path.exists():
-        raise HTTPException(status_code=404, detail=f"dataset path not found: {body.dataset_path}")
-
-    fmt_map: dict[DatasetFormat, dict[str, Path]] = {
-        "jsonl": {"jsonl": corpus_path},
-        "brat-dir": {"brat_dir": corpus_path},
-        "brat-corpus": {"brat_corpus": corpus_path},
-    }
-
-    try:
-        documents = load_annotated_corpus(**fmt_map[body.dataset_format])
-    except Exception as exc:
-        raise HTTPException(
-            status_code=422, detail=f"failed to load dataset: {exc}"
-        ) from exc
 
     if not documents:
         raise HTTPException(status_code=422, detail="dataset is empty")
@@ -200,18 +247,22 @@ def run_evaluation(session: SessionDep, body: EvalRunRequest) -> EvalRunDetail:
             "support": lm.support,
         }
 
-    metrics = {
+    metrics: dict[str, Any] = {
         "overall": _eval_metrics_to_dict(result.overall),
         "per_label": per_label_dict,
         "risk_weighted_recall": result.risk_weighted_recall,
         "label_confusion": result.label_confusion,
+        "has_redaction": result.has_redaction,
     }
+
+    if result.redaction is not None:
+        metrics["redaction"] = _redaction_metrics_to_dict(result.redaction)
 
     # Persist eval result to filesystem
     result_path = save_eval_result(
         settings.evaluations_dir,
         pipeline_name=body.pipeline_name,
-        dataset_source=body.dataset_path,
+        dataset_source=dataset_source,
         metrics=metrics,
         document_count=result.document_count,
     )
@@ -226,7 +277,7 @@ def run_evaluation(session: SessionDep, body: EvalRunRequest) -> EvalRunDetail:
             command="eval",
             pipeline_name=body.pipeline_name,
             pipeline_config=config,
-            dataset_source=body.dataset_path,
+            dataset_source=dataset_source,
             doc_count=result.document_count,
             span_count=result.overall.strict.tp + result.overall.strict.fp,
             duration_seconds=0.0,

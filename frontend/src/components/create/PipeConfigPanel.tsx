@@ -1,9 +1,13 @@
-import { useMemo } from 'react';
+import { useMemo, useState, useCallback, useRef, useEffect } from 'react';
 import { X, Trash2, Info } from 'lucide-react';
 import { usePipelineEditorStore } from '../../stores/pipelineEditorStore';
 import { labelColor } from '../../lib/labelColors';
 import SchemaForm from './SchemaForm';
 import type { SchemaFormContext } from './SchemaForm';
+
+const MIN_WIDTH = 280;
+const MAX_WIDTH = 640;
+const DEFAULT_WIDTH = 320;
 
 function SurrogateStrategies({ strategies }: { strategies: Record<string, string[]> }) {
   return (
@@ -70,10 +74,49 @@ export default function PipeConfigPanel() {
     return null;
   }, [data?.configSchema]);
 
+  const [width, setWidth] = useState(DEFAULT_WIDTH);
+  const dragging = useRef(false);
+  const startX = useRef(0);
+  const startW = useRef(DEFAULT_WIDTH);
+
+  const onMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    dragging.current = true;
+    startX.current = e.clientX;
+    startW.current = width;
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+  }, [width]);
+
+  useEffect(() => {
+    const onMouseMove = (e: MouseEvent) => {
+      if (!dragging.current) return;
+      const newWidth = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, startW.current - (e.clientX - startX.current)));
+      setWidth(newWidth);
+    };
+    const onMouseUp = () => {
+      if (!dragging.current) return;
+      dragging.current = false;
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+    };
+  }, []);
+
   if (!node || !data) return null;
 
   return (
-    <div className="flex w-80 shrink-0 flex-col overflow-y-auto border-l border-gray-200 bg-white">
+    <div className="relative flex shrink-0 flex-col overflow-y-auto border-l border-gray-200 bg-white" style={{ width }}>
+      {/* Resize handle */}
+      <div
+        onMouseDown={onMouseDown}
+        className="absolute inset-y-0 left-0 z-10 w-1 cursor-col-resize hover:bg-blue-400/40 active:bg-blue-400/60"
+      />
       {/* Header */}
       <div className="flex items-center gap-2 border-b border-gray-200 px-4 py-3">
         <div className="min-w-0 flex-1">

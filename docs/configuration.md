@@ -7,8 +7,12 @@ All configuration is managed through environment variables, with sensible defaul
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `CLINICAL_DEID_DATABASE_URL` | `sqlite:///./var/dev.sqlite` | SQLAlchemy database URL |
-| `CLINICAL_DEID_LOCAL_DATA_DIR` | `var/data` | Root directory for dataset storage |
-| `CLINICAL_DEID_MODELS_DIR` | `models/` | Root directory for model registry |
+| `CLINICAL_DEID_PIPELINES_DIR` | `pipelines` | Named pipeline JSON configs |
+| `CLINICAL_DEID_EVALUATIONS_DIR` | `evaluations` | Evaluation result JSON files |
+| `CLINICAL_DEID_DATASETS_DIR` | `datasets` | Dataset manifest JSON files |
+| `CLINICAL_DEID_DICTIONARIES_DIR` | `data/dictionaries` | Whitelist/blacklist term-list files |
+| `CLINICAL_DEID_MODELS_DIR` | `models` | Root directory for model registry |
+| `CLINICAL_DEID_CORS_ORIGINS` | `["http://localhost:3000", "http://127.0.0.1:3000"]` | Allowed CORS origins |
 | `CLINICAL_DEID_ENV_FILE` | _(auto-detected)_ | Explicit path to `.env` file |
 | `OPENAI_API_KEY` | _(none)_ | API key for LLM synthesis |
 | `CLINICAL_DEID_OPENAI_API_KEY` | _(none)_ | Alternative name for the API key |
@@ -61,12 +65,11 @@ To use a different path:
 export CLINICAL_DEID_DATABASE_URL="sqlite:////tmp/my-deid.sqlite"
 ```
 
-Tables are auto-created on startup via `init_db()`. The two existing tables are:
+Tables are auto-created on startup via `init_db()`:
 
 | Table | Purpose |
 |-------|---------|
-| `pipeline` | Named pipelines with description, version counter, soft-delete flag |
-| `pipelineversion` | Immutable version snapshots with JSON config and SHA-256 config hash |
+| `audit_log` | Append-only audit trail for all CLI and API operations |
 
 ## Pipeline cache
 
@@ -91,11 +94,11 @@ The `clinical_deid` logger namespace is used throughout the application. Uvicorn
 
 ## CORS
 
-CORS middleware allows requests from:
-- `http://localhost:3000`
-- `http://127.0.0.1:3000`
+CORS middleware allows requests from origins in `CLINICAL_DEID_CORS_ORIGINS` (default: `http://localhost:3000`, `http://127.0.0.1:3000`). Override via environment variable or `.env` file.
 
-Edit `src/clinical_deid/api/app.py` to change allowed origins for production deployments.
+## Deploy configuration
+
+Production deploy settings are stored in `modes.json` (project root). This file is managed via the `/deploy` API endpoints and the Deploy tab in the UI. It maps inference mode names to pipelines, defines an optional pipeline allowlist, and stores the production API URL for audit log proxying.
 
 ## Project structure
 
@@ -107,7 +110,14 @@ src/clinical_deid/
 │   ├── schemas.py        # Pydantic request/response models
 │   └── routers/
 │       ├── pipelines.py  # Pipeline CRUD + file upload endpoints
-│       └── process.py    # Inference endpoints
+│       ├── process.py    # Inference endpoints
+│       ├── evaluation.py # Eval run/list/compare
+│       ├── datasets.py   # Dataset register/browse/compose/transform/generate
+│       ├── dictionaries.py # Dictionary CRUD
+│       ├── audit.py      # Audit log query + stats
+│       ├── audit_proxy.py # Production audit proxy
+│       ├── deploy.py     # Deploy config (modes, allowlist)
+│       └── models.py     # Model listing
 ├── pipes/                # Pipe system (see pipes-and-pipelines.md)
 │   ├── base.py           # Protocols (Pipe, Detector, Redactor, etc.)
 │   ├── registry.py       # Registration, JSON serialization, catalog

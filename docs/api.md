@@ -270,6 +270,217 @@ Process multiple documents in one request.
 
 ---
 
+### Dictionaries
+
+All dictionary routes are under `/dictionaries`. Dictionaries are term lists (whitelist or blacklist) stored under `data/dictionaries/`.
+
+#### `GET /dictionaries`
+
+List all stored dictionaries. Optional query params: `kind` (whitelist/blacklist), `label`.
+
+#### `GET /dictionaries/{kind}/{name}`
+
+Get a dictionary's terms. For whitelist dictionaries, pass `?label=HOSPITAL` to get a specific label section.
+
+#### `GET /dictionaries/{kind}/{name}/preview`
+
+Preview with sample terms and metadata.
+
+#### `GET /dictionaries/{kind}/{name}/terms`
+
+Paginated term list. Query params: `offset`, `limit`, `search`, `label`.
+
+#### `POST /dictionaries`
+
+Upload a dictionary file. Multipart form: `file` (txt/csv/json, max 2 MB), `kind`, `name`, optional `label`.
+
+#### `DELETE /dictionaries/{kind}/{name}`
+
+Delete a dictionary. Optional query param: `label`.
+
+---
+
+### Datasets
+
+All dataset routes are under `/datasets`. Datasets are registered from local paths and stored as JSON manifests in `datasets/`.
+
+#### `GET /datasets`
+
+List registered datasets. Query params: `limit`, `offset`.
+
+#### `POST /datasets`
+
+Register a dataset from a local path. Validates data and computes analytics.
+
+**Request:**
+```json
+{
+  "name": "i2b2-2014",
+  "data_path": "/path/to/corpus.jsonl",
+  "format": "jsonl",
+  "description": "i2b2 2014 de-identification corpus"
+}
+```
+
+Supported formats: `jsonl`, `brat-dir`, `brat-corpus`.
+
+**Errors:** `409` (name taken), `422` (invalid data), `404` (path not found).
+
+#### `GET /datasets/{name}`
+
+Full dataset metadata and cached analytics (label counts, span stats, etc.).
+
+#### `PUT /datasets/{name}`
+
+Update description or metadata (does not re-scan data).
+
+#### `DELETE /datasets/{name}`
+
+Unregister a dataset. Does **not** delete the underlying data files.
+
+#### `POST /datasets/{name}/refresh`
+
+Reload data from disk and recompute cached analytics.
+
+#### `GET /datasets/{name}/preview`
+
+Preview documents (paginated). Returns document ID, text preview, span count, and labels per document.
+
+#### `GET /datasets/{name}/documents/{doc_id}`
+
+Full document text with all spans.
+
+#### `POST /datasets/compose`
+
+Compose multiple datasets into a new registered dataset.
+
+**Request:**
+```json
+{
+  "output_name": "combined-corpus",
+  "source_datasets": ["i2b2-2014", "physionet"],
+  "strategy": "merge",
+  "shuffle": true
+}
+```
+
+Strategies: `merge` (concatenate), `interleave` (round-robin), `proportional` (weighted sampling with `weights`).
+
+#### `POST /datasets/transform`
+
+Apply transforms to a dataset and register the result. Available transforms (applied in order): drop/keep labels, label mapping, resize, boost rare labels, re-split, strip splits.
+
+#### `POST /datasets/generate`
+
+Generate synthetic clinical notes via LLM and register as a dataset.
+
+**Request:**
+```json
+{
+  "output_name": "synth-100",
+  "count": 100,
+  "phi_types": ["PERSON", "DATE", "LOCATION"],
+  "description": "Synthetic training data"
+}
+```
+
+---
+
+### Evaluation
+
+#### `POST /eval/run`
+
+Run pipeline against a gold-standard dataset.
+
+#### `GET /eval/runs`
+
+List stored evaluation results.
+
+#### `GET /eval/runs/{id}`
+
+Evaluation result detail (metrics, per-label breakdown, document results).
+
+#### `POST /eval/compare`
+
+Compare two evaluation runs side-by-side.
+
+---
+
+### Audit
+
+#### `GET /audit/logs`
+
+Query audit trail. Query params: `pipeline_name`, `source`, `command`, `from_date`, `to_date`, `limit`, `offset`.
+
+#### `GET /audit/logs/{id}`
+
+Audit log detail (full pipeline config, metrics, etc.).
+
+#### `GET /audit/stats`
+
+Aggregate stats: total requests, average duration, top pipelines, source breakdown. Query params: `pipeline_name`, `source`.
+
+#### `GET /audit/production/logs`
+
+Proxy audit log listing from a remote production API. Requires `production_api_url` configured in `modes.json` (via the Deploy tab).
+
+#### `GET /audit/production/logs/{id}`
+
+Proxy a single audit log detail from the production API.
+
+#### `GET /audit/production/stats`
+
+Proxy audit stats from the production API.
+
+---
+
+### Deploy
+
+Deploy configuration manages which pipelines are available in production and maps them to named inference modes.
+
+#### `GET /deploy`
+
+Read the current deploy configuration (modes, default mode, pipeline allowlist, production API URL).
+
+#### `PUT /deploy`
+
+Write an updated deploy configuration.
+
+**Request:**
+```json
+{
+  "modes": {
+    "fast": {"pipeline": "regex-only", "description": "Fastest, regex only"},
+    "balanced": {"pipeline": "balanced-v2", "description": "Regex + Presidio"}
+  },
+  "default_mode": "balanced",
+  "allowed_pipelines": ["regex-only", "balanced-v2"],
+  "production_api_url": "https://prod-server:8000"
+}
+```
+
+#### `GET /deploy/pipelines`
+
+List all saved pipeline names (for populating UI dropdowns).
+
+---
+
+### Models
+
+#### `GET /models`
+
+List trained models from the `models/` directory.
+
+#### `GET /models/{framework}/{name}`
+
+Model manifest details.
+
+#### `POST /models/refresh`
+
+Re-scan the models directory.
+
+---
+
 ## Request limits
 
 | Limit | Value | Where defined |

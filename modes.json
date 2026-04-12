@@ -1,0 +1,19 @@
+{
+  "modes": {
+    "fast": {
+      "pipeline": "regex-whitelist-blacklist",
+      "description": "Regex + whitelist + blacklist. No ML, lowest latency."
+    },
+    "balanced": {
+      "pipeline": "presidio-plus-regex",
+      "description": "Presidio NER + regex + whitelist. Good accuracy/speed tradeoff."
+    },
+    "accurate": {
+      "pipeline": "full-ensemble",
+      "description": "All detectors + consistency propagation. Highest quality."
+    }
+  },
+  "default_mode": "balanced",
+  "allowed_pipelines": null,
+  "production_api_url": null
+}

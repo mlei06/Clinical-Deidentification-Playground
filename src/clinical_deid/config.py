@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     evaluations_dir: Path = Path("evaluations")
     inference_runs_dir: Path = Path("inference_runs")
     models_dir: Path = Path("models")
+    datasets_dir: Path = Path("datasets")
     dictionaries_dir: Path = Path("data/dictionaries")
     cors_origins: list[str] = Field(
         default=["http://localhost:3000", "http://127.0.0.1:3000"],

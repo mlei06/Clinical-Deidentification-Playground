@@ -14,7 +14,7 @@ A **local-first platform** for clinical text de-identification. Three complement
 
 3. **Inference for services** — Expose **HTTP endpoints** so upstream systems send text (or batch items) and receive de-identified output plus **auditable** metadata: `request_id`, spans, timings, pipeline name, and optional **intermediary traces** when the pipeline enables step capture. All operations are logged to a unified SQLite audit trail.
 
-4. **Playground (planned UI)** — A **web UI** on top of the same APIs so people can: **(a)** pick a saved pipeline, paste or upload text, and inspect results (redacted output, spans, optional step trace); **(b)** run **evaluation** against annotated data either from **paths on the server** (JSONL, BRAT corpus roots the app can read) or from **drag-and-drop uploads** in the browser. The goal is parity: *one eval implementation*, two ways to supply gold data.
+4. **Playground UI** — A **React + TypeScript web UI** (Vite, Tailwind CSS) with seven views: **(a)** visual pipeline builder, **(b)** inference with span highlighting and step trace, **(c)** eval dashboard with metrics/confusion matrix/comparison, **(d)** dataset management (register, compose, transform, generate), **(e)** dictionary management, **(f)** deploy configuration (inference modes, pipeline allowlist), **(g)** audit log viewer with stats and local/production toggle.
 
 ---
 
@@ -29,7 +29,7 @@ A **local-first platform** for clinical text de-identification. Three complement
 
 ## Current state of the codebase
 
-**~7,000 lines of Python** across 96 source modules, 25 test files, and 9 scripts. FastAPI backend with SQLite for audit only. Python 3.11+.
+FastAPI backend with SQLite for audit only, React + TypeScript frontend. Python 3.11+.
 
 ### What's built and working
 
@@ -41,8 +41,8 @@ A **local-first platform** for clinical text de-identification. Three complement
 | **Pipeline composition** | `Pipeline` (sequential chain), `ParallelDetectors` (fan-out with merge: union, consensus voting, max-confidence, longest, exact-dedupe). |
 | **Pipe registry** | Maps type names to (config_class, pipe_class) pairs. JSON serialization/deserialization. Adding a new detector = config class + pipe class + one `register()` call. |
 | **Pipeline profiles** | `fast` (regex-only), `balanced` (+ presidio), `accurate` (+ consistency propagation + span resolution). |
-| **CLI** | `run` (stdin/files), `batch` (directory/JSONL), `eval` (gold corpus), `audit list/show`, `setup`, `serve`. All support `--profile`, `--pipeline`, `--config`, `--redactor`. |
-| **API** | Pipeline CRUD, process (single + batch), evaluation (run/list/compare), audit (logs/stats), models (list/detail/refresh). |
+| **CLI** | `run` (stdin/files), `batch` (directory/JSONL), `eval` (gold corpus), `dict` (list/preview/import/delete), `dataset` (list/register/show/delete), `audit list/show`, `setup`, `serve`. Pipeline commands support `--profile`, `--pipeline`, `--config`, `--redactor`. |
+| **API** | Pipeline CRUD, process (single + batch), evaluation (run/list/compare), datasets (register/browse/compose/transform/generate), dictionaries (CRUD), audit (logs/stats + production proxy), deploy (modes config), models (list/detail/refresh). |
 | **Evaluation** | 4 matching modes (strict, exact boundary, partial overlap, token-level BIO), risk-weighted recall, HIPAA Safe Harbor coverage, per-label breakdown, confusion matrix, worst-document ranking. |
 | **Storage** | Filesystem-first: pipelines as JSON, eval results as JSON, models as directories. SQLite only for append-only audit trail. |
 | **Dataset ingestion** | JSONL, BRAT (.txt/.ann with splits), ASQ-PHI, MIMIC synthetic notes, PhysioNet i2b2. |
@@ -50,39 +50,45 @@ A **local-first platform** for clinical text de-identification. Three complement
 | **Transforms** | Label remapping, random resize (downsample/upsample), boost by label, train/valid/test split reassignment. |
 | **Composition** | Merge, interleave, proportional sampling across multiple corpora. |
 | **LLM synthesis** | Few-shot clinical note generation via OpenAI-compatible API. Prompt templates, PHI extraction, span alignment. |
-| **Tests** | 25 test files covering API, ingestion, analytics, transforms, synthesis, config, compose, pipeline execution, span resolution. |
+| **Playground UI** | React + TypeScript (Vite, Tailwind). 7 views: pipeline builder, inference, eval dashboard, datasets, dictionaries, deploy config, audit log viewer. |
+| **Dataset API + CLI** | REST API: register, browse, compose, transform, LLM generate. CLI: `dataset list/register/show/delete`. |
+| **Deploy config** | Inference modes mapped to pipelines, pipeline allowlist, production API URL — managed via UI and `modes.json`. |
+| **Audit production proxy** | Playground UI can view remote production audit logs via `/audit/production/*` proxy endpoints. |
+| **Tests** | 27+ test files covering API, ingestion, analytics, transforms, synthesis, config, compose, pipeline execution, span resolution, datasets, eval. |
 
 ### What's NOT built yet
 
 | Gap | Status |
 |---|---|
-| **Playground UI** (`htmx + Jinja2`) | Planned — pipeline picker + text try-it; eval with local path or browser upload |
-| **Log viewer UI** | Planned — browse audit trail in browser |
 | **Training data export** (spaCy DocBin / HF JSONL / CoNLL) | Planned |
 | **Training runner CLI** | Planned |
 | **Custom NER pipe** (loads trained models from `models/` by name) | Planned |
-| **Eval corpus upload** (multipart JSONL / zip BRAT for browser eval) | Planned |
-| **Dataset HTTP API** (import/list/analytics) | Optional — library + scripts exist |
 
 ---
 
 ## Architecture
 
 ```
-     +--------------------------------+       +-------------------------+
-     | Playground UI (planned)         |       | Log / audit viewer       |
-     |  text in -> spans out; eval     |       | (htmx + Jinja2, planned) |
-     |  local path or file upload      |       +------------+------------+
-     +----------------+---------------+                    |
-                      |          FastAPI Gateway            |
-                      +----------------+-------------------+
-                                       |
-  +----------+----------+--------------+----------+----------+--------------+
-  |          |          |              |          |          |              |
-  v          v          v              v          v          v              v
-Data prep  Training   Model          Pipeline   Process   Audit-Log     Evaluation
-+ library  (local     Directory      Service    Service   Service       Service
-(scripts)  CLI, plan) (FS registry)  (exists)   (exists)  (exists)      (exists)
+     +-------------------------------------------------------+
+     | Playground UI (React + Vite + TypeScript)              |
+     |  /create  /inference  /evaluate  /datasets             |
+     |  /dictionaries  /deploy  /audit                        |
+     +----------------------------+--------------------------+
+                                  |
+                          FastAPI Gateway
+                                  |
+  +----------+----------+---------+--------+-----------+-----------+
+  |          |          |         |        |           |           |
+  v          v          v         v        v           v           v
+Pipeline   Process   Eval      Dataset  Dictionary  Deploy     Audit
+Service    Service   Service   Service  Service     Service    Service
+                                                               + prod proxy
+  +----------+----------+
+  |          |          |
+  v          v          v
+Data prep  Training   Model
++ library  (local     Directory
+(scripts)  CLI, plan) (FS registry)
 ```
 
 ---
@@ -197,6 +203,23 @@ Merge strategies: `union`, `exact_dedupe`, `consensus`, `max_confidence`, `longe
 | `PUT` | `/pipelines/{name}` | Update pipeline config |
 | `DELETE` | `/pipelines/{name}` | Delete pipeline |
 | `POST` | `/pipelines/{name}/validate` | Dry-run validation |
+| `GET` | `/dictionaries` | List dictionaries |
+| `GET` | `/dictionaries/{kind}/{name}` | Dictionary metadata |
+| `GET` | `/dictionaries/{kind}/{name}/preview` | Preview terms |
+| `GET` | `/dictionaries/{kind}/{name}/terms` | Full term list (paginated) |
+| `POST` | `/dictionaries` | Upload dictionary |
+| `DELETE` | `/dictionaries/{kind}/{name}` | Delete dictionary |
+| `GET` | `/datasets` | List registered datasets |
+| `POST` | `/datasets` | Register dataset from local path |
+| `GET` | `/datasets/{name}` | Dataset detail + analytics |
+| `PUT` | `/datasets/{name}` | Update description/metadata |
+| `DELETE` | `/datasets/{name}` | Unregister dataset |
+| `POST` | `/datasets/{name}/refresh` | Recompute analytics |
+| `GET` | `/datasets/{name}/preview` | Preview documents (paginated) |
+| `GET` | `/datasets/{name}/documents/{doc_id}` | Full document with spans |
+| `POST` | `/datasets/compose` | Compose multiple datasets |
+| `POST` | `/datasets/transform` | Apply transforms to dataset |
+| `POST` | `/datasets/generate` | Generate synthetic data via LLM |
 | `POST` | `/process/{pipeline_name}` | Run pipeline on text; auditable JSON response |
 | `POST` | `/process/{pipeline_name}/batch` | Batch process |
 | `POST` | `/eval/run` | Run pipeline against gold dataset |
@@ -206,6 +229,12 @@ Merge strategies: `union`, `exact_dedupe`, `consensus`, `max_confidence`, `longe
 | `GET` | `/audit/logs` | Query audit trail (paginated, filtered) |
 | `GET` | `/audit/logs/{id}` | Audit log detail |
 | `GET` | `/audit/stats` | Aggregate stats |
+| `GET` | `/audit/production/logs` | Proxy production audit logs |
+| `GET` | `/audit/production/logs/{id}` | Proxy production log detail |
+| `GET` | `/audit/production/stats` | Proxy production stats |
+| `GET` | `/deploy` | Get deploy config (modes + allowlist) |
+| `PUT` | `/deploy` | Update deploy config |
+| `GET` | `/deploy/pipelines` | List deployable pipeline names |
 | `GET` | `/models` | List models from filesystem |
 | `GET` | `/models/{framework}/{name}` | Model manifest details |
 | `POST` | `/models/refresh` | Re-scan models directory |
@@ -225,7 +254,10 @@ src/clinical_deid/
   eval_store.py              # Filesystem eval result storage
   models.py                  # Filesystem model registry (scan, get, list)
   profiles.py                # fast/balanced/accurate profile builders
-  cli.py                     # Click CLI (run, batch, eval, audit, setup, serve)
+  cli.py                     # Click CLI (run, batch, eval, dict, dataset, audit, setup, serve)
+  dataset_store.py           # Filesystem dataset registry (register, list, analytics)
+  dictionary_store.py        # Whitelist/blacklist term-list CRUD
+  mode_config.py             # Deploy config (modes.json) load/save
   export.py                  # Output formatters (text, JSON, JSONL, CSV, Parquet)
   ids.py                     # UUID helpers
   env_file.py                # .env resolution
@@ -255,7 +287,11 @@ src/clinical_deid/
       pipelines.py           # Pipeline CRUD, pipe-types, validate, list helpers
       process.py             # Inference (text + batch), audit logging
       evaluation.py          # Eval run/list/compare (filesystem-backed)
+      datasets.py            # Dataset register/browse/compose/transform/generate
+      dictionaries.py        # Dictionary CRUD (upload, list, preview, delete)
       audit.py               # Audit log query + stats
+      audit_proxy.py         # Proxy production audit endpoints
+      deploy.py              # Deploy config (modes, allowlist)
       models.py              # Model listing (filesystem-backed)
   eval/
     spans.py                 # strict_micro_f1, SpanMicroF1
@@ -300,11 +336,11 @@ src/clinical_deid/
 | Phase | Scope | Status |
 |---|---|---|
 | **1. Pipe system + composition** | Protocol, registry, built-in pipes, combinators, JSON serialization | Done |
-| **2. API + CLI** | Pipeline CRUD, process, batch, CLI commands, profiles | Done |
+| **2. API + CLI** | Pipeline CRUD, process, batch, dict, dataset, audit CLI commands, profiles | Done |
 | **3. Evaluation** | Multi-mode matching, risk-weighted recall, HIPAA coverage, eval runner, eval API | Done |
-| **4. Storage refactor** | Filesystem-first pipelines + eval, unified audit trail | Done |
-| **5. Playground UI** | htmx pages: pipeline selector, text try-it, eval form (local path or drag-and-drop) | Planned |
-| **6. Log Viewer UI** | htmx templates, dashboard, log viewer | Planned |
+| **4. Storage refactor** | Filesystem-first pipelines + eval + datasets, unified audit trail | Done |
+| **5. Playground UI** | React + Vite: pipeline builder, inference, eval, datasets, dictionaries, deploy, audit | Done |
+| **6. Dataset & Deploy APIs** | Dataset register/compose/transform/generate, deploy config, audit production proxy | Done |
 | **7. Training & Models** | Exporters, training CLI, custom_ner pipe | Planned |
 
 ---
@@ -316,7 +352,7 @@ src/clinical_deid/
 - **LLM:** OpenAI-compatible API client
 - **Testing:** Pytest, Faker, HTTPx (async test client)
 - **Data:** Pandas (scripts), custom JSONL/BRAT parsers
-- **UI (planned):** htmx, Jinja2, Chart.js
+- **Frontend:** React, TypeScript, Vite, Tailwind CSS, TanStack Query
 - **Storage:** SQLite (audit only), local filesystem for everything else
 
 ---
@@ -326,13 +362,16 @@ src/clinical_deid/
 ```
 1. Ingest data        -> JSONL, BRAT, ASQ-PHI, MIMIC
 2. Prepare data       -> label remap, compose, augment with LLM synthesis
+                         UI: /datasets (register, compose, transform, generate)
+                         CLI: clinical-deid dataset register/list/show
 3. Export             -> clinical-deid export (spaCy/HF/CoNLL) [planned]
 4. Train              -> clinical-deid train (local, outputs to models/) [planned]
 5. Available          -> model directory scanned, appears in GET /models
-6. Build pipeline     -> save as pipelines/my-pipeline.json or POST /pipelines
-7. Evaluate pipeline  -> clinical-deid eval or POST /eval/run
-8. Try interactively  -> Playground UI [planned]: choose pipeline, paste text
-9. Deploy pipeline    -> POST /process/{pipeline_name} (with audit logging)
-10. Monitor           -> GET /audit/logs, GET /audit/stats
-11. Retrain           -> new data or failed cases -> back to step 2
+6. Build pipeline     -> UI: /create (visual builder) or POST /pipelines
+7. Evaluate pipeline  -> UI: /evaluate or clinical-deid eval or POST /eval/run
+8. Try interactively  -> UI: /inference — paste text, see spans + trace
+9. Configure deploy   -> UI: /deploy — map modes to pipelines, set allowlist
+10. Deploy pipeline   -> POST /process/{pipeline_name} (with audit logging)
+11. Monitor           -> UI: /audit or clinical-deid audit list or GET /audit/logs
+12. Retrain           -> new data or failed cases -> back to step 2
 ```

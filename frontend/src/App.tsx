@@ -5,6 +5,9 @@ import PipelineBuilder from './components/create/PipelineBuilder';
 import InferenceView from './components/inference/InferenceView';
 import EvaluateView from './components/evaluate/EvaluateView';
 import DictionaryManager from './components/dictionaries/DictionaryManager';
+import DeployView from './components/deploy/DeployView';
+import DatasetsView from './components/datasets/DatasetsView';
+import AuditView from './components/audit/AuditView';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -21,7 +24,10 @@ export default function App() {
             <Route path="/create" element={<PipelineBuilder />} />
             <Route path="/inference" element={<InferenceView />} />
             <Route path="/evaluate" element={<EvaluateView />} />
+            <Route path="/datasets" element={<DatasetsView />} />
             <Route path="/dictionaries" element={<DictionaryManager />} />
+            <Route path="/deploy" element={<DeployView />} />
+            <Route path="/audit" element={<AuditView />} />
             <Route path="*" element={<Navigate to="/create" replace />} />
           </Route>
         </Routes>

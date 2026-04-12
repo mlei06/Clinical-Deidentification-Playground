@@ -102,8 +102,9 @@ export interface MatchMetrics {
 
 export interface EvalRunRequest {
   pipeline_name: string;
-  dataset_path: string;
-  dataset_format: 'jsonl' | 'brat-dir' | 'brat-corpus';
+  dataset_path?: string;
+  dataset_name?: string;
+  dataset_format?: 'jsonl' | 'brat-dir' | 'brat-corpus';
 }
 
 export interface EvalRunSummary {
@@ -123,12 +124,39 @@ export interface LabelMetricsDetail {
   support: number;
 }
 
+export interface LabelLeakage {
+  label: string;
+  gold_count: number;
+  leaked_count: number;
+  leakage_rate: number;
+}
+
+export interface LeakedSpan {
+  label: string;
+  original_text: string;
+  found_at: number[];
+}
+
+export interface RedactionMetrics {
+  gold_phi_count: number;
+  leaked_phi_count: number;
+  leakage_rate: number;
+  redaction_recall: number;
+  over_redaction_chars: number;
+  original_length: number;
+  redacted_length: number;
+  per_label: LabelLeakage[];
+  leaked_spans: LeakedSpan[];
+}
+
 export interface EvalRunDetail extends EvalRunSummary {
   metrics: {
     overall: Record<string, MatchMetrics>;
     per_label: Record<string, LabelMetricsDetail>;
     risk_weighted_recall: number;
     label_confusion: Record<string, Record<string, number>>;
+    has_redaction?: boolean;
+    redaction?: RedactionMetrics;
   };
 }
 
@@ -137,6 +165,143 @@ export interface EvalCompareResponse {
   run_b: EvalRunDetail;
   delta_strict_f1: number;
   delta_risk_weighted_recall: number;
+}
+
+// Deploy config
+export interface ModeEntry {
+  pipeline: string;
+  description: string;
+}
+
+export interface DeployConfig {
+  modes: Record<string, ModeEntry>;
+  default_mode: string | null;
+  allowed_pipelines: string[] | null;
+  production_api_url: string | null;
+}
+
+// Audit
+export interface AuditLogSummary {
+  id: string;
+  timestamp: string;
+  user: string;
+  command: string;
+  pipeline_name: string;
+  source: string;
+  doc_count: number;
+  span_count: number;
+  duration_seconds: number;
+}
+
+export interface AuditLogDetail extends AuditLogSummary {
+  pipeline_config: Record<string, unknown>;
+  dataset_source: string;
+  error_count: number;
+  metrics: Record<string, unknown>;
+  notes: string;
+}
+
+export interface AuditStats {
+  total_requests: number;
+  avg_duration_seconds: number;
+  total_spans_detected: number;
+  top_pipelines: { pipeline_name: string; request_count: number }[];
+  source_breakdown: Record<string, number>;
+}
+
+// Datasets
+export interface DatasetSummary {
+  name: string;
+  description: string;
+  data_path: string;
+  format: 'jsonl' | 'brat-dir' | 'brat-corpus';
+  document_count: number;
+  total_spans: number;
+  labels: string[];
+  created_at: string;
+}
+
+export interface DatasetDetail extends DatasetSummary {
+  analytics: DatasetAnalytics;
+  metadata: Record<string, unknown>;
+}
+
+export interface DatasetAnalytics {
+  document_count: number;
+  total_spans: number;
+  unique_label_count: number;
+  label_counts: Record<string, number>;
+  character_length: NumericSummary;
+  token_count_estimate: NumericSummary;
+  spans_per_document: NumericSummary;
+  documents_by_span_count: Record<string, number>;
+  span_character_length: NumericSummary;
+  span_length_histogram: Record<string, number>;
+  documents_with_overlapping_spans: number;
+  overlapping_span_pairs: number;
+  label_cooccurrence: Record<string, number>;
+}
+
+export interface NumericSummary {
+  mean: number;
+  min: number;
+  max: number;
+  std: number;
+}
+
+export interface DocumentPreview {
+  document_id: string;
+  text_preview: string;
+  span_count: number;
+  labels: string[];
+}
+
+export interface DocumentDetail {
+  document_id: string;
+  text: string;
+  metadata: Record<string, unknown>;
+  spans: { start: number; end: number; label: string; confidence?: number | null; source?: string | null }[];
+}
+
+export interface RegisterDatasetRequest {
+  name: string;
+  data_path: string;
+  format: 'jsonl' | 'brat-dir' | 'brat-corpus';
+  description?: string;
+}
+
+export interface ComposeRequest {
+  output_name: string;
+  source_datasets: string[];
+  strategy: 'merge' | 'interleave' | 'proportional';
+  weights?: number[];
+  target_documents?: number;
+  seed?: number;
+  shuffle?: boolean;
+  description?: string;
+}
+
+export interface TransformRequest {
+  source_dataset: string;
+  output_name: string;
+  drop_labels?: string[];
+  keep_labels?: string[];
+  label_mapping?: Record<string, string>;
+  target_documents?: number;
+  boost_label?: string;
+  boost_extra_copies?: number;
+  resplit?: Record<string, number>;
+  strip_splits?: boolean;
+  seed?: number;
+  description?: string;
+}
+
+export interface GenerateRequest {
+  output_name: string;
+  count: number;
+  phi_types?: string[];
+  special_rules?: string;
+  description?: string;
 }
 
 // Dictionaries

@@ -797,3 +797,223 @@ def serve(host: str, port: int, do_reload: bool, workers: int) -> None:
         reload=do_reload,
         workers=workers,
     )
+
+
+# ---------------------------------------------------------------------------
+# dict (dictionary management)
+# ---------------------------------------------------------------------------
+
+
+@main.group(name="dict")
+def dict_group() -> None:
+    """Dictionary management (whitelist / blacklist term lists)."""
+
+
+def _dict_store():
+    from clinical_deid.config import get_settings
+    from clinical_deid.dictionary_store import DictionaryStore
+
+    return DictionaryStore(get_settings().dictionaries_dir)
+
+
+@dict_group.command(name="list")
+@click.option("--kind", type=click.Choice(["whitelist", "blacklist"]), default=None)
+@click.option("--label", default=None, help="Filter by label (whitelist only).")
+def dict_list(kind: str | None, label: str | None) -> None:
+    """List all dictionaries."""
+    store = _dict_store()
+    entries = store.list_dictionaries(kind=kind, label=label)
+    if not entries:
+        click.echo("No dictionaries found.")
+        return
+
+    header = f"{'Kind':<12} {'Name':<25} {'Label':<15} {'Terms':>8} {'File'}"
+    click.echo(header)
+    click.echo("-" * len(header))
+    for e in entries:
+        lbl = getattr(e, "label", "") or ""
+        click.echo(
+            f"{e.kind:<12} {e.name:<25} {lbl:<15} {e.term_count:>8} {e.filename}"
+        )
+
+
+@dict_group.command(name="preview")
+@click.argument("kind", type=click.Choice(["whitelist", "blacklist"]))
+@click.argument("name")
+@click.option("--label", default=None, help="Label section (whitelist only).")
+@click.option("-n", "count", default=20, show_default=True, help="Number of terms to show.")
+def dict_preview(kind: str, name: str, label: str | None, count: int) -> None:
+    """Preview terms from a dictionary."""
+    store = _dict_store()
+    try:
+        terms = store.get_terms(kind, name, label=label)
+    except FileNotFoundError as exc:
+        click.echo(f"Error: {exc}", err=True)
+        raise SystemExit(1)
+
+    click.echo(f"{kind}/{name}  ({len(terms)} terms total)")
+    for t in terms[:count]:
+        click.echo(f"  {t}")
+    if len(terms) > count:
+        click.echo(f"  ... and {len(terms) - count} more")
+
+
+@dict_group.command(name="import")
+@click.argument("file", type=click.Path(exists=True))
+@click.option("--kind", type=click.Choice(["whitelist", "blacklist"]), required=True)
+@click.option("--name", required=True, help="Dictionary name.")
+@click.option("--label", default=None, help="Label (whitelist only).")
+def dict_import(file: str, kind: str, name: str, label: str | None) -> None:
+    """Import a dictionary from a local file (txt, csv, or json)."""
+    p = Path(file)
+    content = p.read_text(encoding="utf-8")
+    ext = p.suffix if p.suffix in (".txt", ".csv", ".json") else ".txt"
+
+    store = _dict_store()
+    try:
+        info = store.save(kind, name, content, label=label, extension=ext)
+    except ValueError as exc:
+        click.echo(f"Error: {exc}", err=True)
+        raise SystemExit(1)
+
+    click.echo(f"Saved {info.term_count} terms to {info.kind}/{info.filename}")
+
+
+@dict_group.command(name="delete")
+@click.argument("kind", type=click.Choice(["whitelist", "blacklist"]))
+@click.argument("name")
+@click.option("--label", default=None, help="Label section (whitelist only).")
+def dict_delete(kind: str, name: str, label: str | None) -> None:
+    """Delete a dictionary."""
+    store = _dict_store()
+    try:
+        store.delete(kind, name, label=label)
+    except FileNotFoundError as exc:
+        click.echo(f"Error: {exc}", err=True)
+        raise SystemExit(1)
+    click.echo(f"Deleted {kind}/{name}")
+
+
+# ---------------------------------------------------------------------------
+# dataset
+# ---------------------------------------------------------------------------
+
+
+@main.group()
+def dataset() -> None:
+    """Dataset management (register, browse, delete)."""
+
+
+def _datasets_dir():
+    from clinical_deid.config import get_settings
+
+    return get_settings().datasets_dir
+
+
+@dataset.command(name="list")
+@click.option("--limit", type=int, default=50, show_default=True)
+def dataset_list(limit: int) -> None:
+    """List registered datasets."""
+    from clinical_deid.dataset_store import list_datasets
+
+    datasets = list_datasets(_datasets_dir())[:limit]
+    if not datasets:
+        click.echo("No datasets registered.")
+        return
+
+    header = f"{'Name':<25} {'Format':<12} {'Docs':>6} {'Spans':>8} {'Labels'}"
+    click.echo(header)
+    click.echo("-" * len(header))
+    for ds in datasets:
+        labels_str = ", ".join(ds.labels[:5])
+        if len(ds.labels) > 5:
+            labels_str += f" (+{len(ds.labels) - 5})"
+        click.echo(
+            f"{ds.name:<25} {ds.format:<12} {ds.document_count:>6} "
+            f"{ds.total_spans:>8} {labels_str}"
+        )
+
+
+@dataset.command(name="register")
+@click.argument("data_path", type=click.Path(exists=True))
+@click.option("--name", required=True, help="Dataset name.")
+@click.option(
+    "--format",
+    "fmt",
+    type=click.Choice(["jsonl", "brat-dir", "brat-corpus"]),
+    default="jsonl",
+    show_default=True,
+)
+@click.option("--description", default="", help="Optional description.")
+def dataset_register(data_path: str, name: str, fmt: str, description: str) -> None:
+    """Register a dataset from a local path.
+
+    \b
+    Examples:
+      clinical-deid dataset register data/corpus.jsonl --name i2b2-2014
+      clinical-deid dataset register data/brat/ --name physionet --format brat-dir
+    """
+    from clinical_deid.dataset_store import register_dataset
+
+    try:
+        manifest = register_dataset(
+            _datasets_dir(),
+            name,
+            str(Path(data_path).resolve()),
+            fmt,
+            description=description,
+        )
+    except (ValueError, FileNotFoundError) as exc:
+        click.echo(f"Error: {exc}", err=True)
+        raise SystemExit(1)
+
+    click.echo(
+        f"Registered {name!r}: {manifest['document_count']} docs, "
+        f"{manifest['total_spans']} spans, "
+        f"labels: {', '.join(manifest['labels'])}"
+    )
+
+
+@dataset.command(name="show")
+@click.argument("name")
+def dataset_show(name: str) -> None:
+    """Show details of a registered dataset."""
+    from clinical_deid.dataset_store import load_dataset_manifest
+
+    try:
+        m = load_dataset_manifest(_datasets_dir(), name)
+    except FileNotFoundError as exc:
+        click.echo(f"Error: {exc}", err=True)
+        raise SystemExit(1)
+
+    click.echo(f"Name:          {m['name']}")
+    click.echo(f"Description:   {m.get('description', '')}")
+    click.echo(f"Data path:     {m['data_path']}")
+    click.echo(f"Format:        {m['format']}")
+    click.echo(f"Documents:     {m.get('document_count', 0)}")
+    click.echo(f"Total spans:   {m.get('total_spans', 0)}")
+    click.echo(f"Labels:        {', '.join(m.get('labels', []))}")
+    click.echo(f"Created:       {m.get('created_at', '')}")
+    if m.get("metadata"):
+        click.echo(f"Metadata:      {json.dumps(m['metadata'], indent=2)}")
+    analytics = m.get("analytics", {})
+    if analytics:
+        label_counts = analytics.get("label_counts", {})
+        if label_counts:
+            click.echo("\nLabel distribution:")
+            for label, count in sorted(label_counts.items(), key=lambda x: -x[1]):
+                click.echo(f"  {label:<20} {count:>6}")
+
+
+@dataset.command(name="delete")
+@click.argument("name")
+def dataset_delete(name: str) -> None:
+    """Unregister a dataset (does not delete underlying data files)."""
+    from clinical_deid.dataset_store import delete_dataset
+
+    try:
+        delete_dataset(_datasets_dir(), name)
+    except FileNotFoundError as exc:
+        click.echo(f"Error: {exc}", err=True)
+        raise SystemExit(1)
+    click.echo(f"Deleted dataset {name!r}")

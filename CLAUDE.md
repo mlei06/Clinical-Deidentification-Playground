@@ -25,7 +25,9 @@ Optional extras: `.[presidio]`, `.[ner]`, `.[llm]`, `.[scripts]`, `.[parquet]`, 
 | Pipelines | JSON files | `pipelines/{name}.json` |
 | Eval results | JSON files | `evaluations/{pipeline}_{timestamp}.json` |
 | Models | Directories | `models/{framework}/{name}/` |
-| Datasets | Local files | User-provided paths (JSONL, BRAT dirs) |
+| Datasets | JSON manifests + data files | `datasets/{name}.json` → user-provided paths |
+| Dictionaries | Term-list files | `data/dictionaries/{whitelist,blacklist}/` |
+| Deploy config | JSON file | `modes.json` |
 | Audit log | SQLite (SQLModel) | `var/dev.sqlite` — `audit_log` table |
 
 No migrations. Pipelines use git for history. The database stores only the append-only audit trail (`AuditLogRecord` in `tables.py`).
@@ -81,7 +83,10 @@ frontend/                # Vite + React + TypeScript playground UI
     create/              # Visual pipeline builder (drag-and-drop canvas)
     inference/           # Text input, span highlighting, trace timeline
     evaluate/            # Eval dashboard, metrics, confusion matrix, comparison
+    datasets/            # Dataset register, browse, compose, transform, generate
     dictionaries/        # Dictionary upload / browse / manage
+    deploy/              # Deploy config: inference modes, pipeline allowlist
+    audit/               # Audit log viewer with stats, filters, local/production toggle
     layout/              # Shell layout
     shared/              # Reusable components (SpanHighlighter, LabelBadge, etc.)
 
@@ -107,14 +112,16 @@ src/clinical_deid/
     surrogate/           # Realistic fake data replacement (optional)
   api/
     app.py               # FastAPI application
-    routers/             # pipelines, process, evaluation, audit, models, dictionaries
+    routers/             # pipelines, process, evaluation, audit, models, dictionaries, datasets, deploy, audit_proxy
     schemas.py           # Pydantic request/response models
   eval/
     matching.py          # 4 matching modes (strict, exact boundary, partial, token-level)
     risk.py              # Risk-weighted recall, HIPAA coverage
     runner.py            # Batch evaluation with per-label/per-doc results
   ingest/                # JSONL, BRAT, ASQ-PHI, MIMIC loaders
-  cli.py                 # Click CLI: run, batch, eval, audit, setup, serve
+  cli.py                 # Click CLI: run, batch, eval, audit, dict, dataset, setup, serve
+  dataset_store.py       # Filesystem dataset registry (register, list, analytics)
+  mode_config.py         # Deploy config (modes.json) load/save
   config.py              # Pydantic settings (env vars, .env file)
   tables.py              # AuditLogRecord (only DB table)
   db.py                  # SQLite engine
@@ -155,9 +162,26 @@ All pipeline routes use **name-based** paths (not UUIDs):
 | `GET` | `/eval/runs` | List eval results |
 | `GET` | `/eval/runs/{id}` | Eval result detail |
 | `POST` | `/eval/compare` | Compare two runs |
+| `GET` | `/datasets` | List registered datasets |
+| `POST` | `/datasets` | Register dataset from local path |
+| `GET` | `/datasets/{name}` | Dataset detail + analytics |
+| `PUT` | `/datasets/{name}` | Update description/metadata |
+| `DELETE` | `/datasets/{name}` | Unregister dataset |
+| `POST` | `/datasets/{name}/refresh` | Recompute analytics |
+| `GET` | `/datasets/{name}/preview` | Preview documents (paginated) |
+| `GET` | `/datasets/{name}/documents/{doc_id}` | Full document with spans |
+| `POST` | `/datasets/compose` | Compose multiple datasets |
+| `POST` | `/datasets/transform` | Apply transforms to dataset |
+| `POST` | `/datasets/generate` | Generate synthetic data via LLM |
 | `GET` | `/audit/logs` | Query audit trail |
 | `GET` | `/audit/logs/{id}` | Audit detail |
 | `GET` | `/audit/stats` | Aggregate stats |
+| `GET` | `/audit/production/logs` | Proxy production audit logs |
+| `GET` | `/audit/production/logs/{id}` | Proxy production log detail |
+| `GET` | `/audit/production/stats` | Proxy production stats |
+| `GET` | `/deploy` | Get deploy config (modes + allowlist) |
+| `PUT` | `/deploy` | Update deploy config |
+| `GET` | `/deploy/pipelines` | List deployable pipeline names |
 | `GET` | `/models` | List models |
 | `GET` | `/models/{framework}/{name}` | Model manifest details |
 | `POST` | `/models/refresh` | Re-scan models directory |
@@ -168,13 +192,21 @@ All pipeline routes use **name-based** paths (not UUIDs):
 clinical-deid run [FILES]           # De-identify text from stdin or files
 clinical-deid batch INPUT -o OUT    # Batch process directory or JSONL
 clinical-deid eval --corpus FILE    # Evaluate against gold standard
+clinical-deid dict list             # List dictionaries
+clinical-deid dict preview KIND NAME  # Preview dictionary terms
+clinical-deid dict import FILE --kind KIND --name NAME  # Import dictionary
+clinical-deid dict delete KIND NAME # Delete dictionary
+clinical-deid dataset list          # List registered datasets
+clinical-deid dataset register PATH --name NAME  # Register dataset
+clinical-deid dataset show NAME     # Dataset details + analytics
+clinical-deid dataset delete NAME   # Unregister dataset
 clinical-deid audit list            # List audit records
 clinical-deid audit show ID         # Show audit detail
 clinical-deid setup                 # Verify deps, init DB
 clinical-deid serve                 # Start API server
 ```
 
-All commands support `--profile` (fast/balanced/accurate), `--pipeline` (saved pipeline by name), `--config` (custom JSON file), and `--redactor` (tag/surrogate).
+Pipeline commands (`run`, `batch`, `eval`) support `--profile` (fast/balanced/accurate), `--pipeline` (saved pipeline by name), `--config` (custom JSON file), and `--redactor` (tag/surrogate).
 
 ## Evaluation
 
@@ -186,24 +218,25 @@ Also computes: risk-weighted recall (HIPAA severity weights), per-label breakdow
 
 - Full pipe system with 13 cataloged pipe types (including 2 deprecated aliases)
 - Pipeline composition (sequential chaining with 7 span merge/resolution strategies)
-- CLI with all subcommands
-- FastAPI with all routes (pipelines, process, eval, audit, models, dictionaries)
-- **Playground UI** — Vite + React + TypeScript frontend with visual pipeline builder, inference view with span highlighting and trace timeline, eval dashboard with metrics/confusion matrix/comparison, and dictionary management
+- CLI with all subcommands (run, batch, eval, dict, dataset, audit, setup, serve)
+- FastAPI with all routes (pipelines, process, eval, audit, models, dictionaries, datasets, deploy, audit production proxy)
+- **Playground UI** — Vite + React + TypeScript frontend with 7 views: pipeline builder, inference (span highlighting + trace), eval dashboard (metrics/confusion/comparison), datasets (register/compose/transform/generate), dictionaries, deploy config (modes + allowlist), audit log viewer (stats, filters, local/production toggle)
+- Dataset HTTP API — register, browse, compose, transform, generate (LLM synthesis) via REST
+- Deploy configuration — inference modes mapped to pipelines, pipeline allowlist, production API URL
+- Audit production proxy — view remote production audit logs from the playground UI
 - Multi-mode evaluation with HIPAA coverage
-- Filesystem-backed pipeline and eval storage
+- Filesystem-backed pipeline, eval, and dataset storage
 - Unified audit trail (CLI + API write to same SQLite table)
 - Data ingestion (JSONL, BRAT, ASQ-PHI, MIMIC, PhysioNet)
 - LLM synthesis for generating training data
 - NeuroNER LSTM-CRF integration (Python 3.7 subprocess bridge)
-- 27 test files
+- 27+ test files
 
 ## What's not built yet
 
-- **Audit/log viewer UI** — browse audit trail in browser
 - **Training data export** — AnnotatedDocument to spaCy DocBin / HuggingFace JSONL / CoNLL
 - **Training runner CLI** — wrapper for spaCy/HF training
 - **Custom NER pipe** — load trained models from `models/` by name
-- **Dataset HTTP API** — import/list/analytics via API (library + scripts exist)
 
 ## Conventions
 

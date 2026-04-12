@@ -53,6 +53,7 @@ all = [
 [project.scripts]
 clinical-deid = "clinical_deid.cli:main"
 clinical-deid-api = "clinical_deid.__main__:main"
+clinical-deid-production = "clinical_deid.production_main:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

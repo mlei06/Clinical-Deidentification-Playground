@@ -21,9 +21,12 @@ Architecture detail and roadmap: [DESIGN_PLAN.md](./DESIGN_PLAN.md) and [PROJECT
 | `frontend/` | React (Vite + TypeScript) playground UI |
 | `pipelines/` | Named pipeline configs (JSON files, git-versioned) |
 | `evaluations/` | Eval result JSON files |
+| `datasets/` | Registered dataset manifests (JSON) |
 | `models/` | Trained model artifacts (see [`models/README.md`](./models/README.md)) |
+| `data/dictionaries/` | Whitelist & blacklist term-list files |
 | [`data/raw/`](./data/raw) | Optional local inbox for source files |
 | [`data/corpora/`](./data/corpora) | Annotated datasets (gold, transformed, synthesized) |
+| `modes.json` | Deploy configuration (inference modes, pipeline allowlist) |
 | `var/` | SQLite database (audit log only) |
 
 ## Security notice
@@ -58,6 +61,19 @@ clinical-deid batch corpus.jsonl -o output/ --pipeline my-pipeline
 clinical-deid eval --corpus data.jsonl --profile balanced
 clinical-deid eval --corpus data.jsonl --pipeline my-pipeline
 
+# Dictionary management
+clinical-deid dict list
+clinical-deid dict preview whitelist hospitals --label HOSPITAL
+clinical-deid dict import terms.txt --kind whitelist --name hospitals --label HOSPITAL
+clinical-deid dict delete whitelist hospitals
+
+# Dataset management
+clinical-deid dataset list
+clinical-deid dataset register data/corpus.jsonl --name i2b2-2014
+clinical-deid dataset register data/brat/ --name physionet --format brat-dir
+clinical-deid dataset show i2b2-2014
+clinical-deid dataset delete i2b2-2014
+
 # Audit trail
 clinical-deid audit list
 clinical-deid audit show <record-id>
@@ -66,11 +82,21 @@ clinical-deid audit show <record-id>
 clinical-deid serve --port 8000 --reload
 ```
 
-All commands support `--profile` (fast/balanced/accurate), `--pipeline` (saved pipeline by name), `--config` (custom JSON file), and `--redactor` (tag/surrogate).
+Pipeline commands (`run`, `batch`, `eval`) support `--profile` (fast/balanced/accurate), `--pipeline` (saved pipeline by name), `--config` (custom JSON file), and `--redactor` (tag/surrogate).
 
 ## Frontend (Playground UI)
 
-The frontend is a React + TypeScript app (Vite, Tailwind CSS) for visual pipeline building, inference testing, evaluation dashboards, and dictionary management.
+The frontend is a React + TypeScript app (Vite, Tailwind CSS) with seven views:
+
+| View | Route | What it does |
+|------|-------|-------------|
+| **Pipeline Builder** | `/create` | Visual drag-and-drop pipeline composer |
+| **Inference** | `/inference` | Paste text, see spans + redacted output + trace |
+| **Evaluate** | `/evaluate` | Run evals, view metrics/confusion matrix, compare runs |
+| **Datasets** | `/datasets` | Register, browse, compose, transform, generate datasets |
+| **Dictionaries** | `/dictionaries` | Upload/manage whitelist & blacklist term lists |
+| **Deploy** | `/deploy` | Configure production inference modes & pipeline allowlist |
+| **Audit** | `/audit` | Browse audit trail with stats, filters, detail panel; toggle local/production |
 
 ```bash
 cd frontend
@@ -109,9 +135,20 @@ Default SQLite database: `./var/dev.sqlite` (audit log only). Override with `CLI
 | Dictionaries | `GET` | `/dictionaries` | List all uploaded dictionaries |
 | Dictionaries | `GET` | `/dictionaries/{kind}/{name}` | Dictionary metadata |
 | Dictionaries | `GET` | `/dictionaries/{kind}/{name}/preview` | Preview first N terms |
-| Dictionaries | `GET` | `/dictionaries/{kind}/{name}/terms` | Full term list |
+| Dictionaries | `GET` | `/dictionaries/{kind}/{name}/terms` | Full term list (paginated) |
 | Dictionaries | `POST` | `/dictionaries` | Upload a new dictionary file |
 | Dictionaries | `DELETE` | `/dictionaries/{kind}/{name}` | Delete a dictionary |
+| Datasets | `GET` | `/datasets` | List registered datasets |
+| Datasets | `POST` | `/datasets` | Register dataset from local path |
+| Datasets | `GET` | `/datasets/{name}` | Dataset detail + analytics |
+| Datasets | `PUT` | `/datasets/{name}` | Update description/metadata |
+| Datasets | `DELETE` | `/datasets/{name}` | Unregister dataset |
+| Datasets | `POST` | `/datasets/{name}/refresh` | Recompute analytics |
+| Datasets | `GET` | `/datasets/{name}/preview` | Preview documents (paginated) |
+| Datasets | `GET` | `/datasets/{name}/documents/{doc_id}` | Full document with spans |
+| Datasets | `POST` | `/datasets/compose` | Compose multiple datasets |
+| Datasets | `POST` | `/datasets/transform` | Apply transforms to dataset |
+| Datasets | `POST` | `/datasets/generate` | Generate synthetic data via LLM |
 | Process | `POST` | `/process/{pipeline_name}` | Run pipeline on text |
 | Process | `POST` | `/process/{pipeline_name}/batch` | Batch variant |
 | Eval | `POST` | `/eval/run` | Run evaluation against dataset |
@@ -121,6 +158,12 @@ Default SQLite database: `./var/dev.sqlite` (audit log only). Override with `CLI
 | Audit | `GET` | `/audit/logs` | Query audit trail (filtered, paginated) |
 | Audit | `GET` | `/audit/logs/{id}` | Audit log detail |
 | Audit | `GET` | `/audit/stats` | Aggregate stats |
+| Audit | `GET` | `/audit/production/logs` | Proxy production audit logs |
+| Audit | `GET` | `/audit/production/logs/{id}` | Proxy production log detail |
+| Audit | `GET` | `/audit/production/stats` | Proxy production stats |
+| Deploy | `GET` | `/deploy` | Get deploy config (modes + allowlist) |
+| Deploy | `PUT` | `/deploy` | Update deploy config |
+| Deploy | `GET` | `/deploy/pipelines` | List deployable pipeline names |
 | Models | `GET` | `/models` | List models from filesystem |
 | Models | `GET` | `/models/{framework}/{name}` | Model manifest details |
 | Models | `POST` | `/models/refresh` | Re-scan models directory |
