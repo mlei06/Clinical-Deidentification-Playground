@@ -1,6 +1,6 @@
 import { useMutation } from '@tanstack/react-query';
-import { processText } from '../api/process';
-import type { OutputMode, ProcessRequest } from '../api/types';
+import { processText, redactDocument } from '../api/process';
+import type { OutputMode, ProcessRequest, RedactRequest } from '../api/types';
 
 export function useProcessText() {
   return useMutation({
@@ -10,5 +10,11 @@ export function useProcessText() {
       trace?: boolean;
       outputMode?: OutputMode;
     }) => processText(pipelineName, req, trace, outputMode),
+  });
+}
+
+export function useRedactDocument() {
+  return useMutation({
+    mutationFn: (req: RedactRequest) => redactDocument(req),
   });
 }

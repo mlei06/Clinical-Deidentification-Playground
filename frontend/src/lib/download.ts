@@ -1,6 +1,6 @@
 /** Trigger a browser download of text/binary content. */
-export function downloadBlob(filename: string, content: string, mime: string): void {
-  const blob = new Blob([content], { type: mime });
+export function downloadBlob(filename: string, content: string | Blob, mime: string): void {
+  const blob = content instanceof Blob ? content : new Blob([content], { type: mime });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;

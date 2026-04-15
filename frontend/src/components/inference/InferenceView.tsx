@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import {
   Play,
   Loader2,
@@ -14,7 +14,8 @@ import PipelineSelector from '../shared/PipelineSelector';
 import TextInput from './TextInput';
 import AnnotatedDocumentViewer from '../shared/AnnotatedDocumentViewer';
 import TraceTimeline from './TraceTimeline';
-import { useProcessText } from '../../hooks/useProcess';
+import SpanEditor from './SpanEditor';
+import { useProcessText, useRedactDocument } from '../../hooks/useProcess';
 import {
   listInferenceRuns,
   saveInferenceSnapshot,
@@ -22,7 +23,12 @@ import {
   deleteInferenceRun,
 } from '../../api/inference';
 import { downloadBlob } from '../../lib/download';
-import type { OutputMode, ProcessResponse, SavedInferenceRunDetail } from '../../api/types';
+import type {
+  OutputMode,
+  PHISpanResponse,
+  ProcessResponse,
+  SavedInferenceRunDetail,
+} from '../../api/types';
 
 function toProcessResponse(d: SavedInferenceRunDetail): ProcessResponse {
   const { id: _id, saved_at: _saved, ...rest } = d;
@@ -43,9 +49,29 @@ export default function InferenceView() {
   /** Set when the current view came from a saved snapshot (or right after saving). */
   const [snapshotMeta, setSnapshotMeta] = useState<{ id: string; saved_at: string } | null>(null);
   const [selectedRunId, setSelectedRunId] = useState('');
+  const [editedSpans, setEditedSpans] = useState<PHISpanResponse[] | null>(null);
+  const [editOutputMode, setEditOutputMode] = useState<OutputMode>('redacted');
+  const [redactError, setRedactError] = useState<string | null>(null);
 
   const queryClient = useQueryClient();
   const mutation = useProcessText();
+  const redactMutation = useRedactDocument();
+
+  // Reset post-edit state whenever a new pipeline result is loaded.
+  useEffect(() => {
+    setEditedSpans(null);
+    setRedactError(null);
+    if (result) {
+      setEditOutputMode(
+        result.redacted_text && result.redacted_text !== result.original_text
+          ? 'redacted'
+          : outputMode === 'annotated'
+            ? 'redacted'
+            : outputMode,
+      );
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [result?.request_id, result?.pipeline_name]);
 
   const { data: savedRuns = [], isLoading: runsLoading } = useQuery({
     queryKey: ['inference-runs'],
@@ -121,6 +147,51 @@ export default function InferenceView() {
     if (!result) return;
     const base = exportFilenameBase(result.pipeline_name);
     downloadBlob(`${base}_redacted.txt`, result.redacted_text, 'text/plain; charset=utf-8');
+  };
+
+  const effectiveSpans: PHISpanResponse[] = editedSpans ?? result?.spans ?? [];
+  const isDirty =
+    editedSpans !== null &&
+    result !== null &&
+    (editedSpans.length !== result.spans.length ||
+      editedSpans.some((s, i) => {
+        const orig = result.spans[i];
+        return !orig || s.start !== orig.start || s.end !== orig.end || s.label !== orig.label;
+      }));
+
+  const handleEditedSpansChange = (spans: PHISpanResponse[]) => {
+    setEditedSpans(spans);
+    setRedactError(null);
+  };
+
+  const handleResetEdits = () => {
+    setEditedSpans(null);
+    setRedactError(null);
+  };
+
+  const handleApplyCorrections = () => {
+    if (!result) return;
+    setRedactError(null);
+    redactMutation.mutate(
+      {
+        text: result.original_text,
+        spans: effectiveSpans.map((s) => ({ start: s.start, end: s.end, label: s.label })),
+        output_mode: editOutputMode,
+      },
+      {
+        onSuccess: (res) => {
+          setResult({
+            ...result,
+            redacted_text: res.output_text,
+            spans: effectiveSpans,
+          });
+          setEditedSpans(null);
+          setSnapshotMeta(null);
+        },
+        onError: (err: unknown) =>
+          setRedactError(err instanceof Error ? err.message : 'Redaction failed'),
+      },
+    );
   };
 
   return (
@@ -279,9 +350,22 @@ export default function InferenceView() {
           <AnnotatedDocumentViewer
             originalText={result.original_text}
             redactedText={result.redacted_text}
-            spans={result.spans}
+            spans={effectiveSpans}
             processingTimeMs={result.processing_time_ms}
             pipelineName={result.pipeline_name}
+          />
+
+          <SpanEditor
+            originalText={result.original_text}
+            spans={effectiveSpans}
+            outputMode={editOutputMode}
+            onOutputModeChange={setEditOutputMode}
+            onChange={handleEditedSpansChange}
+            onApply={handleApplyCorrections}
+            onReset={handleResetEdits}
+            isApplying={redactMutation.isPending}
+            isDirty={isDirty}
+            error={redactError}
           />
 
           {result.intermediary_trace && result.intermediary_trace.length > 0 && (

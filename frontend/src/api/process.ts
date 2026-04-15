@@ -9,11 +9,16 @@ import type {
   ScrubResponse,
 } from './types';
 
+function clientIdHeaders(clientId?: string): Record<string, string> {
+  return clientId ? { 'X-Client-Id': clientId } : {};
+}
+
 export function processText(
   pipelineName: string,
   req: ProcessRequest,
   trace = true,
   outputMode?: OutputMode,
+  clientId?: string,
 ): Promise<ProcessResponse> {
   const params = new URLSearchParams();
   if (trace) params.set('trace', 'true');
@@ -22,19 +27,25 @@ export function processText(
   return apiFetch(`/process/${encodeURIComponent(pipelineName)}${qs}`, {
     method: 'POST',
     body: JSON.stringify(req),
+    headers: clientIdHeaders(clientId),
   });
 }
 
-export function redactDocument(req: RedactRequest): Promise<RedactResponse> {
+export function redactDocument(
+  req: RedactRequest,
+  clientId?: string,
+): Promise<RedactResponse> {
   return apiFetch('/process/redact', {
     method: 'POST',
     body: JSON.stringify(req),
+    headers: clientIdHeaders(clientId),
   });
 }
 
-export function scrubText(req: ScrubRequest): Promise<ScrubResponse> {
+export function scrubText(req: ScrubRequest, clientId?: string): Promise<ScrubResponse> {
   return apiFetch('/process/scrub', {
     method: 'POST',
     body: JSON.stringify(req),
+    headers: clientIdHeaders(clientId),
   });
 }
