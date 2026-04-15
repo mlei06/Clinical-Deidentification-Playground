@@ -1,13 +1,7 @@
 """Evaluation runner — batch evaluation with per-label, per-document, and confusion matrix results.
 
-Supports two evaluation modes:
-
-- **Detection**: compares predicted spans against gold spans (standard NER evaluation).
-- **Redaction**: checks whether gold PHI strings still appear in the pipeline's output text
-  (relevant when the pipeline includes a redactor/surrogate that consumes spans).
-
-The runner auto-detects which mode applies based on whether the pipeline's output text
-differs from the input and/or spans are empty with ``pre_redaction_spans`` in metadata.
+Compares predicted spans against gold spans (standard NER evaluation).
+Pipelines only produce spans; redaction is applied separately at the API layer.
 """
 
 from __future__ import annotations
@@ -114,34 +108,6 @@ def _aggregate_match_results(results: list[MatchResult]) -> MatchResult:
     return make_match_result(tp, fp, fn, partial)
 
 
-def _recover_spans(pred_doc: AnnotatedDocument) -> list[PHISpan]:
-    """Recover detection spans from a redactor pipeline's output.
-
-    Redactor pipes (SurrogatePipe, PresidioAnonymizerPipe) set ``spans=[]``
-    because character offsets are invalid in the transformed text, but
-    SurrogatePipe stashes the original spans in ``metadata["pre_redaction_spans"]``.
-    """
-    if pred_doc.spans:
-        return list(pred_doc.spans)
-
-    pre = pred_doc.document.metadata.get("pre_redaction_spans")
-    if pre and isinstance(pre, list):
-        recovered: list[PHISpan] = []
-        for s in pre:
-            try:
-                recovered.append(PHISpan(
-                    start=s["start"],
-                    end=s["end"],
-                    label=s["label"],
-                    confidence=s.get("confidence"),
-                    source=s.get("source"),
-                ))
-            except (KeyError, ValueError):
-                continue
-        return recovered
-
-    return []
-
 
 def _aggregate_redaction_metrics(doc_metrics: list[RedactionMetrics]) -> RedactionMetrics:
     """Aggregate per-document redaction metrics into a corpus-level summary."""
@@ -241,8 +207,7 @@ def evaluate_pipeline(
         text = gold_doc.document.text
         gold_spans = list(gold_doc.spans)
 
-        # Recover spans (handles both normal output and redactor metadata)
-        pred_spans = _recover_spans(pred_doc)
+        pred_spans = list(pred_doc.spans)
 
         # Detect redaction: output text differs from input
         is_redacted = pred_doc.document.text != text
