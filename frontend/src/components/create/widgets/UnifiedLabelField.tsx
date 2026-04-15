@@ -3,6 +3,7 @@ import { useState, useCallback } from 'react';
 import type { FieldProps } from '@rjsf/utils';
 import { labelColor } from '../../../lib/labelColors';
 import { useLabelSpace } from '../../../hooks/useLabelSpace';
+import CanonicalLabelSelect from './CanonicalLabelSelect';
 
 interface LabelSettings {
   enabled: boolean;
@@ -207,16 +208,14 @@ export default function UnifiedLabelField(props: FieldProps) {
                     <span className="text-[10px] text-amber-500">remapped</span>
                   )}
 
-                  {/* Remap input (inline) */}
+                  {/* Remap to canonical label */}
                   {s.enabled && (
                     <>
                       <ArrowRight size={12} className="shrink-0 text-gray-300" />
-                      <input
-                        type="text"
-                        className="min-w-0 flex-1 rounded border border-gray-200 bg-gray-50 px-1.5 py-0.5 text-xs text-gray-700 placeholder:text-gray-300 focus:border-blue-300 focus:bg-white focus:outline-none"
+                      <CanonicalLabelSelect
                         value={s.remap ?? ''}
-                        onChange={(e) => setRemap(label, e.target.value)}
-                        placeholder="keep as-is"
+                        onChange={(v) => setRemap(label, v)}
+                        exclude={label}
                       />
                     </>
                   )}

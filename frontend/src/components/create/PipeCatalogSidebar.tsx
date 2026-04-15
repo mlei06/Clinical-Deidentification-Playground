@@ -3,11 +3,12 @@ import { usePipeTypes } from '../../hooks/usePipeTypes';
 import PipeCatalogCard from './PipeCatalogCard';
 import type { PipeTypeInfo } from '../../api/types';
 
-const ROLE_ORDER = ['detector', 'span_transformer', 'redactor', 'preprocessor'];
+// Redactors are excluded — redaction/surrogate is now an output mode on the
+// process endpoint, not a pipe in the pipeline.
+const ROLE_ORDER = ['detector', 'span_transformer', 'preprocessor'];
 const ROLE_LABELS: Record<string, string> = {
   detector: 'Detectors',
   span_transformer: 'Transformers',
-  redactor: 'Redactors',
   preprocessor: 'Preprocessors',
 };
 

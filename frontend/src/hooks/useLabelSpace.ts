@@ -11,7 +11,7 @@ export function useLabelSpace(
   pipeType: string,
   config: Record<string, unknown>,
   baseLabels: string[],
-  currentMapping: Record<string, string | null> | undefined,
+  currentMapping: Record<string, unknown> | undefined,
 ) {
   const configWithoutMapping = useMemo(() => {
     const { label_mapping: _, ...rest } = config;

@@ -2,13 +2,12 @@ import { memo } from 'react';
 import { Handle, Position } from '@xyflow/react';
 import type { NodeProps } from '@xyflow/react';
 import { clsx } from 'clsx';
-import { Search, Shuffle, Scissors, AlertCircle } from 'lucide-react';
+import { Search, Shuffle, AlertCircle } from 'lucide-react';
 import type { PipeNodeData } from '../../stores/pipelineEditorStore';
 
 const ROLE_STYLES: Record<string, { border: string; bg: string; icon: typeof Search }> = {
   detector:         { border: 'border-l-blue-500',   bg: 'bg-blue-50',   icon: Search },
   span_transformer: { border: 'border-l-amber-500',  bg: 'bg-amber-50',  icon: Shuffle },
-  redactor:         { border: 'border-l-red-500',     bg: 'bg-red-50',    icon: Scissors },
   preprocessor:     { border: 'border-l-violet-500',  bg: 'bg-violet-50', icon: Shuffle },
 };
 

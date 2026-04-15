@@ -87,7 +87,6 @@ export default function PipelineCanvas() {
             const role = (node.data as Record<string, unknown>)?.role;
             if (role === 'detector') return '#3b82f6';
             if (role === 'span_transformer') return '#f59e0b';
-            if (role === 'redactor') return '#ef4444';
             return '#8b5cf6';
           }}
         />

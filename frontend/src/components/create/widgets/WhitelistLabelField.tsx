@@ -15,6 +15,7 @@ import { useLabelSpace } from '../../../hooks/useLabelSpace';
 import { uploadDictionary, listDictionaries } from '../../../api/dictionaries';
 import type { DictionaryInfo } from '../../../api/types';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import CanonicalLabelSelect from './CanonicalLabelSelect';
 
 interface LabelSettings {
   enabled: boolean;
@@ -65,7 +66,7 @@ export default function WhitelistLabelField(props: FieldProps) {
     pipeType,
     config,
     baseLabels,
-    labels as Record<string, string | null>,
+    labels,
   );
 
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -238,16 +239,14 @@ export default function WhitelistLabelField(props: FieldProps) {
                     <span className="text-[10px] text-amber-500">remapped</span>
                   )}
 
-                  {/* Remap input (inline) */}
+                  {/* Remap to canonical label */}
                   {s.enabled && (
                     <>
                       <ArrowRight size={12} className="shrink-0 text-gray-300" />
-                      <input
-                        type="text"
-                        className="min-w-0 flex-1 rounded border border-gray-200 bg-gray-50 px-1.5 py-0.5 text-xs text-gray-700 placeholder:text-gray-300 focus:border-blue-300 focus:bg-white focus:outline-none"
+                      <CanonicalLabelSelect
                         value={s.remap ?? ''}
-                        onChange={(e) => setRemap(label, e.target.value)}
-                        placeholder="keep as-is"
+                        onChange={(v) => setRemap(label, v)}
+                        exclude={label}
                       />
                     </>
                   )}
