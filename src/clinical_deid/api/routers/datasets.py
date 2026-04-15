@@ -293,6 +293,57 @@ def get_document(name: str, doc_id: str) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# Export endpoint
+# ---------------------------------------------------------------------------
+
+
+class ExportTrainingRequest(BaseModel):
+    format: Literal["conll", "spacy", "huggingface"] = "conll"
+    filename: str | None = None
+
+
+class ExportTrainingResponse(BaseModel):
+    path: str
+    format: str
+    document_count: int
+    total_spans: int
+
+
+@router.post("/{name}/export", response_model=ExportTrainingResponse, status_code=200)
+def export_dataset(name: str, body: ExportTrainingRequest) -> ExportTrainingResponse:
+    """Export a registered dataset to a training format (CoNLL, spaCy DocBin, HuggingFace JSONL).
+
+    Writes the output file to the dataset directory.
+    """
+    from clinical_deid.training_export import export_training_data
+
+    ds_dir = _datasets_dir()
+    try:
+        docs = load_dataset_documents(ds_dir, name)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    if not docs:
+        raise HTTPException(status_code=422, detail=f"Dataset {name!r} has no documents")
+
+    output_dir = ds_dir / f"{name}_export"
+    try:
+        path = export_training_data(
+            docs, output_dir, body.format, filename=body.filename
+        )
+    except ImportError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    total_spans = sum(len(d.spans) for d in docs)
+    return ExportTrainingResponse(
+        path=str(path),
+        format=body.format,
+        document_count=len(docs),
+        total_spans=total_spans,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Compose endpoint
 # ---------------------------------------------------------------------------
 
