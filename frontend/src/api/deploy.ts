@@ -1,5 +1,5 @@
 import { apiFetch } from './client';
-import type { DeployConfig } from './types';
+import type { DeployConfig, DeployHealthResponse } from './types';
 
 export function getDeployConfig(): Promise<DeployConfig> {
   return apiFetch('/deploy');
@@ -11,4 +11,8 @@ export function updateDeployConfig(config: DeployConfig): Promise<DeployConfig> 
 
 export function listDeployablePipelines(): Promise<string[]> {
   return apiFetch('/deploy/pipelines');
+}
+
+export function getDeployHealth(): Promise<DeployHealthResponse> {
+  return apiFetch('/deploy/health');
 }

@@ -183,6 +183,19 @@ export interface DeployConfig {
   production_api_url: string | null;
 }
 
+export interface ModeHealth {
+  name: string;
+  pipeline: string;
+  description: string;
+  available: boolean;
+  missing: string[];
+}
+
+export interface DeployHealthResponse {
+  modes: ModeHealth[];
+  default_mode: string | null;
+}
+
 // Audit
 export interface AuditLogSummary {
   id: string;

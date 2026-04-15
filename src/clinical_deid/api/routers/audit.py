@@ -38,6 +38,9 @@ class AuditLogDetail(AuditLogSummary):
     error_count: int
     metrics: dict[str, Any]
     notes: str
+    client_id: str = ""
+    output_mode: str = ""
+    service_type: str = ""
 
 
 class AuditStats(BaseModel):
@@ -118,6 +121,9 @@ def get_audit_log(session: SessionDep, log_id: str) -> AuditLogDetail:
         error_count=record.error_count,
         metrics=record.metrics,
         notes=record.notes,
+        client_id=record.client_id,
+        output_mode=record.output_mode,
+        service_type=record.service_type,
     )
 
 

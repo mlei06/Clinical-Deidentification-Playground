@@ -1,10 +1,20 @@
 import { NavLink, Outlet } from 'react-router-dom';
-import { Blocks, Play, BarChart3, Database, BookOpen, Rocket, Activity } from 'lucide-react';
+import {
+  Blocks,
+  Play,
+  BarChart3,
+  Database,
+  BookOpen,
+  Rocket,
+  Activity,
+  ShieldCheck,
+} from 'lucide-react';
 import { clsx } from 'clsx';
 
 const TABS = [
   { to: '/create', label: 'Create', icon: Blocks },
   { to: '/inference', label: 'Inference', icon: Play },
+  { to: '/production', label: 'Production', icon: ShieldCheck },
   { to: '/evaluate', label: 'Evaluate', icon: BarChart3 },
   { to: '/datasets', label: 'Datasets', icon: Database },
   { to: '/dictionaries', label: 'Dictionaries', icon: BookOpen },

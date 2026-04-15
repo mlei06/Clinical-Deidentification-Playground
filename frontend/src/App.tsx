@@ -8,6 +8,7 @@ import DictionaryManager from './components/dictionaries/DictionaryManager';
 import DeployView from './components/deploy/DeployView';
 import DatasetsView from './components/datasets/DatasetsView';
 import AuditView from './components/audit/AuditView';
+import ProductionView from './components/production/ProductionView';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -23,6 +24,7 @@ export default function App() {
           <Route element={<Shell />}>
             <Route path="/create" element={<PipelineBuilder />} />
             <Route path="/inference" element={<InferenceView />} />
+            <Route path="/production" element={<ProductionView />} />
             <Route path="/evaluate" element={<EvaluateView />} />
             <Route path="/datasets" element={<DatasetsView />} />
             <Route path="/dictionaries" element={<DictionaryManager />} />

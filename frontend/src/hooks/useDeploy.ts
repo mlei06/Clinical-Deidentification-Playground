@@ -16,6 +16,13 @@ export function useDeployablePipelines() {
   });
 }
 
+export function useDeployHealth() {
+  return useQuery({
+    queryKey: ['deploy-health'],
+    queryFn: api.getDeployHealth,
+  });
+}
+
 export function useUpdateDeployConfig() {
   const qc = useQueryClient();
   return useMutation({
