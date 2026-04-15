@@ -30,7 +30,7 @@ export function listAuditLogs(
   filters: AuditLogFilters = {},
   source: AuditSource = 'local',
 ): Promise<AuditLogSummary[]> {
-  return apiFetch(`${basePath(source)}/logs${buildQs(filters)}`);
+  return apiFetch(`${basePath(source)}/logs${buildQs(filters as Record<string, string | number | undefined>)}`);
 }
 
 export function getAuditLog(id: string, source: AuditSource = 'local'): Promise<AuditLogDetail> {

@@ -2,6 +2,9 @@
 /* Mirrors of backend Pydantic schemas                                */
 /* ------------------------------------------------------------------ */
 
+// Output mode for process/redact/scrub endpoints
+export type OutputMode = 'annotated' | 'redacted' | 'surrogate';
+
 // Domain
 export interface PHISpanResponse {
   start: number;
@@ -199,6 +202,40 @@ export interface AuditLogDetail extends AuditLogSummary {
   error_count: number;
   metrics: Record<string, unknown>;
   notes: string;
+  client_id: string;
+  output_mode: string;
+  service_type: string;
+}
+
+// Redact endpoint
+export interface RedactRequest {
+  text: string;
+  spans: { start: number; end: number; label: string }[];
+  output_mode: OutputMode;
+  surrogate_seed?: number | null;
+  surrogate_consistency?: boolean;
+}
+
+export interface RedactResponse {
+  output_text: string;
+  output_mode: OutputMode;
+  span_count: number;
+}
+
+// Scrub endpoint
+export interface ScrubRequest {
+  text: string;
+  mode?: string | null;
+  output_mode?: OutputMode;
+  request_id?: string;
+}
+
+export interface ScrubResponse {
+  text: string;
+  pipeline_used: string;
+  output_mode: OutputMode;
+  span_count: number;
+  processing_time_ms: number;
 }
 
 export interface AuditStats {

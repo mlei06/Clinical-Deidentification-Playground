@@ -1,8 +1,17 @@
 from __future__ import annotations
 
+from enum import Enum
 from typing import Any
 
 from pydantic import BaseModel, Field
+
+
+class OutputMode(str, Enum):
+    """How to format the output of a process/scrub request."""
+
+    annotated = "annotated"  # return spans on original text (no redaction)
+    redacted = "redacted"  # replace spans with [LABEL] tags
+    surrogate = "surrogate"  # replace spans with realistic fake data
 
 
 class HealthResponse(BaseModel):
@@ -80,6 +89,53 @@ class BatchProcessRequest(BaseModel):
 class BatchProcessResponse(BaseModel):
     results: list[ProcessResponse]
     total_processing_time_ms: float
+
+
+# ---------------------------------------------------------------------------
+# Redact / Scrub endpoints
+# ---------------------------------------------------------------------------
+
+
+class RedactSpan(BaseModel):
+    start: int
+    end: int
+    label: str
+
+
+class RedactRequest(BaseModel):
+    """Apply redaction or surrogate replacement to text given known spans."""
+
+    text: str = Field(..., max_length=MAX_TEXT_LENGTH)
+    spans: list[RedactSpan]
+    output_mode: OutputMode = OutputMode.redacted
+    surrogate_seed: int | None = None
+    surrogate_consistency: bool = True
+
+
+class RedactResponse(BaseModel):
+    output_text: str
+    output_mode: OutputMode
+    span_count: int
+
+
+class ScrubRequest(BaseModel):
+    """Zero-config log cleaning: text in, clean text out."""
+
+    text: str = Field(..., max_length=MAX_TEXT_LENGTH)
+    mode: str | None = Field(
+        default=None,
+        description="Mode name (e.g. 'fast') or pipeline name. Falls back to deploy default_mode.",
+    )
+    output_mode: OutputMode = OutputMode.redacted
+    request_id: str | None = None
+
+
+class ScrubResponse(BaseModel):
+    text: str
+    pipeline_used: str
+    output_mode: OutputMode
+    span_count: int
+    processing_time_ms: float
 
 
 class SaveInferenceSnapshotRequest(ProcessResponse):

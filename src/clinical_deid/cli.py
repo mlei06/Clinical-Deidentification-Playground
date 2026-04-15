@@ -21,19 +21,9 @@ def _build_pipeline(
     profile: str,
     config_path: str | None,
     pipeline_name: str | None,
-    redactor: str,
 ) -> tuple[Any, dict[str, Any], str]:
     """Return ``(pipe_chain, config_dict, resolved_pipeline_name)``."""
-    from clinical_deid.pipes.registry import load_pipeline, registered_pipes
-
-    # Early check: if surrogate redactor requested, verify faker is available
-    if redactor == "surrogate" and "surrogate" not in registered_pipes():
-        click.echo(
-            "Error: --redactor surrogate requires the faker library.\n"
-            "Install it with:  pip install 'clinical-deid-playground[scripts]'",
-            err=True,
-        )
-        raise SystemExit(1)
+    from clinical_deid.pipes.registry import load_pipeline
 
     resolved_name = ""
 
@@ -54,7 +44,7 @@ def _build_pipeline(
     else:
         from clinical_deid.profiles import get_profile_config
 
-        config = get_profile_config(profile, redactor=redactor)
+        config = get_profile_config(profile)
         resolved_name = f"profile:{profile}"
 
     try:
@@ -66,20 +56,38 @@ def _build_pipeline(
     return pipeline, config, resolved_name
 
 
+def _apply_output_mode(text: str, spans: list[PHISpan], output_mode: str) -> str:
+    """Apply the requested output mode to produce final text."""
+    if output_mode == "annotated":
+        return text
+
+    if output_mode == "surrogate":
+        from clinical_deid.pipes.surrogate.strategies import SurrogateGenerator
+
+        gen = SurrogateGenerator()
+        sorted_spans = sorted(spans, key=lambda s: s.start, reverse=True)
+        result = text
+        for s in sorted_spans:
+            original = text[s.start : s.end]
+            replacement = gen.replace(s.label, original)
+            result = result[: s.start] + replacement + result[s.end :]
+        return result
+
+    # Default: tag replacement
+    return tag_replace(text, spans)
+
+
 def _process_doc(
     pipeline: Any,
     doc_id: str,
     text: str,
-    redactor: str,
+    output_mode: str,
 ) -> ProcessedResult:
     """Run pipeline on one document and return a ProcessedResult."""
     doc = AnnotatedDocument(document=Document(id=doc_id, text=text), spans=[])
     out = pipeline.forward(doc)
 
-    if out.document.text != text:
-        output_text = out.document.text
-    else:
-        output_text = tag_replace(text, out.spans)
+    output_text = _apply_output_mode(text, out.spans, output_mode)
 
     return ProcessedResult(
         doc_id=doc_id,
@@ -136,11 +144,11 @@ def main(verbose: bool) -> None:
     help="Name of a saved pipeline (overrides --profile and --config).",
 )
 @click.option(
-    "--redactor",
-    type=click.Choice(["tag", "surrogate"]),
-    default="tag",
+    "--output-mode",
+    type=click.Choice(["redacted", "surrogate", "annotated"]),
+    default="redacted",
     show_default=True,
-    help="tag=[LABEL] replacement, surrogate=realistic fake data.",
+    help="redacted=[LABEL] tags, surrogate=fake data, annotated=original text.",
 )
 @click.option(
     "--format",
@@ -154,7 +162,7 @@ def run(
     profile: str,
     config_path: str | None,
     pipeline_name: str | None,
-    redactor: str,
+    output_mode: str,
     output_format: str,
     files: tuple[str, ...],
 ) -> None:
@@ -165,10 +173,21 @@ def run(
       echo "Patient John Smith DOB 01/15/1980" | clinical-deid run
       clinical-deid run notes.txt
       clinical-deid run --pipeline my-pipeline notes.txt
-      clinical-deid run --profile fast --redactor surrogate notes.txt
+      clinical-deid run --profile fast --output-mode surrogate notes.txt
     """
+    if output_mode == "surrogate":
+        from clinical_deid.pipes.registry import registered_pipes
+
+        if "surrogate" not in registered_pipes():
+            click.echo(
+                "Error: --output-mode surrogate requires the faker library.\n"
+                "Install it with:  pip install 'clinical-deid-playground[scripts]'",
+                err=True,
+            )
+            raise SystemExit(1)
+
     pipeline, config, resolved_name = _build_pipeline(
-        profile, config_path, pipeline_name, redactor
+        profile, config_path, pipeline_name
     )
 
     texts: list[tuple[str, str]] = []
@@ -182,7 +201,7 @@ def run(
         texts.append(("stdin", sys.stdin.read()))
 
     t0 = time.perf_counter()
-    results = [_process_doc(pipeline, doc_id, text, redactor) for doc_id, text in texts]
+    results = [_process_doc(pipeline, doc_id, text, output_mode) for doc_id, text in texts]
     duration = time.perf_counter() - t0
 
     from clinical_deid.export import to_json, to_jsonl, to_text
@@ -249,9 +268,9 @@ def run(
     show_default=True,
 )
 @click.option(
-    "--redactor",
-    type=click.Choice(["tag", "surrogate"]),
-    default="tag",
+    "--output-mode",
+    type=click.Choice(["redacted", "surrogate", "annotated"]),
+    default="redacted",
     show_default=True,
 )
 @click.option("--config", "config_path", type=click.Path(exists=True), default=None)
@@ -262,7 +281,7 @@ def batch(
     pipeline_name: str | None,
     on_error: str,
     output_format: str,
-    redactor: str,
+    output_mode: str,
     config_path: str | None,
 ) -> None:
     """Process a directory of .txt files or a JSONL file.
@@ -274,7 +293,7 @@ def batch(
       clinical-deid batch notes_dir/ -o output/ --pipeline my-pipeline
     """
     pipeline, config, resolved_name = _build_pipeline(
-        profile, config_path, pipeline_name, redactor
+        profile, config_path, pipeline_name
     )
 
     # Load input documents
@@ -309,7 +328,7 @@ def batch(
 
     for doc_id, text in texts:
         try:
-            results.append(_process_doc(pipeline, doc_id, text, redactor))
+            results.append(_process_doc(pipeline, doc_id, text, output_mode))
         except Exception as exc:
             if on_error == "fail":
                 raise
@@ -395,12 +414,6 @@ def batch(
     show_default=True,
     help="Flag spans below this confidence.",
 )
-@click.option(
-    "--redactor",
-    type=click.Choice(["tag", "surrogate"]),
-    default="tag",
-    show_default=True,
-)
 def eval_cmd(
     corpus: str,
     corpus_format: str,
@@ -408,7 +421,6 @@ def eval_cmd(
     pipeline_name: str | None,
     config_path: str | None,
     confidence_threshold: float,
-    redactor: str,
 ) -> None:
     """Evaluate pipeline against a gold-standard corpus.
 
@@ -440,7 +452,7 @@ def eval_cmd(
     click.echo(f"Evaluating on {len(golds)} document(s)...", err=True)
 
     pipeline, config, resolved_name = _build_pipeline(
-        profile, config_path, pipeline_name, redactor
+        profile, config_path, pipeline_name
     )
 
     t0 = time.perf_counter()
@@ -1017,3 +1029,51 @@ def dataset_delete(name: str) -> None:
         click.echo(f"Error: {exc}", err=True)
         raise SystemExit(1)
     click.echo(f"Deleted dataset {name!r}")
+
+
+@dataset.command(name="export")
+@click.argument("name")
+@click.option("-o", "--output", "output_dir", type=click.Path(), required=True)
+@click.option(
+    "--format",
+    "fmt",
+    type=click.Choice(["conll", "spacy", "huggingface"]),
+    default="conll",
+    show_default=True,
+    help="Training data format.",
+)
+@click.option("--filename", default=None, help="Override output filename.")
+def dataset_export(name: str, output_dir: str, fmt: str, filename: str | None) -> None:
+    """Export a registered dataset to a training format.
+
+    \b
+    Examples:
+      clinical-deid dataset export i2b2-2014 -o training/ --format conll
+      clinical-deid dataset export physionet -o training/ --format spacy
+      clinical-deid dataset export i2b2-2014 -o training/ --format huggingface
+    """
+    from clinical_deid.dataset_store import load_dataset_documents
+    from clinical_deid.training_export import export_training_data
+
+    try:
+        docs = load_dataset_documents(_datasets_dir(), name)
+    except FileNotFoundError as exc:
+        click.echo(f"Error: {exc}", err=True)
+        raise SystemExit(1)
+
+    if not docs:
+        click.echo("Dataset has no documents.", err=True)
+        raise SystemExit(1)
+
+    try:
+        path = export_training_data(
+            docs, Path(output_dir), fmt, filename=filename
+        )
+    except ImportError as exc:
+        click.echo(f"Error: {exc}", err=True)
+        raise SystemExit(1)
+
+    total_spans = sum(len(d.spans) for d in docs)
+    click.echo(
+        f"Exported {len(docs)} docs ({total_spans} spans) to {path}"
+    )

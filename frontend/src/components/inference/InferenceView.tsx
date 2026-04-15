@@ -22,7 +22,7 @@ import {
   deleteInferenceRun,
 } from '../../api/inference';
 import { downloadBlob } from '../../lib/download';
-import type { ProcessResponse, SavedInferenceRunDetail } from '../../api/types';
+import type { OutputMode, ProcessResponse, SavedInferenceRunDetail } from '../../api/types';
 
 function toProcessResponse(d: SavedInferenceRunDetail): ProcessResponse {
   const { id: _id, saved_at: _saved, ...rest } = d;
@@ -38,6 +38,7 @@ function exportFilenameBase(pipelineName: string): string {
 export default function InferenceView() {
   const [pipeline, setPipeline] = useState('');
   const [text, setText] = useState('');
+  const [outputMode, setOutputMode] = useState<OutputMode>('redacted');
   const [result, setResult] = useState<ProcessResponse | null>(null);
   /** Set when the current view came from a saved snapshot (or right after saving). */
   const [snapshotMeta, setSnapshotMeta] = useState<{ id: string; saved_at: string } | null>(null);
@@ -92,7 +93,7 @@ export default function InferenceView() {
     setSnapshotMeta(null);
     setSelectedRunId('');
     mutation.mutate(
-      { pipelineName: pipeline, req: { text }, trace: true },
+      { pipelineName: pipeline, req: { text }, trace: true, outputMode },
       { onSuccess: setResult },
     );
   };
@@ -128,6 +129,18 @@ export default function InferenceView() {
         <div className="flex flex-col gap-1">
           <label className="text-xs font-medium text-gray-500">Pipeline</label>
           <PipelineSelector value={pipeline} onChange={setPipeline} />
+        </div>
+        <div className="flex flex-col gap-1">
+          <label className="text-xs font-medium text-gray-500">Output</label>
+          <select
+            className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-800 shadow-sm focus:border-blue-400 focus:outline-none"
+            value={outputMode}
+            onChange={(e) => setOutputMode(e.target.value as OutputMode)}
+          >
+            <option value="annotated">Annotated (no redaction)</option>
+            <option value="redacted">Redacted ([LABEL] tags)</option>
+            <option value="surrogate">Surrogate (fake data)</option>
+          </select>
         </div>
         <button
           onClick={handleRun}

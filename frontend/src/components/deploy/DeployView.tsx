@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { Loader2, Plus, Trash2, Save, Shield, Rocket, Globe } from 'lucide-react';
 import { clsx } from 'clsx';
 import { useDeployConfig, useDeployablePipelines, useUpdateDeployConfig } from '../../hooks/useDeploy';
-import type { DeployConfig, ModeEntry } from '../../api/types';
+import type { DeployConfig } from '../../api/types';
 
 interface ModeFormEntry {
   pipeline: string;
