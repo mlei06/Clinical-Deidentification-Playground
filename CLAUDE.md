@@ -43,6 +43,14 @@ class Pipe(Protocol):
 
 Subtypes: `Detector` (produces spans), `SpanTransformer` (modifies spans), `Redactor` (replaces text), `Preprocessor` (transforms text before detection).
 
+### Canonical PHI labels
+
+`PHILabel` enum in `domain.py` defines the canonical label space (~30 labels based on HIPAA Safe Harbor 18 identifiers + clinical additions). Detectors may use any internal labels but should map to canonical labels via `remap` config. `PHILabel.normalize(raw_label)` maps raw strings to canonical labels (with alias support), falling back to `OTHER`.
+
+### Redaction as an output mode (not a pipe)
+
+Pipelines should only predict spans. Redaction (tag replacement) and surrogate (fake data) are applied at the API layer via `output_mode` parameter (`annotated`, `redacted`, `surrogate`). Legacy redactor pipes (surrogate, presidio_anonymizer) still work in pipelines for backward compat, but the preferred pattern is `output_mode` on process endpoints. The `/process/redact` endpoint accepts text + user-corrected spans for post-editing export. The `/process/scrub` endpoint provides zero-config log cleaning.
+
 ### Pipe registry
 
 Pipes are registered by name: `register("my_pipe", MyConfig, MyPipe)`. After registration, the pipe works in pipeline JSON configs, the API, CLI, and evaluation — zero other code changes.
@@ -106,6 +114,7 @@ src/clinical_deid/
     presidio_ner/        # Presidio wrapper (optional)
     presidio_anonymizer/ # Presidio redaction (optional)
     neuroner_ner/        # NeuroNER LSTM-CRF wrapper (Python 3.7 subprocess)
+    custom_ner/          # Load trained spaCy/HuggingFace models from models/
     llm_ner.py           # LLM-prompted detection (optional)
     span_resolver.py     # Overlap resolution (deprecated, use resolve_spans)
     consistency_propagator.py  # Document-level span propagation
@@ -130,6 +139,7 @@ src/clinical_deid/
   eval_store.py          # Filesystem eval result storage
   profiles.py            # fast/balanced/accurate profile builders
   export.py              # Output formatters (text, JSON, JSONL, CSV, Parquet)
+  training_export.py     # Training data export (CoNLL, spaCy DocBin, HuggingFace JSONL)
 ```
 
 ## API routes
@@ -156,7 +166,9 @@ All pipeline routes use **name-based** paths (not UUIDs):
 | `GET` | `/dictionaries/{kind}/{name}/terms` | Full term list |
 | `POST` | `/dictionaries` | Upload a dictionary |
 | `DELETE` | `/dictionaries/{kind}/{name}` | Delete a dictionary |
-| `POST` | `/process/{pipeline_name}` | Run pipeline on text |
+| `POST` | `/process/redact` | Redact/surrogate given text + spans |
+| `POST` | `/process/scrub` | Zero-config log cleaning (text in, clean text out) |
+| `POST` | `/process/{pipeline_name}?output_mode=` | Run pipeline on text (annotated/redacted/surrogate) |
 | `POST` | `/process/{pipeline_name}/batch` | Batch process |
 | `POST` | `/eval/run` | Run evaluation |
 | `GET` | `/eval/runs` | List eval results |
@@ -173,6 +185,7 @@ All pipeline routes use **name-based** paths (not UUIDs):
 | `POST` | `/datasets/compose` | Compose multiple datasets |
 | `POST` | `/datasets/transform` | Apply transforms to dataset |
 | `POST` | `/datasets/generate` | Generate synthetic data via LLM |
+| `POST` | `/datasets/{name}/export` | Export dataset to training format |
 | `GET` | `/audit/logs` | Query audit trail |
 | `GET` | `/audit/logs/{id}` | Audit detail |
 | `GET` | `/audit/stats` | Aggregate stats |
@@ -200,6 +213,7 @@ clinical-deid dataset list          # List registered datasets
 clinical-deid dataset register PATH --name NAME  # Register dataset
 clinical-deid dataset show NAME     # Dataset details + analytics
 clinical-deid dataset delete NAME   # Unregister dataset
+clinical-deid dataset export NAME -o DIR  # Export to training format (conll/spacy/huggingface)
 clinical-deid audit list            # List audit records
 clinical-deid audit show ID         # Show audit detail
 clinical-deid setup                 # Verify deps, init DB
@@ -216,7 +230,7 @@ Also computes: risk-weighted recall (HIPAA severity weights), per-label breakdow
 
 ## What's built
 
-- Full pipe system with 13 cataloged pipe types (including 2 deprecated aliases)
+- Full pipe system with 14 cataloged pipe types (including 2 deprecated aliases)
 - Pipeline composition (sequential chaining with 7 span merge/resolution strategies)
 - CLI with all subcommands (run, batch, eval, dict, dataset, audit, setup, serve)
 - FastAPI with all routes (pipelines, process, eval, audit, models, dictionaries, datasets, deploy, audit production proxy)
@@ -230,13 +244,19 @@ Also computes: risk-weighted recall (HIPAA severity weights), per-label breakdow
 - Data ingestion (JSONL, BRAT, ASQ-PHI, MIMIC, PhysioNet)
 - LLM synthesis for generating training data
 - NeuroNER LSTM-CRF integration (Python 3.7 subprocess bridge)
-- 27+ test files
+- **Training data export** — AnnotatedDocument to CoNLL, spaCy DocBin, HuggingFace JSONL (CLI + API)
+- **Custom NER pipe** — load trained spaCy/HuggingFace models from `models/` by name
+- **Canonical PHI labels** — `PHILabel` enum with HIPAA-based label space + `normalize()` for alias mapping
+- **Output mode separation** — redaction/surrogate decoupled from pipelines; applied via `output_mode` param on process endpoints
+- **`/process/redact`** — apply redaction/surrogate to user-corrected spans (post-editing export)
+- **`/process/scrub`** — zero-config log cleaning endpoint for upstream services
+- **Enriched audit** — `client_id`, `output_mode`, `service_type`, per-label `entity_counts` in audit records
+- 30+ test files
 
 ## What's not built yet
 
-- **Training data export** — AnnotatedDocument to spaCy DocBin / HuggingFace JSONL / CoNLL
-- **Training runner CLI** — wrapper for spaCy/HF training
-- **Custom NER pipe** — load trained models from `models/` by name
+- **Training runner CLI** — wrapper for spaCy/HF training (export + model registry are ready)
+- **Production inference UI** — assisted deidentification + batch inference/export frontend view (span editing, file upload, human-assist toggle)
 
 ## Conventions
 
