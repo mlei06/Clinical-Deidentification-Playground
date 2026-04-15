@@ -5,6 +5,7 @@ import type {
   ComposeRequest,
   TransformRequest,
   GenerateRequest,
+  ExportTrainingRequest,
 } from '../api/types';
 
 export function useDatasets() {
@@ -86,5 +87,11 @@ export function useGenerateDataset() {
   return useMutation({
     mutationFn: (req: GenerateRequest) => api.generateDataset(req),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['datasets'] }),
+  });
+}
+
+export function useExportDataset(name: string) {
+  return useMutation({
+    mutationFn: (req: ExportTrainingRequest) => api.exportDataset(name, req),
   });
 }

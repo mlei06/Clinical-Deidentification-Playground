@@ -300,6 +300,20 @@ export interface DocumentDetail {
   spans: { start: number; end: number; label: string; confidence?: number | null; source?: string | null }[];
 }
 
+export type TrainingExportFormat = 'conll' | 'spacy' | 'huggingface';
+
+export interface ExportTrainingRequest {
+  format: TrainingExportFormat;
+  filename?: string;
+}
+
+export interface ExportTrainingResponse {
+  path: string;
+  format: string;
+  document_count: number;
+  total_spans: number;
+}
+
 export interface RegisterDatasetRequest {
   name: string;
   data_path: string;

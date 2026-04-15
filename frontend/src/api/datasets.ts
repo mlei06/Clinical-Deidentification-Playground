@@ -8,6 +8,8 @@ import type {
   ComposeRequest,
   TransformRequest,
   GenerateRequest,
+  ExportTrainingRequest,
+  ExportTrainingResponse,
 } from './types';
 
 export function listDatasets(params?: {
@@ -74,4 +76,14 @@ export function transformDataset(req: TransformRequest): Promise<DatasetDetail> 
 
 export function generateDataset(req: GenerateRequest): Promise<DatasetDetail> {
   return apiFetch('/datasets/generate', { method: 'POST', body: JSON.stringify(req) });
+}
+
+export function exportDataset(
+  name: string,
+  req: ExportTrainingRequest,
+): Promise<ExportTrainingResponse> {
+  return apiFetch(`/datasets/${encodeURIComponent(name)}/export`, {
+    method: 'POST',
+    body: JSON.stringify(req),
+  });
 }
