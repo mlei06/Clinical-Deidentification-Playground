@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import importlib
 import json
-import warnings
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -150,19 +149,6 @@ _CATALOG: list[PipeCatalogEntry] = [
         config_path="clinical_deid.pipes.presidio_ner.pipe:PresidioNerConfig",
         pipe_path="clinical_deid.pipes.presidio_ner.pipe:PresidioNerPipe",
         default_base_labels_fn="clinical_deid.pipes.presidio_ner.pipe:default_base_labels",
-    ),
-    PipeCatalogEntry(
-        name="span_resolver",
-        description=(
-            "Resolve overlapping spans: pick winner by longest, highest_confidence, or label priority; "
-            "optionally merge adjacent same-label spans"
-        ),
-        role="span_transformer",
-        extra=None,
-        install_hint="Included by default",
-        config_path="clinical_deid.pipes.span_resolver:SpanResolverConfig",
-        pipe_path="clinical_deid.pipes.span_resolver:SpanResolverPipe",
-        deprecated=True,
     ),
     PipeCatalogEntry(
         name="consistency_propagator",
@@ -306,42 +292,15 @@ def _load_pipeline_from_dict(spec: dict[str, Any]) -> Pipeline:
 
     if "pipes" not in spec:
         raise ValueError(f"pipeline spec missing 'pipes': {spec}")
-    pipe_list: list[Pipe] = []
-    for p in spec["pipes"]:
-        result = load_pipe(p)
-        if isinstance(result, list):
-            pipe_list.extend(result)
-        else:
-            pipe_list.append(result)
+    pipe_list: list[Pipe] = [load_pipe(p) for p in spec["pipes"]]
     return PipelineCls(pipes=pipe_list)
 
 
-def load_pipe(spec: dict[str, Any]) -> Pipe | list[Pipe]:
-    """Recursively build a single pipe from a JSON-like dict.
-
-    Returns a list of pipes for deprecated ``"parallel"`` blocks (flattened
-    into the parent pipeline).
-    """
+def load_pipe(spec: dict[str, Any]) -> Pipe:
+    """Recursively build a single pipe from a JSON-like dict."""
     pipe_type = spec.get("type")
     if pipe_type is None:
         raise ValueError(f"Pipe spec missing 'type': {spec}")
-
-    # Backward-compat: flatten deprecated parallel blocks into sequential detectors
-    if pipe_type == "parallel":
-        warnings.warn(
-            '"type": "parallel" is deprecated. Chain detectors sequentially instead '
-            "and use resolve_spans for overlap handling.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        pipes: list[Pipe] = []
-        for d in spec.get("detectors", []):
-            result = load_pipe(d)
-            if isinstance(result, list):
-                pipes.extend(result)
-            else:
-                pipes.append(result)
-        return pipes
 
     if pipe_type == "pipeline":
         return _load_pipeline_from_dict(spec)

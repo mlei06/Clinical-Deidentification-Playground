@@ -69,7 +69,7 @@ def accurate_profile() -> dict[str, Any]:
             {"type": "presidio_ner"},
             {"type": "blacklist"},
             {"type": "consistency_propagator", "config": {"min_confidence": 0.7}},
-            {"type": "span_resolver", "config": {"strategy": "highest_confidence", "merge_adjacent": True}},
+            {"type": "resolve_spans", "config": {"strategy": "max_confidence"}},
         ],
     }
 

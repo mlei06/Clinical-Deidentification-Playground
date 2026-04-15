@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import warnings
-
 from clinical_deid.domain import AnnotatedDocument, Document
 from clinical_deid.pipes.registry import dump_pipeline, load_pipeline
 from clinical_deid.pipes.whitelist import WhitelistLabelConfig
@@ -90,25 +88,3 @@ def test_run_with_trace_and_timing() -> None:
     assert run.trace[0].elapsed_ms is not None
 
 
-def test_backward_compat_parallel_flattens_to_sequential() -> None:
-    """Legacy 'type: parallel' JSON is migrated to sequential detectors."""
-    cfg = {
-        "pipes": [
-            {
-                "type": "parallel",
-                "strategy": "union",
-                "detectors": [
-                    {"type": "regex_ner"},
-                    {"type": "whitelist", "config": {"load_all_dictionaries": False}},
-                ],
-            }
-        ]
-    }
-    with warnings.catch_warnings(record=True) as w:
-        warnings.simplefilter("always")
-        p = load_pipeline(cfg)
-        assert any("deprecated" in str(x.message).lower() for x in w)
-    # Parallel block should be flattened into 2 sequential pipes
-    assert len(p.pipes) == 2
-    out = p.forward(_doc("Call 555-123-4567."))
-    assert len(out.spans) >= 1

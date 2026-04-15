@@ -75,8 +75,6 @@ Pipelines are JSON documents with sequential steps — detectors chained into sp
 }
 ```
 
-> **Note:** The older `"type": "parallel"` block syntax is deprecated. Chain detectors sequentially instead and use `resolve_spans` to handle overlaps.
-
 ### Three built-in profiles
 
 - **fast** — regex + whitelist + blacklist + resolve (~10ms, no ML)
@@ -116,7 +114,6 @@ src/clinical_deid/
     neuroner_ner/        # NeuroNER LSTM-CRF wrapper (Python 3.7 subprocess)
     custom_ner/          # Load trained spaCy/HuggingFace models from models/
     llm_ner.py           # LLM-prompted detection (optional)
-    span_resolver.py     # Overlap resolution (deprecated, use resolve_spans)
     consistency_propagator.py  # Document-level span propagation
     surrogate/           # Realistic fake data replacement (optional)
   api/
@@ -230,7 +227,7 @@ Also computes: risk-weighted recall (HIPAA severity weights), per-label breakdow
 
 ## What's built
 
-- Full pipe system with 14 cataloged pipe types (including 2 deprecated aliases)
+- Full pipe system with 11 cataloged pipe types (1 deprecated alias)
 - Pipeline composition (sequential chaining with 7 span merge/resolution strategies)
 - CLI with all subcommands (run, batch, eval, dict, dataset, audit, setup, serve)
 - FastAPI with all routes (pipelines, process, eval, audit, models, dictionaries, datasets, deploy, audit production proxy)
