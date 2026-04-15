@@ -4,7 +4,6 @@ from clinical_deid.pipes.base import (
     DetectorWithLabelMapping,
     Pipe,
     Preprocessor,
-    Redactor,
     SpanTransformer,
 )
 from clinical_deid.pipes.detector_label_mapping import (
@@ -66,7 +65,6 @@ __all__ = [
     "pipe_config_json_schema",
     "Pipe",
     "Preprocessor",
-    "Redactor",
     "SpanTransformer",
     # Combinators
     "LabelMapper",
@@ -104,19 +102,13 @@ __all__ = [
     "save_pipeline",
 ]
 
-# Optional: Presidio pipes — available when `pip install .[presidio]`
+# Optional: Presidio NER — available when `pip install .[presidio]`
 try:
-    from clinical_deid.pipes.presidio_anonymizer import (
-        PresidioAnonymizerConfig,
-        PresidioAnonymizerPipe,
-    )
     from clinical_deid.pipes.presidio_ner import PresidioNerConfig, PresidioNerPipe
 
     __all__ += [
         "PresidioNerConfig",
         "PresidioNerPipe",
-        "PresidioAnonymizerConfig",
-        "PresidioAnonymizerPipe",
     ]
 except ImportError:
     pass

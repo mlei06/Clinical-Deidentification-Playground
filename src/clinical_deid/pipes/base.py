@@ -65,9 +65,3 @@ class SpanTransformer(Pipe, Protocol):
     """Modifies spans without changing document text (e.g. remap labels, filter)."""
 
     ...
-
-
-class Redactor(Pipe, Protocol):
-    """Consumes spans to produce redacted / anonymised text."""
-
-    ...

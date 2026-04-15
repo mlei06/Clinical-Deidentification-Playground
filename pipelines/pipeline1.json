@@ -34,13 +34,6 @@
         "apply_to_labels": null,
         "load_all_dictionaries": true
       }
-    },
-    {
-      "type": "surrogate",
-      "config": {
-        "seed": null,
-        "consistency": true
-      }
     }
   ]
 }

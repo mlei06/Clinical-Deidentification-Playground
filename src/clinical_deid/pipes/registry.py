@@ -152,24 +152,6 @@ _CATALOG: list[PipeCatalogEntry] = [
         default_base_labels_fn="clinical_deid.pipes.presidio_ner.pipe:default_base_labels",
     ),
     PipeCatalogEntry(
-        name="presidio_anonymizer",
-        description="Redact/mask/hash/encrypt text using Microsoft Presidio Anonymizer",
-        role="redactor",
-        extra="presidio",
-        install_hint="pip install '.[presidio]'",
-        config_path="clinical_deid.pipes.presidio_anonymizer.pipe:PresidioAnonymizerConfig",
-        pipe_path="clinical_deid.pipes.presidio_anonymizer.pipe:PresidioAnonymizerPipe",
-    ),
-    PipeCatalogEntry(
-        name="surrogate",
-        description="Replace PHI with realistic fake data (Faker-based surrogate generation)",
-        role="redactor",
-        extra="scripts",
-        install_hint="pip install '.[scripts]'",
-        config_path="clinical_deid.pipes.surrogate.pipe:SurrogateConfig",
-        pipe_path="clinical_deid.pipes.surrogate.pipe:SurrogatePipe",
-    ),
-    PipeCatalogEntry(
         name="span_resolver",
         description=(
             "Resolve overlapping spans: pick winner by longest, highest_confidence, or label priority; "
@@ -214,31 +196,17 @@ _CATALOG: list[PipeCatalogEntry] = [
         check_ready="clinical_deid.pipes.neuroner_ner.pipe:check_neuroner_ready",
         default_base_labels_fn="clinical_deid.pipes.neuroner_ner.pipe:default_base_labels",
     ),
+    PipeCatalogEntry(
+        name="custom_ner",
+        description="Load a trained NER model (spaCy or HuggingFace) from models/ directory",
+        role="detector",
+        extra=None,
+        install_hint="Train or place a model under models/{spacy,huggingface}/{name}/ with model_manifest.json",
+        config_path="clinical_deid.pipes.custom_ner.pipe:CustomNerConfig",
+        pipe_path="clinical_deid.pipes.custom_ner.pipe:CustomNerPipe",
+        default_base_labels_fn="clinical_deid.pipes.custom_ner.pipe:default_base_labels",
+    ),
 ]
-
-
-_PIPE_ROLE_BY_NAME: dict[str, str] = {e.name: e.role for e in _CATALOG}
-
-
-def _collect_redactors_in_spec(spec: Any) -> list[str]:
-    """Collect pipe types with catalog role 'redactor' inside a JSON-ish pipe spec."""
-    if not isinstance(spec, dict):
-        return []
-    pipe_type = spec.get("type")
-    if not isinstance(pipe_type, str):
-        return []
-
-    role = _PIPE_ROLE_BY_NAME.get(pipe_type)
-    found: list[str] = []
-    if role == "redactor":
-        found.append(pipe_type)
-
-    # Structural recursion
-    if pipe_type == "pipeline":
-        for p in spec.get("pipes", []):
-            found.extend(_collect_redactors_in_spec(p))
-
-    return list(dict.fromkeys(found))  # preserve order, de-dupe
 
 
 def pipe_catalog() -> list[PipeCatalogEntry]:

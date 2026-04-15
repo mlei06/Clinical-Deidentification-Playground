@@ -2,6 +2,9 @@
 
 Each profile function returns a plain ``dict`` pipeline config that can be
 passed directly to :func:`~clinical_deid.pipes.registry.load_pipeline`.
+
+Pipelines only produce spans — redaction/surrogate is applied separately
+via ``output_mode`` at the API/CLI layer.
 """
 
 from __future__ import annotations
@@ -78,28 +81,9 @@ _PROFILE_BUILDERS = {
 }
 
 
-def get_profile_config(
-    name: str,
-    *,
-    redactor: str = "tag",
-) -> dict[str, Any]:
-    """Build a complete pipeline config dict for the named profile.
-
-    Parameters
-    ----------
-    name : str
-        One of ``"fast"``, ``"balanced"``, ``"accurate"``.
-    redactor : str
-        ``"tag"`` (default, ``[LABEL]`` replacement in CLI output layer) or
-        ``"surrogate"`` (appends the surrogate pipe to the pipeline).
-    """
+def get_profile_config(name: str) -> dict[str, Any]:
+    """Build a complete pipeline config dict for the named profile."""
     builder = _PROFILE_BUILDERS.get(name)
     if builder is None:
         raise ValueError(f"Unknown profile {name!r}. Choose from: {sorted(_PROFILE_BUILDERS)}")
-
-    config = builder()
-
-    if redactor == "surrogate":
-        config["pipes"].append({"type": "surrogate"})
-
-    return config
+    return builder()
