@@ -283,3 +283,27 @@ def test_neuroner_label_space_bundle(client) -> None:
     assert isinstance(body["labels_by_model"], dict)
     assert isinstance(body["default_entity_map"], dict)
     assert isinstance(body["default_model"], str)
+
+
+def test_presidio_label_space_bundle(client) -> None:
+    r = client.get("/pipelines/pipe-types/presidio_ner/label-space-bundle")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert "labels_by_model" in body
+    assert "default_entity_map" in body
+    assert "default_model" in body
+    assert "spacy/en_core_web_lg" in body["labels_by_model"]
+    assert isinstance(body["labels_by_model"]["spacy/en_core_web_lg"], list)
+
+
+def test_compute_pipe_labels_presidio_omits_neuroner_fields(client) -> None:
+    r = client.post(
+        "/pipelines/pipe-types/presidio_ner/labels",
+        json={"config": {"model": "spacy/en_core_web_sm"}},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert "labels" in body
+    assert isinstance(body["labels"], list)
+    assert "neuroner_model" not in body
+    assert "neuroner_manifest_labels" not in body

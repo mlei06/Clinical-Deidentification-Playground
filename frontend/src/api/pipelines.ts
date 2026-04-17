@@ -60,13 +60,20 @@ export function computePipeLabels(
   });
 }
 
-/** Raw manifest labels for every NeuroNER model + default entity_map (one GET per session). */
-export interface NeuronerLabelSpaceBundle {
+/** Per-model keys into ``entity_map`` + defaults — NeuroNER (raw tags) or Presidio (entity names). One GET per session. */
+export interface LabelSpaceBundle {
   labels_by_model: Record<string, string[]>;
   default_entity_map: Record<string, string>;
   default_model: string;
 }
 
-export function fetchNeuronerLabelSpaceBundle(): Promise<NeuronerLabelSpaceBundle> {
+/** @deprecated alias — use ``LabelSpaceBundle`` */
+export type NeuronerLabelSpaceBundle = LabelSpaceBundle;
+
+export function fetchNeuronerLabelSpaceBundle(): Promise<LabelSpaceBundle> {
   return apiFetch('/pipelines/pipe-types/neuroner_ner/label-space-bundle');
+}
+
+export function fetchPresidioLabelSpaceBundle(): Promise<LabelSpaceBundle> {
+  return apiFetch('/pipelines/pipe-types/presidio_ner/label-space-bundle');
 }

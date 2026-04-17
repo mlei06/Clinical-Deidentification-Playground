@@ -180,13 +180,16 @@ class ComputeLabelsResponse(BaseModel):
 
 
 class NeuronerLabelSpaceBundle(BaseModel):
-    """One payload so the UI can derive label space for any model without a round-trip per switch."""
+    """One GET payload so the UI can derive label space for any model without a POST per switch."""
 
     labels_by_model: dict[str, list[str]] = Field(
-        description="Raw ``labels`` from each ``models/neuroner/<name>/model_manifest.json``.",
+        description=(
+            "Neo: raw tags from each ``model_manifest.json``. Presidio: Presidio entity names per "
+            "known model (``entity_map`` keys); merge with ``default_entity_map`` on the client."
+        ),
     )
     default_entity_map: dict[str, str] = Field(
-        description="Default NeuroNER raw-tag → canonical map (merged with config.entity_map on the client).",
+        description="Default raw/entity → canonical PHI map (merged with config.entity_map on the client).",
     )
     default_model: str = Field(description="Default ``model`` when the pipe config omits it.")
 

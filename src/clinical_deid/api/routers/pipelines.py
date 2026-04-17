@@ -175,7 +175,11 @@ def _inject_dynamic_options(config_schema: dict) -> None:
             prop["enum"] = options
 
 
-@router.post("/pipe-types/{name}/labels", response_model=ComputeLabelsResponse)
+@router.post(
+    "/pipe-types/{name}/labels",
+    response_model=ComputeLabelsResponse,
+    response_model_exclude_none=True,
+)
 def compute_pipe_labels(name: str, body: ComputeLabelsRequest | None = None) -> ComputeLabelsResponse:
     """Compute the effective base labels for a pipe type given optional config.
 
@@ -227,6 +231,18 @@ def neuroner_label_space_bundle() -> NeuronerLabelSpaceBundle:
         default_entity_map=dict(DEFAULT_ENTITY_MAP),
         default_model=cfg.model,
     )
+
+
+@router.get(
+    "/pipe-types/presidio_ner/label-space-bundle",
+    response_model=NeuronerLabelSpaceBundle,
+)
+def presidio_label_space_bundle() -> NeuronerLabelSpaceBundle:
+    """Per known Presidio backend model: ``entity_map`` keys + default map (same shape as NeuroNER)."""
+    from clinical_deid.pipes.presidio_ner.pipe import build_presidio_label_space_bundle
+
+    data = build_presidio_label_space_bundle()
+    return NeuronerLabelSpaceBundle(**data)
 
 
 @router.get("/ner/builtins", response_model=NerBuiltinInfo)

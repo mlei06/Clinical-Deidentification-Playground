@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Any, Literal, get_args
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -121,6 +121,19 @@ def _ner_labels_for_model(model: str) -> list[str]:
     if family == "huggingface" and model_path in _SPECIFIC_MODEL_NER_LABELS:
         return _SPECIFIC_MODEL_NER_LABELS[model_path]
     return _FAMILY_NER_LABELS.get(family, [])
+
+
+def _model_entity_map_keys(
+    model: str,
+    model_to_presidio: dict[str, str] | None = None,
+) -> list[str]:
+    """Presidio entity names produced for *model* (inputs to ``entity_map``), before PHI renaming."""
+    m2p = model_to_presidio or DEFAULT_MODEL_TO_PRESIDIO
+    keys: set[str] = set()
+    for ner_label in _ner_labels_for_model(model):
+        keys.add(m2p.get(ner_label, ner_label))
+    keys.update(_BUILTIN_PRESIDIO_ENTITIES)
+    return sorted(keys)
 
 
 def _model_base_labels(
@@ -408,3 +421,21 @@ class PresidioNerPipe(ConfigurablePipe):
         found.sort(key=lambda s: (s.start, s.end, s.label))
         found = apply_detector_label_mapping(found, self._config.label_mapping)
         return accumulate_spans(doc, found, skip_overlapping=self._config.skip_overlapping)
+
+
+def build_presidio_label_space_bundle() -> dict[str, Any]:
+    """Payload for ``GET …/presidio_ner/label-space-bundle`` (same JSON shape as NeuroNER bundle).
+
+    ``labels_by_model`` holds **Presidio entity names** (``entity_map`` keys) per selectable model
+    using default ``model_to_presidio``. The client merges ``default_entity_map`` with
+    ``config.entity_map``, then maps each key to canonical PHI labels.
+    """
+    labels_by_model: dict[str, list[str]] = {}
+    for model in get_args(KNOWN_MODELS):
+        labels_by_model[model] = _model_entity_map_keys(model, None)
+    cfg = PresidioNerConfig()
+    return {
+        "labels_by_model": labels_by_model,
+        "default_entity_map": dict(DEFAULT_ENTITY_MAP),
+        "default_model": cfg.model,
+    }
