@@ -271,3 +271,15 @@ def test_list_pipe_types(client) -> None:
         if entry["installed"]:
             assert entry["config_schema"] is not None
             assert "properties" in entry["config_schema"]
+
+
+def test_neuroner_label_space_bundle(client) -> None:
+    r = client.get("/pipelines/pipe-types/neuroner_ner/label-space-bundle")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert "labels_by_model" in body
+    assert "default_entity_map" in body
+    assert "default_model" in body
+    assert isinstance(body["labels_by_model"], dict)
+    assert isinstance(body["default_entity_map"], dict)
+    assert isinstance(body["default_model"], str)

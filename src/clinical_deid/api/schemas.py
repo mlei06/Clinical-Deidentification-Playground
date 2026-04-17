@@ -165,7 +165,30 @@ class ComputeLabelsRequest(BaseModel):
 
 
 class ComputeLabelsResponse(BaseModel):
-    labels: list[str]
+    labels: list[str] = Field(
+        ...,
+        description="Canonical detector labels after entity_map (inputs to label_mapping).",
+    )
+    neuroner_model: str | None = Field(
+        default=None,
+        description="NeuroNER: effective ``model`` from the request config (echo for debugging).",
+    )
+    neuroner_manifest_labels: list[str] | None = Field(
+        default=None,
+        description="NeuroNER: raw ``labels`` from ``model_manifest.json`` when the model is registered.",
+    )
+
+
+class NeuronerLabelSpaceBundle(BaseModel):
+    """One payload so the UI can derive label space for any model without a round-trip per switch."""
+
+    labels_by_model: dict[str, list[str]] = Field(
+        description="Raw ``labels`` from each ``models/neuroner/<name>/model_manifest.json``.",
+    )
+    default_entity_map: dict[str, str] = Field(
+        description="Default NeuroNER raw-tag → canonical map (merged with config.entity_map on the client).",
+    )
+    default_model: str = Field(description="Default ``model`` when the pipe config omits it.")
 
 
 class PipeTypeInfo(BaseModel):

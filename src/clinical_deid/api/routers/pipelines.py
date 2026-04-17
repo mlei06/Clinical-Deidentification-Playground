@@ -6,6 +6,7 @@ all operate on the filesystem — no database.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Annotated, Any
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
@@ -15,6 +16,7 @@ from clinical_deid.api.schemas import (
     ComputeLabelsRequest,
     ComputeLabelsResponse,
     CreatePipelineRequest,
+    NeuronerLabelSpaceBundle,
     NerBuiltinInfo,
     ParseListFileResult,
     ParseListFilesResponse,
@@ -88,6 +90,7 @@ def list_pipe_types() -> list[PipeTypeInfo]:
             _inject_base_labels(config_schema, base_labels, entry["name"])
         if config_schema:
             _inject_dict_info(config_schema)
+            _inject_dynamic_options(config_schema)
         result.append(PipeTypeInfo(**entry, config_schema=config_schema))
     return result
 
@@ -147,12 +150,83 @@ def _inject_dict_info(config_schema: dict) -> None:
             ]
 
 
+_OPTIONS_SOURCE_RESOLVERS: dict[str, Any] = {
+    "neuroner_models": lambda: sorted(
+        p.name for p in Path("models/neuroner").resolve().iterdir() if p.is_dir()
+    )
+    if Path("models/neuroner").resolve().is_dir()
+    else [],
+}
+
+
+def _inject_dynamic_options(config_schema: dict) -> None:
+    """Populate ``enum`` for properties that declare a ``ui_options_source``."""
+    for prop in config_schema.get("properties", {}).values():
+        if not isinstance(prop, dict):
+            continue
+        source = prop.get("ui_options_source")
+        if not source:
+            continue
+        resolver = _OPTIONS_SOURCE_RESOLVERS.get(source)
+        if resolver is None:
+            continue
+        options = resolver()
+        if options:
+            prop["enum"] = options
+
+
 @router.post("/pipe-types/{name}/labels", response_model=ComputeLabelsResponse)
 def compute_pipe_labels(name: str, body: ComputeLabelsRequest | None = None) -> ComputeLabelsResponse:
-    """Compute the effective base labels for a pipe type given optional config."""
+    """Compute the effective base labels for a pipe type given optional config.
+
+    For NeuroNER, ``labels`` are **post-``entity_map``** names (what ``label_mapping`` keys use).
+    ``neuroner_manifest_labels`` are the raw tags from ``model_manifest.json`` for comparison.
+    """
     config = body.config if body else None
     labels = compute_base_labels(name, config)
-    return ComputeLabelsResponse(labels=labels)
+    neuroner_model: str | None = None
+    neuroner_manifest_labels: list[str] | None = None
+    if name == "neuroner_ner":
+        from clinical_deid.config import get_settings
+        from clinical_deid.models import get_model
+        from clinical_deid.pipes.neuroner_ner.pipe import NeuroNerConfig
+
+        cfg = NeuroNerConfig.model_validate(config or {})
+        neuroner_model = cfg.model
+        try:
+            info = get_model(get_settings().models_dir, cfg.model)
+            if info.framework == "neuroner" and info.labels:
+                neuroner_manifest_labels = sorted(info.labels)
+        except (KeyError, ValueError, OSError):
+            pass
+    return ComputeLabelsResponse(
+        labels=labels,
+        neuroner_model=neuroner_model,
+        neuroner_manifest_labels=neuroner_manifest_labels,
+    )
+
+
+@router.get(
+    "/pipe-types/neuroner_ner/label-space-bundle",
+    response_model=NeuronerLabelSpaceBundle,
+)
+def neuroner_label_space_bundle() -> NeuronerLabelSpaceBundle:
+    """Return manifest labels for every NeuroNER model plus the default ``entity_map``.
+
+    The playground uses this once per session so changing ``model`` does not require another request.
+    """
+    from clinical_deid.models import list_models
+    from clinical_deid.pipes.neuroner_ner.pipe import DEFAULT_ENTITY_MAP, NeuroNerConfig
+
+    labels_by_model: dict[str, list[str]] = {}
+    for info in list_models(get_settings().models_dir, framework="neuroner"):
+        labels_by_model[info.name] = sorted(info.labels)
+    cfg = NeuroNerConfig()
+    return NeuronerLabelSpaceBundle(
+        labels_by_model=labels_by_model,
+        default_entity_map=dict(DEFAULT_ENTITY_MAP),
+        default_model=cfg.model,
+    )
 
 
 @router.get("/ner/builtins", response_model=NerBuiltinInfo)
