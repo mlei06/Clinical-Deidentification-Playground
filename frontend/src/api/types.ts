@@ -64,6 +64,7 @@ export interface PipeStep {
 
 export interface PipelineConfig {
   pipes: PipeStep[];
+  description?: string;
 }
 
 export interface PipelineDetail {

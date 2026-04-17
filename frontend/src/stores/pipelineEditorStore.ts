@@ -22,6 +22,7 @@ interface PipelineEditorState {
   edges: Edge[];
   selectedNodeId: string | null;
   pipelineName: string;
+  pipelineDescription: string;
   isDirty: boolean;
 
   onNodesChange: OnNodesChange;
@@ -33,6 +34,7 @@ interface PipelineEditorState {
   loadFromPipeline: (detail: PipelineDetail, pipeTypes: PipeTypeInfo[]) => void;
   toPipelineConfig: () => ReturnType<typeof flowToPipeline>;
   setPipelineName: (name: string) => void;
+  setPipelineDescription: (description: string) => void;
   reset: () => void;
 }
 
@@ -43,6 +45,7 @@ export const usePipelineEditorStore = create<PipelineEditorState>((set, get) => 
   edges: [],
   selectedNodeId: null,
   pipelineName: '',
+  pipelineDescription: '',
   isDirty: false,
 
   onNodesChange: (changes) =>
@@ -160,17 +163,23 @@ export const usePipelineEditorStore = create<PipelineEditorState>((set, get) => 
       nodes,
       edges,
       pipelineName: detail.name,
+      pipelineDescription: detail.config.description ?? '',
       selectedNodeId: null,
       isDirty: false,
     });
   },
 
   toPipelineConfig: () => {
-    const { nodes, edges } = get();
-    return flowToPipeline(nodes, edges);
+    const { nodes, edges, pipelineDescription } = get();
+    const config = flowToPipeline(nodes, edges);
+    const trimmed = pipelineDescription.trim();
+    return trimmed ? { ...config, description: trimmed } : config;
   },
 
   setPipelineName: (name) => set({ pipelineName: name }),
+
+  setPipelineDescription: (description) =>
+    set((s) => ({ pipelineDescription: description, isDirty: s.isDirty || s.pipelineDescription !== description })),
 
   reset: () =>
     set({
@@ -178,6 +187,7 @@ export const usePipelineEditorStore = create<PipelineEditorState>((set, get) => 
       edges: [],
       selectedNodeId: null,
       pipelineName: '',
+      pipelineDescription: '',
       isDirty: false,
     }),
 }));

@@ -22,8 +22,11 @@ def test_alias_mapping() -> None:
     assert PHILabel.normalize("POSTAL_CODE_CA") == PHILabel.POSTAL_CODE
     assert PHILabel.normalize("ZIP_CODE_US") == PHILabel.ZIP_CODE
     assert PHILabel.normalize("LOCATION_OTHER") == PHILabel.LOCATION
-    assert PHILabel.normalize("FIRST_NAME") == PHILabel.NAME
-    assert PHILabel.normalize("LAST_NAME") == PHILabel.NAME
+    assert PHILabel.normalize("FIRST_NAME") == PHILabel.FIRST_NAME
+    assert PHILabel.normalize("LAST_NAME") == PHILabel.LAST_NAME
+    assert PHILabel.normalize("FIRSTNAME") == PHILabel.FIRST_NAME
+    assert PHILabel.normalize("LASTNAME") == PHILabel.LAST_NAME
+    assert PHILabel.normalize("FULL_NAME") == PHILabel.NAME
     assert PHILabel.normalize("DOB") == PHILabel.DATE
 
 

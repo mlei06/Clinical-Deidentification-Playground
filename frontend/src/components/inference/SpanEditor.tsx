@@ -8,6 +8,7 @@ import {
   Crosshair,
   Copy,
   AlertTriangle,
+  Loader2,
 } from 'lucide-react';
 import LabelBadge from '../shared/LabelBadge';
 import { CANONICAL_LABELS } from '../../lib/canonicalLabels';
@@ -34,6 +35,8 @@ interface SpanEditorProps {
   onResolveConflict?: (kept: PHISpanResponse) => void;
   /** Greedy merge using label priority (same idea as ``resolve_spans`` / ``label_priority``). */
   onQuickResolveLabelPriority?: () => void;
+  /** Commit current spans and regenerate the Output pane via ``/process/redact``. */
+  onUpdateOutput?: () => void;
 }
 
 export default function SpanEditor({
@@ -52,6 +55,7 @@ export default function SpanEditor({
   conflictSets = [],
   onResolveConflict,
   onQuickResolveLabelPriority,
+  onUpdateOutput,
 }: SpanEditorProps) {
   const [collapsedLabels, setCollapsedLabels] = useState<Set<string>>(new Set());
   const [collapsedConflicts, setCollapsedConflicts] = useState(false);
@@ -192,6 +196,22 @@ export default function SpanEditor({
         </div>
 
         <div className="flex flex-col gap-1">
+          {onUpdateOutput && (
+            <button
+              type="button"
+              onClick={onUpdateOutput}
+              disabled={isApplying || spans.length === 0}
+              className="inline-flex w-full items-center justify-center gap-1 rounded bg-gray-900 px-2 py-1.5 font-medium text-white hover:bg-gray-800 disabled:opacity-40"
+              title={
+                conflictSets.length > 0
+                  ? 'Regenerate the Output pane from your current spans. Unresolved same-range overlaps use the canonical primary label.'
+                  : 'Regenerate the Output pane from your current spans using the selected view style.'
+              }
+            >
+              {isApplying ? <Loader2 size={12} className="animate-spin" /> : null}
+              {isApplying ? 'Updating…' : 'Update output'}
+            </button>
+          )}
           <button
             type="button"
             onClick={onReset}
@@ -359,8 +379,8 @@ export default function SpanEditor({
                 conflictRangeKeySet.has(spanRangeKey(s.start, s.end)),
               );
               return (
-                <div key={label} className="overflow-hidden rounded border border-gray-200 bg-white shadow-sm">
-                  <div className="flex items-center gap-1 bg-gray-100/90 px-1.5 py-1">
+                <div key={label} className="rounded border border-gray-200 bg-white shadow-sm">
+                  <div className="sticky top-0 z-10 flex items-center gap-1 rounded-t bg-gray-100/90 px-1.5 py-1 backdrop-blur-sm">
                     <button
                       type="button"
                       onClick={() => toggleLabel(label)}

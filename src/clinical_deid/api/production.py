@@ -7,6 +7,7 @@ Exposes only:
 - List available modes
 - Process text (by pipeline name or mode alias)
 - Batch process (by pipeline name or mode alias)
+- Redact text given known spans (stateless, for post-review export)
 - Audit log queries (read-only)
 
 No pipeline CRUD, no evaluation, no dictionary management, no model management,
@@ -25,14 +26,22 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from clinical_deid.api.deps import SessionDep
-from clinical_deid.api.routers.process import _load_pipe_chain, _log_audit, _process_single
+from clinical_deid.api.routers.process import (
+    _apply_output_mode,
+    _load_pipe_chain,
+    _log_audit,
+    _process_single,
+)
 from clinical_deid.api.schemas import (
     BatchProcessRequest,
     BatchProcessResponse,
     HealthResponse,
+    PHISpanResponse,
     PipelineDetail,
     ProcessRequest,
     ProcessResponse,
+    RedactRequest,
+    RedactResponse,
 )
 from clinical_deid.config import get_settings
 from clinical_deid.db import init_db
@@ -140,6 +149,35 @@ def get_pipeline(pipeline_name: str) -> PipelineDetail:
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return PipelineDetail(name=pipeline_name, config=config)
+
+
+# -- Redaction (stateless) --------------------------------------------------
+
+
+@router.post("/redact", response_model=RedactResponse)
+def redact(body: RedactRequest) -> RedactResponse:
+    """Apply redaction or surrogate replacement given text and known spans.
+
+    Stateless text transformation — no pipeline invocation, no audit logging.
+    Used by the production review UI after a human edits spans.
+    """
+    span_responses = [
+        PHISpanResponse(
+            start=s.start, end=s.end, label=s.label,
+            text=body.text[s.start : s.end],
+        )
+        for s in body.spans
+    ]
+    output_text = _apply_output_mode(
+        body.text, span_responses, body.output_mode,
+        surrogate_seed=body.surrogate_seed,
+        surrogate_consistency=body.surrogate_consistency,
+    )
+    return RedactResponse(
+        output_text=output_text,
+        output_mode=body.output_mode,
+        span_count=len(body.spans),
+    )
 
 
 # -- Inference --------------------------------------------------------------

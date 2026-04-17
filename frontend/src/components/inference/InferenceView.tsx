@@ -8,20 +8,26 @@ import {
   FileText,
   Trash2,
   ChevronDown,
+  ChevronLeft,
   ChevronRight,
   PanelTop,
+  PanelRightClose,
+  PanelRightOpen,
+  Pencil,
+  Plus,
 } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import PipelineSelector from '../shared/PipelineSelector';
 import TextInput from './TextInput';
 import SpanHighlighter, { type SpanHighlighterHandle } from '../shared/SpanHighlighter';
 import RedactedView from '../shared/RedactedView';
-import TraceTimeline from './TraceTimeline';
 import SpanEditor from './SpanEditor';
 import ConflictResolutionPopover from './ConflictResolutionPopover';
 import InferenceDualPane from './InferenceDualPane';
 import InferenceRightPanel, { type InferenceRightTab } from './InferenceRightPanel';
-import InferenceStatsTab from './InferenceStatsTab';
+import InferencePipelineTab from './InferencePipelineTab';
+import OutputModeToggle from '../shared/OutputModeToggle';
+import EditableSource from './EditableSource';
 import { useProcessText, useRedactDocument } from '../../hooks/useProcess';
 import {
   listInferenceRuns,
@@ -64,27 +70,55 @@ function exportFilenameBase(pipelineName: string): string {
   return `${safe}_${day}`;
 }
 
-function InferenceLegendBar() {
+function ColorKeyPopover() {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
   const items = labelFamilyLegend();
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (ref.current?.contains(e.target as Node)) return;
+      setOpen(false);
+    };
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, [open]);
+
   return (
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-gray-100 bg-white px-2 py-1.5 text-[10px]">
-      <span className="shrink-0 font-semibold uppercase tracking-wide text-gray-400">Color key</span>
-      {items.map(({ family, title }) => {
-        const sw = labelFamilySwatch(family);
-        return (
-          <span
-            key={family}
-            className="inline-flex items-center gap-1 text-gray-600"
-            title={title}
-          >
-            <span
-              className="h-2.5 w-2.5 shrink-0 rounded-sm"
-              style={{ backgroundColor: sw.bg, border: `1px solid ${sw.border}` }}
-            />
-            <span className="max-w-[140px] truncate">{title}</span>
-          </span>
-        );
-      })}
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="inline-flex items-center gap-1 rounded border border-gray-200 bg-white px-1.5 py-0.5 text-[10px] font-medium text-gray-600 hover:bg-gray-50"
+        aria-expanded={open}
+        title="Show label color key"
+      >
+        Color key
+        <ChevronDown size={11} className={open ? 'rotate-180 transition-transform' : 'transition-transform'} />
+      </button>
+      {open && (
+        <div className="absolute left-0 top-full z-40 mt-1 w-[320px] max-w-[80vw] rounded-md border border-gray-200 bg-white p-2 shadow-lg">
+          <div className="flex flex-wrap gap-x-3 gap-y-1 text-[10px]">
+            {items.map(({ family, title }) => {
+              const sw = labelFamilySwatch(family);
+              return (
+                <span
+                  key={family}
+                  className="inline-flex items-center gap-1 text-gray-700"
+                  title={title}
+                >
+                  <span
+                    className="h-2.5 w-2.5 shrink-0 rounded-sm"
+                    style={{ backgroundColor: sw.bg, border: `1px solid ${sw.border}` }}
+                  />
+                  <span className="max-w-[160px] truncate">{title}</span>
+                </span>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -92,12 +126,11 @@ function InferenceLegendBar() {
 export default function InferenceView() {
   const [pipeline, setPipeline] = useState('');
   const [text, setText] = useState('');
-  const [outputMode, setOutputMode] = useState<OutputMode>('redacted');
+  const [viewMode, setViewMode] = useState<OutputMode>('redacted');
   const [result, setResult] = useState<ProcessResponse | null>(null);
   const [snapshotMeta, setSnapshotMeta] = useState<{ id: string; saved_at: string } | null>(null);
   const [selectedRunId, setSelectedRunId] = useState('');
   const [editedSpans, setEditedSpans] = useState<PHISpanResponse[] | null>(null);
-  const [editOutputMode, setEditOutputMode] = useState<OutputMode>('redacted');
   const [redactError, setRedactError] = useState<string | null>(null);
   const [activeSpanKey, setActiveSpanKey] = useState<string | null>(null);
   const [ghostSelection, setGhostSelection] = useState<{
@@ -132,6 +165,9 @@ export default function InferenceView() {
   const [inputExpanded, setInputExpanded] = useState(true);
   const [rightTab, setRightTab] = useState<InferenceRightTab>('spans');
   const [exportMenuOpen, setExportMenuOpen] = useState(false);
+  const [outputCollapsed, setOutputCollapsed] = useState(false);
+  const [asideCollapsed, setAsideCollapsed] = useState(false);
+  const [sourceEditDraft, setSourceEditDraft] = useState<string | null>(null);
 
   const highlighterRef = useRef<SpanHighlighterHandle>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
@@ -159,14 +195,8 @@ export default function InferenceView() {
     setPulseRange(null);
     setSpanPopover(null);
     setConflictUI(null);
+    setSourceEditDraft(null);
     if (result) {
-      setEditOutputMode(
-        result.redacted_text && result.redacted_text !== result.original_text
-          ? 'redacted'
-          : outputMode === 'annotated'
-            ? 'redacted'
-            : outputMode,
-      );
       setInputExpanded(false);
     } else {
       setInputExpanded(true);
@@ -283,9 +313,41 @@ export default function InferenceView() {
     setSnapshotMeta(null);
     setSelectedRunId('');
     mutation.mutate(
-      { pipelineName: pipeline, req: { text }, trace: true, outputMode },
+      { pipelineName: pipeline, req: { text }, trace: true, outputMode: viewMode },
       { onSuccess: setResult },
     );
+  };
+
+  /** Start a fresh scratchpad: clear text, result, and any loaded snapshot. */
+  const handleNewFreeText = () => {
+    setText('');
+    setResult(null);
+    setSnapshotMeta(null);
+    setSelectedRunId('');
+    setEditedSpans(null);
+    setSourceEditDraft(null);
+    setInputExpanded(true);
+  };
+
+  const handleStartEditSource = () => {
+    if (!result) return;
+    setSourceEditDraft(result.original_text);
+  };
+
+  const handleCancelEditSource = () => {
+    setSourceEditDraft(null);
+  };
+
+  /** Commit edited text: update input, discard stale detections, reopen input panel. */
+  const handleCommitEditSource = () => {
+    if (sourceEditDraft === null) return;
+    setText(sourceEditDraft);
+    setResult(null);
+    setSnapshotMeta(null);
+    setSelectedRunId('');
+    setEditedSpans(null);
+    setSourceEditDraft(null);
+    setInputExpanded(true);
   };
 
   const canSave = result && !saveMutation.isPending;
@@ -372,11 +434,12 @@ export default function InferenceView() {
     /** One span per range for the API; unresolved overlaps use canonical primary for this run. */
     const spansPayload = dedupeSpansKeepPrimary(effectiveSpans);
     setRedactError(null);
+
     redactMutation.mutate(
       {
         text: result.original_text,
         spans: spansPayload.map((s) => ({ start: s.start, end: s.end, label: s.label })),
-        output_mode: editOutputMode,
+        output_mode: viewMode,
       },
       {
         onSuccess: (res) => {
@@ -392,6 +455,38 @@ export default function InferenceView() {
           }
           setSnapshotMeta(null);
           clearPendingSelection();
+        },
+        onError: (err: unknown) =>
+          setRedactError(err instanceof Error ? err.message : 'Redaction failed'),
+      },
+    );
+  };
+
+  /** Toggle the output view mode; re-render the Output pane using current spans. */
+  const handleViewModeChange = (mode: OutputMode) => {
+    setViewMode(mode);
+    if (!result) return;
+
+    const spansPayload = dedupeSpansKeepPrimary(effectiveSpans);
+    if (spansPayload.length === 0) {
+      setResult((prev) =>
+        prev ? { ...prev, redacted_text: prev.original_text } : prev,
+      );
+      return;
+    }
+
+    setRedactError(null);
+    redactMutation.mutate(
+      {
+        text: result.original_text,
+        spans: spansPayload.map((s) => ({ start: s.start, end: s.end, label: s.label })),
+        output_mode: mode,
+      },
+      {
+        onSuccess: (res) => {
+          setResult((prev) =>
+            prev ? { ...prev, redacted_text: res.output_text } : prev,
+          );
         },
         onError: (err: unknown) =>
           setRedactError(err instanceof Error ? err.message : 'Redaction failed'),
@@ -489,21 +584,20 @@ export default function InferenceView() {
     <div className="flex h-full min-h-0 flex-col">
       {/* Top bar */}
       <header className="flex shrink-0 flex-wrap items-end gap-2 border-b border-gray-200 bg-white px-3 py-2 shadow-sm">
-        <div className="flex min-w-[140px] max-w-[220px] flex-1 flex-col gap-0.5">
-          <span className="text-[10px] font-medium text-gray-500">Pipeline</span>
-          <PipelineSelector value={pipeline} onChange={setPipeline} />
-        </div>
-        <div className="flex flex-col gap-0.5">
-          <span className="text-[10px] font-medium text-gray-500">Run output</span>
-          <select
-            className="rounded-md border border-gray-300 bg-white px-2 py-1.5 text-sm text-gray-800"
-            value={outputMode}
-            onChange={(e) => setOutputMode(e.target.value as OutputMode)}
+        <div className="flex min-w-[180px] max-w-[340px] flex-1 items-end gap-1.5 rounded-md border border-gray-200 bg-gray-50 px-1.5 py-1">
+          <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+            <span className="text-[10px] font-medium text-gray-500">Pipeline</span>
+            <PipelineSelector value={pipeline} onChange={setPipeline} />
+          </div>
+          <button
+            type="button"
+            onClick={handleRun}
+            disabled={runDisabled}
+            className="flex shrink-0 items-center gap-1.5 rounded-md bg-gray-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-gray-800 disabled:opacity-40"
           >
-            <option value="annotated">Annotated</option>
-            <option value="redacted">Redacted</option>
-            <option value="surrogate">Surrogate</option>
-          </select>
+            {mutation.isPending ? <Loader2 size={15} className="animate-spin" /> : <Play size={15} />}
+            Run
+          </button>
         </div>
         <button
           type="button"
@@ -517,52 +611,18 @@ export default function InferenceView() {
         </button>
         <button
           type="button"
-          onClick={handleRun}
-          disabled={runDisabled}
-          className="flex items-center gap-1.5 rounded-md bg-gray-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-gray-800 disabled:opacity-40"
+          onClick={handleNewFreeText}
+          className="flex items-center gap-1 rounded-md border border-gray-200 bg-gray-50 px-2 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-100"
+          title="Clear text and result to start a fresh free-text entry"
         >
-          {mutation.isPending ? <Loader2 size={15} className="animate-spin" /> : <Play size={15} />}
-          Run
+          <Plus size={14} />
+          New
         </button>
 
         {result && (
           <>
             <div className="mx-1 h-8 w-px self-stretch bg-gray-200" />
             <div className="flex flex-wrap items-center gap-0 rounded-lg border border-gray-200 bg-slate-50/90 p-0.5 shadow-sm">
-              <div className="flex items-center gap-1.5 px-2 py-1">
-                <label
-                  htmlFor="inference-view-style"
-                  className="whitespace-nowrap text-[10px] font-medium uppercase tracking-wide text-gray-500"
-                >
-                  View style
-                </label>
-                <select
-                  id="inference-view-style"
-                  className="max-w-[140px] rounded border border-gray-200 bg-white px-2 py-1 text-xs text-gray-800"
-                  value={editOutputMode}
-                  onChange={(e) => setEditOutputMode(e.target.value as OutputMode)}
-                  title="Redacted tags or surrogate text — used when you update output"
-                >
-                  <option value="redacted">Redacted</option>
-                  <option value="surrogate">Surrogate</option>
-                </select>
-              </div>
-              <div className="mx-0.5 h-6 w-px self-center bg-gray-200" />
-              <button
-                type="button"
-                onClick={handleUpdateOutput}
-                disabled={redactMutation.isPending || effectiveSpans.length === 0}
-                title={
-                  conflictSets.length > 0
-                    ? 'Regenerates the Output column from your current spans and view style. Unresolved same-range overlaps use the canonical primary label for this run; duplicate labels stay in the sidebar until you resolve or use Quick resolve.'
-                    : 'Regenerate the Output column from your current spans using the selected view style (redacted tags or surrogate).'
-                }
-                className="inline-flex items-center gap-1.5 rounded-md border border-gray-800 bg-gray-100 px-2.5 py-1.5 text-sm font-medium text-gray-900 hover:bg-gray-200 disabled:opacity-40"
-              >
-                {redactMutation.isPending ? <Loader2 size={14} className="animate-spin" /> : null}
-                {redactMutation.isPending ? 'Updating…' : 'Update output'}
-              </button>
-              <div className="mx-0.5 h-6 w-px self-center bg-gray-200" />
               <button
                 type="button"
                 disabled={!canSave}
@@ -691,9 +751,70 @@ export default function InferenceView() {
         <section className="flex min-h-0 min-w-0 flex-1 flex-col">
           {result ? (
             <>
-              <InferenceLegendBar />
               <InferenceDualPane
+                outputCollapsed={outputCollapsed}
+                leftHeader={
+                  <div className="flex w-full items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">
+                        {sourceEditDraft !== null ? 'Editing source' : 'Annotated source'}
+                      </span>
+                      {sourceEditDraft === null && <ColorKeyPopover />}
+                    </div>
+                    <div className="flex items-center gap-1">
+                      {sourceEditDraft === null && (
+                        <button
+                          type="button"
+                          onClick={handleStartEditSource}
+                          className="inline-flex items-center gap-1 rounded border border-gray-200 bg-white px-1.5 py-0.5 text-[10px] font-medium text-gray-600 hover:bg-gray-50"
+                          title="Edit the source text — clears current detections"
+                        >
+                          <Pencil size={11} />
+                          Edit
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => setOutputCollapsed((v) => !v)}
+                        className="inline-flex items-center gap-1 rounded border border-gray-200 bg-white px-1.5 py-0.5 text-[10px] font-medium text-gray-600 hover:bg-gray-50"
+                        title={outputCollapsed ? 'Show output pane' : 'Hide output pane'}
+                      >
+                        {outputCollapsed ? (
+                          <>
+                            <PanelRightOpen size={11} />
+                            Show output
+                          </>
+                        ) : (
+                          <>
+                            <PanelRightClose size={11} />
+                            Hide output
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                }
+                rightHeader={
+                  <div className="flex w-full items-center justify-between gap-2">
+                    <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">
+                      Output
+                    </span>
+                    <OutputModeToggle
+                      value={viewMode}
+                      onChange={handleViewModeChange}
+                      disabled={redactMutation.isPending}
+                    />
+                  </div>
+                }
                 left={
+                  sourceEditDraft !== null ? (
+                    <EditableSource
+                      value={sourceEditDraft}
+                      onChange={setSourceEditDraft}
+                      onCommit={handleCommitEditSource}
+                      onCancel={handleCancelEditSource}
+                    />
+                  ) : (
                   <SpanHighlighter
                     ref={highlighterRef}
                     text={result.original_text}
@@ -726,7 +847,15 @@ export default function InferenceView() {
                     overlapConflictRangeKeys={overlapConflictRangeKeys}
                     overlapSpanCandidatesByRange={overlapSpanCandidatesByRange}
                     onOverlapConflictClick={handleOverlapConflictClick}
+                    onSpanResize={(key, start, end) => {
+                      updateSpanByKey(key, {
+                        start,
+                        end,
+                        text: result.original_text.slice(start, end),
+                      });
+                    }}
                   />
+                  )
                 }
                 right={<RedactedView text={result.redacted_text} />}
               />
@@ -742,11 +871,25 @@ export default function InferenceView() {
           )}
         </section>
 
-        {result && (
+        {result && asideCollapsed && (
+          <aside className="flex w-9 shrink-0 flex-col items-center border-l border-gray-200 bg-white py-1">
+            <button
+              type="button"
+              onClick={() => setAsideCollapsed(false)}
+              className="rounded p-1.5 text-gray-500 hover:bg-gray-100 hover:text-gray-800"
+              title="Expand side panel"
+              aria-label="Expand side panel"
+            >
+              <ChevronLeft size={14} />
+            </button>
+          </aside>
+        )}
+        {result && !asideCollapsed && (
           <aside className="flex w-[min(38%,520px)] min-w-[280px] max-w-[560px] shrink-0 flex-col border-l border-gray-200 bg-white">
             <InferenceRightPanel
               tab={rightTab}
               onTabChange={setRightTab}
+              onCollapse={() => setAsideCollapsed(true)}
               spansContent={
                 <SpanEditor
                   originalText={result.original_text}
@@ -771,15 +914,15 @@ export default function InferenceView() {
                   conflictSets={conflictSets}
                   onResolveConflict={handleResolveOverlapConflict}
                   onQuickResolveLabelPriority={handleQuickResolveLabelPriority}
+                  onUpdateOutput={handleUpdateOutput}
                 />
               }
-              statsContent={<InferenceStatsTab spans={effectiveSpans} />}
-              traceContent={
-                traceFrames && traceFrames.length > 0 ? (
-                  <TraceTimeline frames={traceFrames} />
-                ) : (
-                  <p className="text-xs text-gray-400">No trace for this run.</p>
-                )
+              pipelineContent={
+                <InferencePipelineTab
+                  pipelineName={pipeline}
+                  spans={effectiveSpans}
+                  frames={traceFrames}
+                />
               }
             />
           </aside>
@@ -841,22 +984,33 @@ export default function InferenceView() {
           style={{ left: spanPopover.left, top: spanPopover.top }}
         >
           <div className="mb-1.5 text-[10px] font-semibold uppercase text-gray-500">Span</div>
-          <select
-            value={spanPopover.span.label}
-            onChange={(e) => {
-              updateSpanByKey(spanPopover.key, { label: e.target.value });
-              setSpanPopover((p) =>
-                p ? { ...p, span: { ...p.span, label: e.target.value } } : null,
-              );
-            }}
-            className="mb-2 w-full rounded border border-gray-200 px-2 py-1 text-xs text-gray-800"
-          >
-            {CANONICAL_LABELS.map((l) => (
-              <option key={l} value={l}>
-                {l}
-              </option>
-            ))}
-          </select>
+          {(() => {
+            const raw = spanPopover.span.label;
+            const upper = raw.toUpperCase();
+            const isCanonical = (CANONICAL_LABELS as readonly string[]).includes(upper);
+            return (
+              <select
+                value={isCanonical ? upper : '__custom__'}
+                onChange={(e) => {
+                  if (e.target.value === '__custom__') return;
+                  updateSpanByKey(spanPopover.key, { label: e.target.value });
+                  setSpanPopover((p) =>
+                    p ? { ...p, span: { ...p.span, label: e.target.value } } : null,
+                  );
+                }}
+                className="mb-2 w-full rounded border border-gray-200 px-2 py-1 text-xs text-gray-800"
+              >
+                {!isCanonical && (
+                  <option value="__custom__">{raw} (custom)</option>
+                )}
+                {CANONICAL_LABELS.map((l) => (
+                  <option key={l} value={l}>
+                    {l}
+                  </option>
+                ))}
+              </select>
+            );
+          })()}
           <button
             type="button"
             onClick={() => deleteSpanByKey(spanPopover.key)}

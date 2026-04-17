@@ -2,6 +2,7 @@ import {
   useMemo,
   useRef,
   useCallback,
+  useEffect,
   useImperativeHandle,
   forwardRef,
   type MouseEvent,
@@ -47,6 +48,13 @@ interface SpanHighlighterProps {
   overlapConflictRangeKeys?: Set<string>;
   overlapSpanCandidatesByRange?: Map<string, PHISpanResponse[]>;
   onOverlapConflictClick?: (rangeKey: string, spans: PHISpanResponse[], anchor: DOMRect) => void;
+  /**
+   * If provided, renders drag handles on each span's left/right edges. Fires
+   * continuously during drag with the span's new ``[start, end)``. The caller
+   * is responsible for clamping collision with adjacent spans is already
+   * applied here against the current ``spans`` neighbors.
+   */
+  onSpanResize?: (key: string, start: number, end: number) => void;
 }
 
 interface SegmentMeta {
@@ -117,6 +125,35 @@ function rangeToTextOffsets(root: HTMLElement, range: Range): { start: number; e
   const end = offsetUpTo(root, range.endContainer, range.endOffset);
   if (start > end) return null;
   return { start, end };
+}
+
+interface CaretPosResult {
+  offsetNode: Node;
+  offset: number;
+}
+
+/** Cross-browser caret-from-point: Firefox uses caretPositionFromPoint, Chromium/Safari use caretRangeFromPoint. */
+function caretFromPoint(doc: Document, x: number, y: number): CaretPosResult | null {
+  const anyDoc = doc as unknown as {
+    caretPositionFromPoint?: (x: number, y: number) => CaretPosResult | null;
+    caretRangeFromPoint?: (x: number, y: number) => Range | null;
+  };
+  if (typeof anyDoc.caretPositionFromPoint === 'function') {
+    return anyDoc.caretPositionFromPoint(x, y);
+  }
+  if (typeof anyDoc.caretRangeFromPoint === 'function') {
+    const r = anyDoc.caretRangeFromPoint(x, y);
+    if (!r) return null;
+    return { offsetNode: r.startContainer, offset: r.startOffset };
+  }
+  return null;
+}
+
+/** Map a viewport point to a text offset inside ``root``. Returns null if the point is outside. */
+function textOffsetFromPoint(root: HTMLElement, x: number, y: number): number | null {
+  const pos = caretFromPoint(root.ownerDocument, x, y);
+  if (!pos || !root.contains(pos.offsetNode)) return null;
+  return offsetUpTo(root, pos.offsetNode, pos.offset);
 }
 
 function overlaps(a0: number, a1: number, b0: number, b1: number): boolean {
@@ -190,6 +227,7 @@ const SpanHighlighter = forwardRef<SpanHighlighterHandle, SpanHighlighterProps>(
       overlapConflictRangeKeys,
       overlapSpanCandidatesByRange,
       onOverlapConflictClick,
+      onSpanResize,
     },
     ref,
   ) {
@@ -201,6 +239,90 @@ const SpanHighlighter = forwardRef<SpanHighlighterHandle, SpanHighlighterProps>(
       for (const s of spans) m.set(phiSpanKey(s), s);
       return m;
     }, [spans]);
+
+    /** Bounds each span can resize into: up to the prior span's end on the left, up to the next span's start on the right. */
+    const siblingBounds = useMemo(() => {
+      const sorted = [...spans].sort((a, b) => a.start - b.start || a.end - b.end);
+      const m = new Map<string, { minStart: number; maxEnd: number }>();
+      for (let i = 0; i < sorted.length; i++) {
+        const prev = i > 0 ? sorted[i - 1] : null;
+        const next = i < sorted.length - 1 ? sorted[i + 1] : null;
+        m.set(phiSpanKey(sorted[i]), {
+          minStart: prev ? prev.end : 0,
+          maxEnd: next ? next.start : text.length,
+        });
+      }
+      return m;
+    }, [spans, text.length]);
+
+    /**
+     * Drag state is a ref rather than state so mousemove doesn't re-run
+     * effects. ``key`` is the *current* span key (rotates after each update
+     * since the span's key is derived from start/end).
+     */
+    const dragRef = useRef<{
+      key: string;
+      side: 'left' | 'right';
+      anchorStart: number;
+      anchorEnd: number;
+      label: string;
+      minStart: number;
+      maxEnd: number;
+    } | null>(null);
+
+    const beginResize = useCallback(
+      (side: 'left' | 'right', span: PHISpanResponse) =>
+        (e: MouseEvent<HTMLSpanElement>) => {
+          if (!onSpanResize) return;
+          e.stopPropagation();
+          e.preventDefault();
+          const key = phiSpanKey(span);
+          const b = siblingBounds.get(key);
+          if (!b) return;
+          dragRef.current = {
+            key,
+            side,
+            anchorStart: span.start,
+            anchorEnd: span.end,
+            label: span.label,
+            minStart: b.minStart,
+            maxEnd: b.maxEnd,
+          };
+        },
+      [onSpanResize, siblingBounds],
+    );
+
+    useEffect(() => {
+      if (!onSpanResize) return;
+      const onMove = (ev: globalThis.MouseEvent) => {
+        const drag = dragRef.current;
+        if (!drag || !rootRef.current) return;
+        const off = textOffsetFromPoint(rootRef.current, ev.clientX, ev.clientY);
+        if (off == null) return;
+        let newStart = drag.anchorStart;
+        let newEnd = drag.anchorEnd;
+        if (drag.side === 'left') {
+          newStart = Math.min(drag.anchorEnd - 1, Math.max(drag.minStart, off));
+        } else {
+          newEnd = Math.max(drag.anchorStart + 1, Math.min(drag.maxEnd, off));
+        }
+        if (newStart === drag.anchorStart && newEnd === drag.anchorEnd && drag.side === 'left') return;
+        onSpanResize(drag.key, newStart, newEnd);
+        /** Span key is derived from start:end:label — rotate it so the next call targets the updated span. */
+        drag.key = `${newStart}-${newEnd}-${drag.label}`;
+        if (drag.side === 'left') drag.anchorStart = newStart;
+        else drag.anchorEnd = newEnd;
+      };
+      const onUp = () => {
+        dragRef.current = null;
+      };
+      window.addEventListener('mousemove', onMove);
+      window.addEventListener('mouseup', onUp);
+      return () => {
+        window.removeEventListener('mousemove', onMove);
+        window.removeEventListener('mouseup', onUp);
+      };
+    }, [onSpanResize]);
 
     useImperativeHandle(
       ref,
@@ -291,7 +413,7 @@ const SpanHighlighter = forwardRef<SpanHighlighterHandle, SpanHighlighterProps>(
               data-span-key={key}
               data-range-key={rangeK}
               className={clsx(
-                'relative inline cursor-pointer rounded-sm px-0.5 transition-shadow',
+                'group relative inline cursor-pointer rounded-sm px-0.5 transition-shadow',
                 isActive && 'ring-2 ring-blue-500 ring-offset-1',
                 isFlash && 'animate-pulse ring-2 ring-amber-400 ring-offset-1',
                 overlapConflict && 'ring-1 ring-rose-300/60',
@@ -323,7 +445,23 @@ const SpanHighlighter = forwardRef<SpanHighlighterHandle, SpanHighlighterProps>(
               }}
             >
               <LabelBadge label={s.label} className="absolute -top-4 left-0" data-no-offset="true" />
+              {onSpanResize && (
+                <span
+                  data-no-offset="true"
+                  aria-hidden="true"
+                  onMouseDown={beginResize('left', s)}
+                  className="absolute -left-0.5 top-0 bottom-0 w-1 cursor-ew-resize opacity-0 group-hover:opacity-100 bg-blue-500/60 rounded-sm"
+                />
+              )}
               {seg.text}
+              {onSpanResize && (
+                <span
+                  data-no-offset="true"
+                  aria-hidden="true"
+                  onMouseDown={beginResize('right', s)}
+                  className="absolute -right-0.5 top-0 bottom-0 w-1 cursor-ew-resize opacity-0 group-hover:opacity-100 bg-blue-500/60 rounded-sm"
+                />
+              )}
             </mark>
           );
         })}

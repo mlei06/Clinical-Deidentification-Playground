@@ -6,7 +6,7 @@
  */
 export const CANONICAL_LABELS = [
   // HIPAA #1 — Names
-  'NAME', 'PATIENT', 'DOCTOR', 'STAFF', 'HCW',
+  'NAME', 'FIRST_NAME', 'LAST_NAME', 'PATIENT', 'DOCTOR', 'STAFF', 'HCW',
   // HIPAA #2 — Geographic
   'ADDRESS', 'LOCATION', 'CITY', 'STATE', 'COUNTRY', 'ZIP_CODE', 'POSTAL_CODE',
   // HIPAA #3 — Dates

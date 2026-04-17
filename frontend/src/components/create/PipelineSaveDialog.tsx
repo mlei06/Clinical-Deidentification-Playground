@@ -14,9 +14,15 @@ export default function PipelineSaveDialog({
   onClose,
   isUpdate,
 }: PipelineSaveDialogProps) {
-  const { pipelineName, setPipelineName, toPipelineConfig } =
-    usePipelineEditorStore();
+  const {
+    pipelineName,
+    setPipelineName,
+    pipelineDescription,
+    setPipelineDescription,
+    toPipelineConfig,
+  } = usePipelineEditorStore();
   const [name, setName] = useState(pipelineName);
+  const [description, setDescription] = useState(pipelineDescription);
   const createMutation = useCreatePipeline();
   const updateMutation = useUpdatePipeline();
 
@@ -25,7 +31,10 @@ export default function PipelineSaveDialog({
   const mutation = isUpdate ? updateMutation : createMutation;
 
   const handleSave = () => {
-    const config = toPipelineConfig();
+    setPipelineDescription(description);
+    const base = toPipelineConfig();
+    const trimmed = description.trim();
+    const config = trimmed ? { ...base, description: trimmed } : base;
     const saveName = isUpdate ? pipelineName : name;
     if (!saveName.trim()) return;
 
@@ -88,6 +97,20 @@ export default function PipelineSaveDialog({
               Update <span className="font-semibold">{pipelineName}</span>?
             </p>
           )}
+
+          <div className="mb-4">
+            <label className="mb-1 block text-xs font-medium text-gray-600">
+              Description
+              <span className="ml-1 text-gray-400">(optional)</span>
+            </label>
+            <textarea
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="What this pipeline does, who it's for, any caveats…"
+              rows={3}
+              className="w-full resize-none rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-gray-500 focus:ring-1 focus:ring-gray-500 focus:outline-none"
+            />
+          </div>
 
           {mutation.isError && (
             <div className="mb-3 rounded border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">

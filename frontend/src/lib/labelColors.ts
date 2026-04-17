@@ -80,6 +80,8 @@ function buildKnown(): Record<string, { bg: string; text: string; border: string
   const m: Record<string, { bg: string; text: string; border: string }> = {};
   const labels = [
     'NAME',
+    'FIRST_NAME',
+    'LAST_NAME',
     'PATIENT',
     'DOCTOR',
     'STAFF',

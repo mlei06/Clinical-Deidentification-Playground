@@ -19,6 +19,8 @@ class PHILabel(str, Enum):
 
     # HIPAA #1 — Names
     NAME = "NAME"
+    FIRST_NAME = "FIRST_NAME"
+    LAST_NAME = "LAST_NAME"
     PATIENT = "PATIENT"
     DOCTOR = "DOCTOR"
     STAFF = "STAFF"
@@ -101,10 +103,8 @@ class PHILabel(str, Enum):
             "POSTAL_CODE_CA": cls.POSTAL_CODE,
             "ZIP_CODE_US": cls.ZIP_CODE,
             "ZIP": cls.ZIP_CODE,
-            "FIRSTNAME": cls.NAME,
-            "FIRST_NAME": cls.NAME,
-            "LASTNAME": cls.NAME,
-            "LAST_NAME": cls.NAME,
+            "FIRSTNAME": cls.FIRST_NAME,
+            "LASTNAME": cls.LAST_NAME,
             "FULLNAME": cls.NAME,
             "FULL_NAME": cls.NAME,
             "DATE_OF_BIRTH": cls.DATE,
