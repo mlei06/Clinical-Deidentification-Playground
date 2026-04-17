@@ -223,13 +223,80 @@ def test_model_labels_returns_cached() -> None:
     assert labels == ["AGE", "DATE", "DOCTOR"]
 
 
-def test_base_labels_from_entity_map() -> None:
+def test_base_labels_after_entity_map_default_model() -> None:
+    """base_labels are post-entity_map names (inputs to label_mapping), not raw NER tags."""
     pipe = NeuroNerPipe(NeuroNerConfig())
     bl = pipe.base_labels
-    # Should include both keys (raw labels) and values (mapped labels)
-    assert "DOCTOR" in bl
+    assert "DOCTOR" not in bl
     assert "NAME" in bl
     assert "DATE" in bl
+
+
+def test_neuroner_raw_labels_match_get_model_registry() -> None:
+    """``_raw_entity_labels`` uses the same ``model_manifest.json`` as :func:`~clinical_deid.models.get_model`."""
+    from pathlib import Path
+
+    import json
+
+    from clinical_deid.config import get_settings
+    from clinical_deid.models import get_model
+
+    root = Path("models/neuroner")
+    if not root.is_dir():
+        pytest.skip("no models/neuroner in repo")
+
+    for name in ("conll_2003_en", "i2b2_2014_glove_spacy_bioes"):
+        manifest = root / name / "model_manifest.json"
+        if not manifest.is_file():
+            pytest.skip(f"missing {manifest}")
+        expected = json.loads(manifest.read_text(encoding="utf-8"))["labels"]
+        info = get_model(get_settings().models_dir, name)
+        assert info.labels == expected
+        pipe = NeuroNerPipe(NeuroNerConfig(model=name))
+        assert sorted(pipe._raw_entity_labels()) == sorted(expected)
+
+
+def test_compute_base_labels_differs_between_neuroner_models() -> None:
+    """POST /pipelines/pipe-types/neuroner_ner/labels must vary with ``model`` when manifests differ."""
+    from pathlib import Path
+
+    from clinical_deid.pipes.registry import compute_base_labels
+
+    root = Path("models/neuroner")
+    if not (root / "conll_2003_en" / "model_manifest.json").is_file():
+        pytest.skip("no conll_2003_en model")
+    if not (root / "i2b2_2014_glove_spacy_bioes" / "model_manifest.json").is_file():
+        pytest.skip("no i2b2 model")
+
+    a = compute_base_labels("neuroner_ner", {"model": "conll_2003_en", "entity_map": {}})
+    b = compute_base_labels("neuroner_ner", {"model": "i2b2_2014_glove_spacy_bioes", "entity_map": {}})
+    assert a != b
+
+
+def test_compute_base_labels_follows_model_manifest(tmp_path) -> None:
+    """``compute_base_labels`` reflects the selected model directory's manifest."""
+    from clinical_deid.pipes.registry import compute_base_labels
+
+    models = tmp_path / "neuroner"
+    models.mkdir()
+    alpha = models / "alpha"
+    beta = models / "beta"
+    alpha.mkdir()
+    beta.mkdir()
+    (alpha / "model_manifest.json").write_text(
+        '{"labels": ["DOCTOR", "DATE"], "framework": "neuroner"}\n',
+        encoding="utf-8",
+    )
+    (beta / "model_manifest.json").write_text(
+        '{"labels": ["CUSTOM_A", "CUSTOM_B"], "framework": "neuroner"}\n',
+        encoding="utf-8",
+    )
+
+    cfg_a = {"model": "alpha", "models_dir": str(models), "entity_map": {}}
+    cfg_b = {"model": "beta", "models_dir": str(models), "entity_map": {}}
+
+    assert compute_base_labels("neuroner_ner", cfg_a) == ["DATE", "DOCTOR"]
+    assert compute_base_labels("neuroner_ner", cfg_b) == ["CUSTOM_A", "CUSTOM_B"]
 
 
 def test_effective_labels_with_mapping() -> None:

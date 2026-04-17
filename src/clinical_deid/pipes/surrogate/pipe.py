@@ -9,7 +9,21 @@ from clinical_deid.pipes.base import ConfigurablePipe
 from clinical_deid.pipes.ui_schema import field_ui
 
 SURROGATE_STRATEGIES: dict[str, list[str]] = {
-    "Name": ["NAME", "PATIENT", "PERSON", "STAFF", "HCW", "DOCTOR"],
+    "Name": [
+        "NAME",
+        "PATIENT",
+        "PERSON",
+        "STAFF",
+        "HCW",
+        "DOCTOR",
+        "FIRST_NAME",
+        "LAST_NAME",
+        "FIRSTNAME",
+        "LASTNAME",
+        "FULL_NAME",
+        "FULLNAME",
+        "USERNAME",
+    ],
     "Date": ["DATE", "DATE_TIME"],
     "Phone": ["PHONE", "PHONE_NUMBER", "FAX"],
     "Email": ["EMAIL", "EMAIL_ADDRESS"],

@@ -9,6 +9,7 @@ from __future__ import annotations
 import concurrent.futures
 import json
 import logging
+import pickle
 import subprocess
 import threading
 from pathlib import Path
@@ -29,6 +30,48 @@ from clinical_deid.pipes.ui_schema import field_ui
 logger = logging.getLogger(__name__)
 
 _WORKER_SCRIPT = str(Path(__file__).with_name("_worker.py"))
+
+
+def _extract_unique_entity_labels_from_dataset_pickle(pickle_path: Path) -> set[str]:
+    """Entity names from ``dataset.pickle`` (BIOES prefixes stripped).
+
+    Matches ``scripts/neuroner_export.extract_labels`` so UI label space matches exports.
+    """
+    with pickle_path.open("rb") as f:
+        ds = pickle.load(f)
+    labels: set[str] = set()
+    for label in ds.unique_labels:
+        if label == "O":
+            continue
+        if isinstance(label, str) and len(label) >= 2 and label[:2] in ("B-", "I-", "E-", "S-"):
+            labels.add(label[2:])
+        else:
+            labels.add(label)
+    return labels
+
+
+def read_raw_neuroner_entity_labels(model_folder: Path) -> list[str]:
+    """Load raw entity type names from an exported model directory (no subprocess).
+
+    Prefer ``model_manifest.json`` (written by ``scripts/neuroner_export``); fall back to
+    ``dataset.pickle`` in the same directory.
+    """
+    manifest = model_folder / "model_manifest.json"
+    if manifest.is_file():
+        try:
+            data = json.loads(manifest.read_text(encoding="utf-8"))
+            raw = data.get("labels")
+            if isinstance(raw, list) and all(isinstance(x, str) for x in raw):
+                return sorted(set(raw))
+        except (OSError, json.JSONDecodeError, TypeError):
+            pass
+    pickle_path = model_folder / "dataset.pickle"
+    if pickle_path.is_file():
+        try:
+            return sorted(_extract_unique_entity_labels_from_dataset_pickle(pickle_path))
+        except Exception:
+            pass
+    return []
 
 
 # ── Runtime availability check (called by registry.pipe_availability) ─────
@@ -133,6 +176,7 @@ class NeuroNerConfig(BaseModel):
             ui_order=1,
             ui_widget="select",
             ui_help="Model name from models/neuroner/",
+            ui_options_source="neuroner_models",
         ),
     )
 
@@ -234,6 +278,7 @@ class NeuroNerConfig(BaseModel):
             ui_group="Entities & mapping",
             ui_order=1,
             ui_widget="key_value",
+            ui_advanced=True,
         ),
     )
 
@@ -270,6 +315,31 @@ class NeuroNerPipe(ConfigurablePipe):
         self._model_labels: list[str] | None = None
         self._stderr_thread: threading.Thread | None = None
         self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+
+    def _raw_entity_labels(self) -> list[str]:
+        """Raw NeuroNER entity names (before ``entity_map``).
+
+        Prefer the same ``model_manifest.json`` registry as ``GET /models`` / :func:`~clinical_deid.models.get_model`
+        (``models/<framework>/<name>/model_manifest.json``), then the pipe ``models_dir`` folder, then I2B2 defaults.
+        """
+        if self._model_labels is not None:
+            return list(self._model_labels)
+        # 1) Central registry — identical labels[] to model_manifest.json (UI + /models API)
+        try:
+            from clinical_deid.config import get_settings
+            from clinical_deid.models import get_model
+
+            info = get_model(get_settings().models_dir, self._config.model)
+            if info.framework == "neuroner" and info.labels:
+                return sorted(info.labels)
+        except (KeyError, ValueError, OSError):
+            pass
+        # 2) Config-specific models_dir (custom layout or tests)
+        folder = Path(self._config.models_dir).resolve() / self._config.model
+        on_disk = read_raw_neuroner_entity_labels(folder)
+        if on_disk:
+            return on_disk
+        return list(DEFAULT_ENTITY_MAP.keys())
 
     # ── Subprocess lifecycle ───────────────────────────────────────────
 
@@ -461,9 +531,13 @@ class NeuroNerPipe(ConfigurablePipe):
 
     @property
     def base_labels(self) -> set[str]:
-        """Entity labels after ``entity_map`` is applied."""
+        """Labels after ``entity_map`` (inputs to ``label_mapping``).
+
+        Derived from the *selected model's* label space so the playground can refresh
+        when ``model`` changes (see ``read_raw_neuroner_entity_labels``).
+        """
         m = self._config.entity_map
-        return set(m.values()) | set(m.keys())
+        return {m.get(r, r) for r in self._raw_entity_labels()}
 
     @property
     def label_mapping(self) -> dict[str, str | None]:

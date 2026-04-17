@@ -78,10 +78,75 @@ _MODEL_DESCRIPTIONS: dict[str, str] = {
     "flair/ner-english-large": "Flair large NER — high accuracy, stacked embeddings.",
 }
 
+# ── Model-dependent label metadata ─────────────────────────────────────
+# Raw NER labels each model family / specific model produces (before
+# ``model_to_presidio`` mapping).  Used by ``base_labels`` so the label
+# mapping widget shows only labels the selected model can detect.
+
+_FAMILY_NER_LABELS: dict[str, list[str]] = {
+    # spaCy / Stanza use OntoNotes entity types
+    "spacy": [
+        "PER", "PERSON", "NORP", "FAC", "LOC", "GPE", "LOCATION",
+        "ORG", "ORGANIZATION", "DATE", "TIME",
+    ],
+    "stanza": [
+        "PER", "PERSON", "NORP", "FAC", "LOC", "GPE", "LOCATION",
+        "ORG", "ORGANIZATION", "DATE", "TIME",
+    ],
+    "flair": ["PER", "LOC", "ORG", "MISC"],
+}
+
+_SPECIFIC_MODEL_NER_LABELS: dict[str, list[str]] = {
+    "obi/deid_roberta_i2b2": [
+        "PATIENT", "STAFF", "AGE", "DATE", "PHONE", "ID", "EMAIL",
+        "PATORG", "LOC", "HOSP", "OTHERPHI",
+    ],
+    "StanfordAIMI/stanford-deidentifier-base": [
+        "AGE", "CONTACT", "DATE", "ID", "LOCATION", "NAME", "PROFESSION",
+    ],
+}
+
+# Presidio entities from built-in regex recognizers (always active regardless
+# of NER model).  Only entities present in the default ``entity_map`` are
+# listed — others (CREDIT_CARD, IBAN_CODE, …) pass through as-is and are
+# rarely relevant for clinical de-identification.
+_BUILTIN_PRESIDIO_ENTITIES: set[str] = {
+    "PHONE_NUMBER", "EMAIL_ADDRESS", "US_SSN", "IP_ADDRESS", "MEDICAL_LICENSE",
+}
+
+
+def _ner_labels_for_model(model: str) -> list[str]:
+    """Return expected raw NER labels for *model* (before ``model_to_presidio``)."""
+    family, model_path = _parse_model_spec(model)
+    if family == "huggingface" and model_path in _SPECIFIC_MODEL_NER_LABELS:
+        return _SPECIFIC_MODEL_NER_LABELS[model_path]
+    return _FAMILY_NER_LABELS.get(family, [])
+
+
+def _model_base_labels(
+    model: str,
+    model_to_presidio: dict[str, str] | None,
+    entity_map: dict[str, str],
+) -> set[str]:
+    """Compute the effective label space for *model*.
+
+    Flows raw NER labels through ``model_to_presidio`` → ``entity_map``,
+    then adds labels from built-in Presidio recognizers that appear in
+    ``entity_map``.
+    """
+    m2p = model_to_presidio or DEFAULT_MODEL_TO_PRESIDIO
+    labels: set[str] = set()
+    for ner_label in _ner_labels_for_model(model):
+        presidio_entity = m2p.get(ner_label, ner_label)
+        labels.add(entity_map.get(presidio_entity, presidio_entity))
+    for entity in _BUILTIN_PRESIDIO_ENTITIES:
+        labels.add(entity_map.get(entity, entity))
+    return labels
+
 
 def default_base_labels() -> list[str]:
     """Default label space for the presidio_ner detector."""
-    return sorted(set(DEFAULT_ENTITY_MAP.values()))
+    return sorted(_model_base_labels("spacy/en_core_web_lg", None, dict(DEFAULT_ENTITY_MAP)))
 
 
 def _parse_model_spec(model: str) -> tuple[str, str]:
@@ -304,8 +369,11 @@ class PresidioNerPipe(ConfigurablePipe):
 
     @property
     def base_labels(self) -> set[str]:
-        m = self._config.entity_map
-        return set(m.values()) | set(m.keys())
+        return _model_base_labels(
+            self._config.model,
+            self._config.model_to_presidio,
+            self._config.entity_map,
+        )
 
     @property
     def label_mapping(self) -> dict[str, str | None]:

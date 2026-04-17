@@ -50,34 +50,68 @@ _ORDINAL = r"(?:st|nd|rd|th)"
 _STREET_SUFFIX = (
     "Street|St|Avenue|Ave|Boulevard|Blvd|Drive|Dr|Road|Rd|"
     "Lane|Ln|Court|Ct|Place|Pl|Circle|Cir|Way|"
-    "Highway|Hwy|Parkway|Pkwy|Terrace|Ter|Trail|Trl"
+    "Highway|Hwy|Parkway|Pkwy|Terrace|Ter|Trail|Trl|"
+    "Square|Sq|Plaza|Plz|Crescent|Cres|Alley|Aly|Loop|Row"
+)
+
+# ---------------------------------------------------------------------------
+# Hospital / organization trailing keywords
+# ---------------------------------------------------------------------------
+
+_HOSPITAL_KEYWORD = (
+    r"Hospitals?|Medical\s+Center|Medical\s+Centre|Medical\s+Group|"
+    r"Health\s+System|Health\s+Center|Health\s+Centre|"
+    r"Healthcare|Health\s+Care|Cancer\s+Center|Cancer\s+Centre|"
+    r"Children's\s+Hospital|Memorial\s+Hospital|"
+    r"Clinic|Polyclinic|Infirmary|Sanitarium|Sanatorium|"
+    r"Urgent\s+Care|Surgery\s+Center"
+)
+
+_ORG_KEYWORD = (
+    r"Inc\.?|LLC|L\.L\.C\.|Corp\.?|Corporation|Co\.|Company|"
+    r"Foundation|Ltd\.?|Limited|Group|Associates|Partners|"
+    r"Pharmaceuticals?|Pharma|Laboratories|Labs?\.?|Industries|"
+    r"Holdings|Enterprises|Solutions|Systems|Technologies|"
+    r"University|College|Institute|Academy|Society|Association"
 )
 
 # ---------------------------------------------------------------------------
 # Built-in patterns
 # ---------------------------------------------------------------------------
 
-_EMAIL = r"\b[\w\.]+\w ?@ ?\w+[\.\w+](?:(?:\.\w+)?){,3}\.\w{2,3}\b"
+# EMAIL: standard mailbox, plus obfuscated [at]/(at) and [dot]/(dot) forms.
+_EMAIL = (
+    r"\b[A-Za-z0-9._%+\-]+\s?@\s?[A-Za-z0-9][A-Za-z0-9\-\.]*\.[A-Za-z]{2,24}\b"
+    r"|\b[A-Za-z0-9._%+\-]+\s*(?:\[at\]|\(at\))\s*"
+    r"[A-Za-z0-9][A-Za-z0-9\-\.]*\s*(?:\[dot\]|\(dot\)|\.)\s*[A-Za-z]{2,24}\b"
+)
 
-# Phone: 10-digit variants + 9-digit + 11-digit + extension
+# Phone: international, NANP, separator-required local, and keyword-anchored.
 _PHONE = (
-    # (XXX) XXX-XXXX flexible
-    r"\(?(\d{3})\s*[\)\.\/\-\, ]*\s*\d\s*\d\s*\d\s*[ \-\.\/]*\s*\d\s*\d\s*\d\s*\d"
-    # XXX-XXX-XXXX strict
-    r"|\(?(\d{3})\s*[\)\.\/\-\, ]*\s*\d{3}\s*[ \-\.\/]*\s*\d{4}"
-    # XXX-XXX-XXX (9 digit)
+    # International with + prefix: +1 555 123 4567, +44 20 7946 0958
+    r"\+\d{1,3}[-.\s]?\(?\d{1,4}\)?[-.\s]?\d{1,4}[-.\s]?\d{1,9}"
+    # (XXX) XXX-XXXX with parentheses
+    r"|\(\d{3}\)\s*\d{3}[-.\s]?\d{4}"
+    # XXX-XXX-XXXX or XXX.XXX.XXXX or XXX XXX XXXX (separator required)
+    r"|\b\d{3}[-.\s]\d{3}[-.\s]\d{4}\b"
+    # 9-digit / 11-digit local variants kept for OCR'd notes
     r"|\(?(\d{3})\s*[\)\.\/\-\=\, ]*\s*\d{3}\s*[ \-\.\/\=]*\s*\d{3}\b"
-    # XXX-XXX-XXXXX (11 digit)
     r"|\(?(\d{3})\s*[\)\.\/\-\=\, ]*\s*\d{3}\s*[ \-\.\/\=]*\s*\d{5}\b"
-    # XXX-XXXX-XXX
-    r"|\(?\d{3}?\s?[\)\.\/\-\=\, ]*\s?\d{4}\s?[ \-\.\/\=]*\s?\d{3}\b"
-    # simple XXX-XXX-XXXX
-    r"|\b\d{3}[-.\s]?\d{3}[-.\s]?\d{4}\b"
-    # extension after phone number
+    # Keyword + digits: phone: 5551234567, mobile #555-1234, pager 1234
+    r"|(?:phone|tel|telephone|mobile|cell|cellular|pager|beeper|"
+    r"home\s+phone|work\s+phone|office\s+phone)\s*"
+    r"(?:number|num|no|#)?\s*[:#\-]?\s*\(?\+?\d[\d\s\-\.\(\)]{6,20}\d"
+    # Optional extension trailer
     r"(?:\s*(?:x|ex|ext|extension)\.?\s*\(?\d+\)?)?"
 )
 
-# Date: comprehensive patterns covering clinical note date formats
+# FAX: phone-like number with required fax-keyword context.
+_FAX = (
+    r"(?:fax|facsimile)\s*(?:number|num|no|#)?\s*"
+    r"[:#\-]?\s*\(?\+?\d[\d\s\-\.\(\)]{6,20}\d"
+)
+
+# Date: comprehensive patterns covering clinical note date formats.
 _DATE = (
     # --- Numeric formats ---
     # MM/DD/YYYY or DD/MM/YYYY or MM-DD-YY
@@ -89,49 +123,143 @@ _DATE = (
     r"|\b\d{4}[\-\/]\d{1,2}\b"
 
     # --- Numeric date ranges ---
-    # MM/DD-MM/DD/YYYY
     r"|\b\d{1,2}\/\d{1,2}\-\d{1,2}\/\d{1,2}(?:\/\d{2,4})?\b"
-    # MM/DD/YY-MM/DD/YY
     r"|\b\d{1,2}\/\d{1,2}\/\d{2,4}\-\d{1,2}\/\d{1,2}\/\d{2,4}\b"
 
-    # --- Named month: Month DD, YYYY ---
+    # --- Named month forms ---
     r"|\b(?:" + _MONTH + r")\.?\s+\d{1,2}(?:" + _ORDINAL + r")?\s*[\,\s]+\d{2,4}\b"
-    # --- Named month: DD Month YYYY ---
     r"|\b\d{1,2}(?:" + _ORDINAL + r")?\s+(?:of\s+)?(?:" + _MONTH + r")\.?\s*[\,\s]+\d{2,4}\b"
-    # --- Named month: Month DD (no year) ---
     r"|\b(?:" + _MONTH + r")\.?\s+\d{1,2}(?:" + _ORDINAL + r")?\b"
-    # --- Named month: DD Month (no year) ---
     r"|\b\d{1,2}(?:" + _ORDINAL + r")?\s+(?:of\s+)?(?:" + _MONTH + r")\b"
-    # --- Named month: Month YYYY ---
     r"|\b(?:" + _MONTH + r")\.?\s*(?:of\s+)?\d{4}\b"
-    # --- Named month: Month 'YY ---
     r"|\b(?:" + _MONTH + r")\.?\s*\'\d{2}\b"
 
-    # --- Named month ranges: Month DD-DD, YYYY ---
+    # --- Named month ranges ---
     r"|\b(?:" + _MONTH + r")\.?\s+\d{1,2}\s*(?:\-|to|through)\s*\d{1,2}\s*[\,\s]+\d{2,4}\b"
-    # --- DD-DD Month YYYY ---
     r"|\b\d{1,2}\s*(?:\-|to|through)\s*\d{1,2}\s+(?:" + _MONTH + r")\.?\s*[\,\s]+\d{2,4}\b"
 
     # --- Season + year ---
     r"|\b(?:" + _SEASON + r")\s*(?:of\s+)?\d{2,4}\b"
 
+    # --- Decades: 1990s, the 90s, '90s ---
+    r"|\b(?:19|20)\d0s\b"
+    r"|\bthe\s+\d0s\b"
+    r"|\'\d{2}s\b"
+
+    # --- Year ranges: 1990-2024, 1990 to 2024 ---
+    r"|\b(?:19|20)\d{2}\s*(?:\-|to|through|until)\s*(?:19|20)\d{2}\b"
+
     # --- Holidays ---
     r"|\b(?:Christmas|Thanksgiving|Easter|Hanukkah|Rosh Hashanah|Ramadan|"
-    r"New Year(?:'s)?(?:\s+Day)?|Independence Day|"
-    r"Victoria Day|Canada Day|Labour Day|Labor Day)\b"
+    r"New Year(?:'s)?(?:\s+Day)?|Independence Day|Memorial Day|"
+    r"Victoria Day|Canada Day|Labour Day|Labor Day|Veterans Day|"
+    r"Mother's Day|Father's Day|Valentine's Day)\b"
 
     # --- Year with medical-event context ---
-    r"|\b(?:since|from|in|year)\s+\d{4}\b"
+    r"|\b(?:since|from|in|year|during|until|before|after|by|circa)\s+\d{4}\b"
 )
 
+# DATE_TIME: ISO 8601 timestamps and bare time-of-day expressions.
+_DATE_TIME = (
+    # ISO 8601: 2024-01-15T14:30:00Z, 2024-01-15 14:30:00+05:30
+    r"\b\d{4}-\d{2}-\d{2}[T\s]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?"
+    r"(?:\s*Z|\s*[+-]\d{2}:?\d{2})?\b"
+    # 24-hour or 12-hour time: 14:30, 2:30 pm, 02:30 a.m.
+    r"|\b(?:[01]?\d|2[0-3]):[0-5]\d(?::[0-5]\d)?(?:\s*[ap]\.?\s*m\.?)?\b"
+    # 10am, 10 p.m.
+    r"|\b\d{1,2}\s*[ap]\.?\s*m\.?\b"
+)
+
+# AGE: explicit age phrases (HIPAA Safe Harbor: ages > 89 must be aggregated).
+_AGE = (
+    # age 55, age: 55, aged 55, age is 55
+    r"\b(?:age[ds]?|aged)\s*(?:is|of|=|:)?\s*\d{1,3}\b"
+    # 55-year-old, 55 year old
+    r"|\b\d{1,3}\s*[\-]?\s*year[\s\-]*old\b"
+    # 55 years old, 55 yrs old, 55 yo
+    r"|\b\d{1,3}\s*(?:years?|yrs?)[\s\.\-]*old\b"
+    # 55 y/o, 55 y.o.
+    r"|\b\d{1,3}\s*y[\s\.\/]\s*o\.?\b"
+    # 55M, 55F shorthand for "55-year-old male/female"
+    r"|\b\d{1,3}\s*[\-]?\s*[ymf]o?\b"
+)
+
+# MRN: medical record number with explicit context terms.
 _MRN = (
-    r"(?:mrn|medical record|hospital number)\s*"
+    r"(?:mrn|medical\s+record(?:\s*(?:number|num|no|#))?|"
+    r"hospital\s+(?:number|#|num)|chart\s*(?:number|#|num|no)?|"
+    r"patient\s+(?:id|identifier|number|#)|case\s*(?:number|#|num|no)|"
+    r"empi)\s*"
     r"(?:number|num|no|#)?\s*"
     r"[\)\#\:\-\=\s\.]*\s*"
     r"[a-zA-Z]*?\d+[\/\-\:]?\d*"
 )
 
-_ID = r"\b(?:MRN|ID)[\s:#]*\d+\b|\b\d{6,10}\b"
+# ID: explicit ID prefix or patient/subject/study identifier.
+_ID = (
+    r"\b(?:MRN|ID|EMPI|HCN|HRN|UPI)[\s:#]*\d+\b"
+    r"|\b(?:patient|subject|study|enrollment)\s+(?:id|identifier|number|#)"
+    r"\s*[:#]?\s*[A-Z0-9][A-Z0-9\-]{2,}\b"
+    r"|\b\d{6,10}\b"
+)
+
+# ACCOUNT: account number with required keyword context.
+_ACCOUNT = (
+    r"\b(?:account|acct|acc)\s*(?:number|num|no|#)?\s*"
+    r"[:#\-]?\s*\d[\dA-Z\-]{3,}\b"
+)
+
+# LICENSE: license/certificate number, plus DEA and NPI registries.
+_LICENSE = (
+    r"\b(?:licen[cs]e|lic\.?|certificate|cert\.?)\s*"
+    r"(?:number|num|no|#)?[\s:#\-]*[A-Z0-9][\dA-Z\-]{3,}\b"
+    r"|\bDEA\s*(?:number|num|no|#)?[\s:#\-]*[A-Z]{2}\d{7}\b"
+    r"|\bNPI\s*(?:number|num|no|#)?[\s:#\-]*\d{10}\b"
+)
+
+# VEHICLE_ID: VIN (17 chars, no I/O/Q) or license plate with context.
+_VEHICLE_ID = (
+    r"\b(?:VIN|vehicle\s+identification\s+number)\s*"
+    r"(?:number|num|no|#)?[\s:#\-]*[A-HJ-NPR-Z0-9]{17}\b"
+    r"|\b(?:license\s+plate|plate\s+number|plate\s+#|tag\s+number)"
+    r"\s*[:#\-]?\s*[A-Z0-9][A-Z0-9\s\-]{2,8}\b"
+)
+
+# DEVICE_ID: device or serial number with required keyword context.
+_DEVICE_ID = (
+    r"\b(?:device\s+(?:id|number|serial|#)|serial\s*(?:number|#|num|no)|"
+    r"s\/n|s\.n\.|model\s+(?:number|#|num|no))\s*"
+    r"[:#\-]?\s*[A-Z0-9][A-Z0-9\-]{3,}\b"
+    r"|\bUDI[\s:#\-]+[\dA-Z\(\)\+\-]{8,}\b"
+)
+
+# URL: http/https/ftp/file plus bare www. domains.
+_URL = (
+    r"\bhttps?:\/\/[^\s<>\"\)\]]+"
+    r"|\b(?:ftp|ftps|file):\/\/[^\s<>\"\)\]]+"
+    r"|\bwww\.[a-zA-Z0-9][a-zA-Z0-9\-]*(?:\.[a-zA-Z0-9\-]+)+(?:\/[^\s<>\"\)\]]*)?"
+)
+
+# IP_ADDRESS: IPv4 (octet-validated) and uncompressed IPv6.
+_IP_ADDRESS = (
+    r"\b(?:25[0-5]|2[0-4]\d|1\d{2}|[1-9]?\d)"
+    r"(?:\.(?:25[0-5]|2[0-4]\d|1\d{2}|[1-9]?\d)){3}\b"
+    r"|\b(?:[a-fA-F0-9]{1,4}:){7}[a-fA-F0-9]{1,4}\b"
+)
+
+# HOSPITAL: capitalized words ending in a hospital/clinic keyword.
+# Both prefix and keyword require uppercase first letter (via (?-i:...)) so
+# stop-word phrases like "the hospital" don't trigger under re.IGNORECASE.
+_HOSPITAL = (
+    r"\b(?:(?-i:[A-Z])[A-Za-z'\.\-]+\s+){1,4}"
+    r"(?-i:" + _HOSPITAL_KEYWORD + r")\b"
+)
+
+# ORGANIZATION: capitalized words ending in a corporate/academic suffix.
+_ORGANIZATION = (
+    r"\b(?:(?-i:[A-Z])[A-Za-z'\.\-]+\s+){1,4}"
+    r"(?-i:" + _ORG_KEYWORD + r")\b"
+)
 
 _POSTAL_CA = r"\b[a-zA-Z]\d[a-zA-Z][ \-]?\d[a-zA-Z]\d\b"
 
@@ -146,20 +274,32 @@ _ZIP_CODE_US = (
     r"\b(?:" + _US_STATES + r")\s*[,.]?\s*(\d{5}(?:-\d{4})?)\b"
 )
 
-# Street addresses with common suffixes + optional apartment/suite
+# Street addresses with common suffixes + optional apt/suite, plus PO Box.
 _ADDRESS = (
     r"\b\d+\s+(?:[A-Za-z\.\']+\s+)?(?:[A-Za-z\.\']+\s+)?"
     r"(?:" + _STREET_SUFFIX + r")\.?"
-    r"(?:\s*[,.]?\s*(?:apt|suite|ste|unit|bldg|building|fl|floor)\.?\s*#?\s*[\w]+)?\b"
+    r"(?:\s*[,.]?\s*(?:apt|suite|ste|unit|bldg|building|fl|floor|rm|room)\.?\s*#?\s*[\w]+)?\b"
+    r"|\bP\.?\s*O\.?\s*Box\s+\d+\b"
 )
 
 
 BUILTIN_REGEX_PATTERNS: dict[str, str] = {
     "DATE": _DATE,
+    "DATE_TIME": _DATE_TIME,
+    "AGE": _AGE,
     "PHONE": _PHONE,
+    "FAX": _FAX,
     "EMAIL": _EMAIL,
     "ID": _ID,
     "MRN": _MRN,
+    "ACCOUNT": _ACCOUNT,
+    "LICENSE": _LICENSE,
+    "VEHICLE_ID": _VEHICLE_ID,
+    "DEVICE_ID": _DEVICE_ID,
+    "URL": _URL,
+    "IP_ADDRESS": _IP_ADDRESS,
+    "HOSPITAL": _HOSPITAL,
+    "ORGANIZATION": _ORGANIZATION,
     "POSTAL_CODE_CA": _POSTAL_CA,
     "OHIP": _OHIP,
     "SIN": _SIN,
