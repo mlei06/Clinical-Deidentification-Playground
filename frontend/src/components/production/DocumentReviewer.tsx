@@ -180,13 +180,30 @@ export default function DocumentReviewer({ doc, reviewer }: DocumentReviewerProp
       </div>
 
       <div className="border-t border-gray-200 bg-gray-50 p-3">
+        <div className="mb-2 flex flex-wrap items-center gap-2 rounded-lg border border-gray-200 bg-white px-2 py-1.5 shadow-sm">
+          <span className="text-[11px] font-medium text-gray-500">Output style</span>
+          <select
+            className="rounded border border-gray-200 bg-white px-2 py-1 text-xs text-gray-800"
+            value={outputMode}
+            onChange={(e) => setOutputMode(e.target.value as OutputMode)}
+            title="Redacted tags or surrogate text for the output pane"
+          >
+            <option value="redacted">Redacted tags</option>
+            <option value="surrogate">Surrogate data</option>
+          </select>
+          <button
+            type="button"
+            onClick={() => void handleApply()}
+            disabled={isApplying}
+            className="rounded border border-blue-200 bg-blue-50 px-2 py-1 text-xs font-medium text-blue-900 hover:bg-blue-100 disabled:opacity-40"
+          >
+            {isApplying ? 'Applying…' : 'Apply output'}
+          </button>
+        </div>
         <SpanEditor
           originalText={doc.text}
           spans={doc.editedSpans}
-          outputMode={outputMode}
-          onOutputModeChange={setOutputMode}
           onChange={handleChangeSpans}
-          onApply={handleApply}
           onReset={handleReset}
           isApplying={isApplying}
           isDirty={originalIsDirty}
