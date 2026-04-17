@@ -3,6 +3,8 @@ import { useState } from 'react';
 import type { FieldProps } from '@rjsf/utils';
 import { labelColor } from '../../../lib/labelColors';
 import { useLabelSpace } from '../../../hooks/useLabelSpace';
+import { usePipeFormContextConfig } from '../../../hooks/usePipeFormContextConfig';
+import type { SchemaFormContext } from '../schemaFormContext';
 
 /**
  * Label-space-aware editor for ``patterns: dict[str, str]``.
@@ -24,13 +26,14 @@ export default function LabelRegexField(props: FieldProps) {
     (schemaAny.ui_pipe_type as string) || formContext?.pipeType || '';
   const baseLabels: string[] =
     (schemaAny.ui_base_labels as string[]) || formContext?.baseLabels || [];
-  const config: Record<string, unknown> = formContext?.config ?? {};
+  const config = usePipeFormContextConfig(formContext as SchemaFormContext | undefined);
 
   const { labels: allLabels, isLoading } = useLabelSpace(
     pipeType,
     config,
     baseLabels,
     patterns,
+    { selectedNodeId: (formContext as SchemaFormContext | undefined)?.selectedNodeId },
   );
 
   const [newLabel, setNewLabel] = useState('');

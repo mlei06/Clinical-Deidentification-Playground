@@ -44,12 +44,29 @@ export function listPipeTypes(): Promise<PipeTypeInfo[]> {
   return apiFetch('/pipelines/pipe-types');
 }
 
+export interface ComputePipeLabelsResponse {
+  labels: string[];
+  neuroner_model?: string | null;
+  neuroner_manifest_labels?: string[] | null;
+}
+
 export function computePipeLabels(
   name: string,
   config?: Record<string, unknown>,
-): Promise<{ labels: string[] }> {
+): Promise<ComputePipeLabelsResponse> {
   return apiFetch(`/pipelines/pipe-types/${encodeURIComponent(name)}/labels`, {
     method: 'POST',
     body: JSON.stringify({ config: config ?? null }),
   });
+}
+
+/** Raw manifest labels for every NeuroNER model + default entity_map (one GET per session). */
+export interface NeuronerLabelSpaceBundle {
+  labels_by_model: Record<string, string[]>;
+  default_entity_map: Record<string, string>;
+  default_model: string;
+}
+
+export function fetchNeuronerLabelSpaceBundle(): Promise<NeuronerLabelSpaceBundle> {
+  return apiFetch('/pipelines/pipe-types/neuroner_ner/label-space-bundle');
 }

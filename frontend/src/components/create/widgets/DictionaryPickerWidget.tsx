@@ -4,6 +4,8 @@ import { Check, ChevronDown, ExternalLink, Loader2 } from 'lucide-react';
 import type { WidgetProps } from '@rjsf/utils';
 import { listDictionaries, getDictionaryPreview } from '../../../api/dictionaries';
 import type { DictionaryInfo } from '../../../api/types';
+import { usePipeFormContextConfig } from '../../../hooks/usePipeFormContextConfig';
+import type { SchemaFormContext } from '../schemaFormContext';
 
 /**
  * Custom rjsf widget that replaces the generic tag-list for dictionary fields.
@@ -27,7 +29,7 @@ export default function DictionaryPickerWidget(props: WidgetProps) {
   // For whitelist, try to infer the label from the config context
   // The dictionaries field lives inside per_label[LABEL].dictionaries
   // We look at the config object's per_label keys
-  const config = (formContext as Record<string, unknown>)?.config as Record<string, unknown> | undefined;
+  const config = usePipeFormContextConfig(formContext as SchemaFormContext | undefined);
   const inferredLabel = useMemo(() => {
     if (kind !== 'whitelist' || !config?.per_label) return undefined;
     const perLabel = config.per_label as Record<string, unknown>;

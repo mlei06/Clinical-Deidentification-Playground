@@ -1,8 +1,10 @@
 import { Plus, X, ArrowRight, Loader2 } from 'lucide-react';
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import type { FieldProps } from '@rjsf/utils';
 import { labelColor } from '../../../lib/labelColors';
 import { useLabelSpace } from '../../../hooks/useLabelSpace';
+import { usePipeFormContextConfig } from '../../../hooks/usePipeFormContextConfig';
+import type { SchemaFormContext } from '../schemaFormContext';
 import CanonicalLabelSelect from './CanonicalLabelSelect';
 
 /**
@@ -12,7 +14,7 @@ import CanonicalLabelSelect from './CanonicalLabelSelect';
  * optional remap text field.  Extra labels are only offered when the schema sets
  * ``ui_allow_custom_labels: true`` (not used for output label mapping).
  *
- * Reads ``pipeType``, ``baseLabels``, and ``config`` from rjsf ``formContext``.
+ * Reads ``pipeType``, ``baseLabels``, and live ``config`` (store + formContext).
  */
 export default function LabelSpaceField(props: FieldProps) {
   const { formData, onChange, schema, formContext, fieldPathId } = props;
@@ -23,16 +25,48 @@ export default function LabelSpaceField(props: FieldProps) {
     (schemaAny.ui_pipe_type as string) || formContext?.pipeType || '';
   const baseLabels: string[] =
     (schemaAny.ui_base_labels as string[]) || formContext?.baseLabels || [];
-  const config: Record<string, unknown> = formContext?.config ?? {};
+  const config = usePipeFormContextConfig(formContext as SchemaFormContext | undefined);
 
   const { labels: allLabels, isLoading } = useLabelSpace(
     pipeType,
     config,
     baseLabels,
     mapping,
+    { selectedNodeId: (formContext as SchemaFormContext | undefined)?.selectedNodeId },
   );
 
   const [newLabel, setNewLabel] = useState('');
+
+  // ── Auto-prune stale label_mapping entries when the label space changes ──
+  // When the user switches models the available labels change. Entries for
+  // labels that no longer exist in the space are removed so the widget stays
+  // in sync with the selected model.
+  const prevLabelsRef = useRef<string[]>(allLabels);
+  useEffect(() => {
+    const prev = prevLabelsRef.current;
+    prevLabelsRef.current = allLabels;
+
+    // Skip on initial mount or while still loading
+    if (prev.length === 0 || isLoading) return;
+
+    const currSet = new Set(allLabels);
+    const prevSet = new Set(prev);
+    if (currSet.size === prevSet.size && [...prevSet].every((l) => currSet.has(l))) return;
+
+    // Prune entries for labels no longer in the space
+    let changed = false;
+    const pruned: Record<string, string | null> = {};
+    for (const [k, v] of Object.entries(mapping)) {
+      if (currSet.has(k)) {
+        pruned[k] = v;
+      } else {
+        changed = true;
+      }
+    }
+    if (changed) {
+      update(pruned);
+    }
+  }, [allLabels, isLoading]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const isEnabled = (label: string) => mapping[label] !== null;
 
@@ -93,9 +127,12 @@ export default function LabelSpaceField(props: FieldProps) {
   /** Only regex_ner / whitelist-style label editors need this; label *mapping* does not. */
   const allowCustom = schemaAny.ui_allow_custom_labels === true;
 
-  const customLabels = Object.keys(mapping).filter(
-    (k) => !allLabels.includes(k),
-  );
+  // When custom labels are not allowed (detector label_mapping), only show
+  // labels from the current model's label space — stale entries from a
+  // previous model selection are hidden (and pruned by the effect above).
+  const customLabels = allowCustom
+    ? Object.keys(mapping).filter((k) => !allLabels.includes(k))
+    : [];
   const displayLabels = [...allLabels, ...customLabels.sort()];
 
   return (

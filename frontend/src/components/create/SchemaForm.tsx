@@ -13,6 +13,9 @@ import BlacklistDictsField from './widgets/BlacklistDictsField';
 import TagListWidget from './widgets/TagListWidget';
 import DictionaryPickerWidget from './widgets/DictionaryPickerWidget';
 import DescribedSelectWidget from './widgets/DescribedSelectWidget';
+import type { SchemaFormContext } from './schemaFormContext';
+
+export type { SchemaFormContext };
 
 const customWidgets: RegistryWidgetsType = {
   tagList: TagListWidget,
@@ -28,12 +31,6 @@ const customFields: RegistryFieldsType = {
   whitelistLabel: WhitelistLabelField,
   blacklistDicts: BlacklistDictsField,
 };
-
-export interface SchemaFormContext {
-  pipeType?: string;
-  baseLabels?: string[];
-  config?: Record<string, unknown>;
-}
 
 interface SchemaFormProps {
   schema: Record<string, unknown>;

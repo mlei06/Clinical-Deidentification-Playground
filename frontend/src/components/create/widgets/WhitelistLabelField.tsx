@@ -12,6 +12,8 @@ import { useState, useCallback, useRef } from 'react';
 import type { FieldProps } from '@rjsf/utils';
 import { labelColor } from '../../../lib/labelColors';
 import { useLabelSpace } from '../../../hooks/useLabelSpace';
+import { usePipeFormContextConfig } from '../../../hooks/usePipeFormContextConfig';
+import type { SchemaFormContext } from '../schemaFormContext';
 import { uploadDictionary, listDictionaries } from '../../../api/dictionaries';
 import type { DictionaryInfo } from '../../../api/types';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -59,7 +61,7 @@ export default function WhitelistLabelField(props: FieldProps) {
     (schemaAny.ui_base_labels as string[]) || formContext?.baseLabels || [];
   const builtinDicts: Record<string, DictInfo[]> =
     (schemaAny.ui_dictionaries_by_label as Record<string, DictInfo[]>) || {};
-  const config: Record<string, unknown> = formContext?.config ?? {};
+  const config = usePipeFormContextConfig(formContext as SchemaFormContext | undefined);
   const allowCustomLabels = schemaAny.ui_allow_custom_labels !== false;
 
   const { labels: allLabels, isLoading } = useLabelSpace(
@@ -67,6 +69,7 @@ export default function WhitelistLabelField(props: FieldProps) {
     config,
     baseLabels,
     labels,
+    { selectedNodeId: (formContext as SchemaFormContext | undefined)?.selectedNodeId },
   );
 
   const [expanded, setExpanded] = useState<Set<string>>(new Set());

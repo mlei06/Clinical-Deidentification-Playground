@@ -3,6 +3,8 @@ import { useState } from 'react';
 import type { FieldProps } from '@rjsf/utils';
 import { labelColor } from '../../../lib/labelColors';
 import { useLabelSpace } from '../../../hooks/useLabelSpace';
+import { usePipeFormContextConfig } from '../../../hooks/usePipeFormContextConfig';
+import type { SchemaFormContext } from '../schemaFormContext';
 
 /**
  * Unified per-label configuration for detector pipes.
@@ -24,9 +26,11 @@ export default function UnifiedLabelField(props: FieldProps) {
     (schemaAny.ui_pipe_type as string) || formContext?.pipeType || '';
   const baseLabels: string[] =
     (schemaAny.ui_base_labels as string[]) || formContext?.baseLabels || [];
-  const config: Record<string, unknown> = formContext?.config ?? {};
+  const config = usePipeFormContextConfig(formContext as SchemaFormContext | undefined);
   const onConfigChange: ((c: Record<string, unknown>) => void) | undefined =
-    formContext?.onConfigChange;
+    (formContext as Record<string, unknown> | undefined)?.onConfigChange as
+      | ((c: Record<string, unknown>) => void)
+      | undefined;
 
   const labelMapping: Record<string, string | null> =
     (config.label_mapping as Record<string, string | null>) ?? {};
@@ -36,6 +40,7 @@ export default function UnifiedLabelField(props: FieldProps) {
     config,
     baseLabels,
     patterns,
+    { selectedNodeId: (formContext as SchemaFormContext | undefined)?.selectedNodeId },
   );
 
   const [newLabel, setNewLabel] = useState('');

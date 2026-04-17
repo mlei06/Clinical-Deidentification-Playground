@@ -3,7 +3,8 @@ import { X, Trash2, Info } from 'lucide-react';
 import { usePipelineEditorStore } from '../../stores/pipelineEditorStore';
 import { labelColor } from '../../lib/labelColors';
 import SchemaForm from './SchemaForm';
-import type { SchemaFormContext } from './SchemaForm';
+import type { SchemaFormContext } from './schemaFormContext';
+import { PipeEditorNodeContext } from './PipeEditorNodeContext';
 
 const MIN_WIDTH = 280;
 const MAX_WIDTH = 640;
@@ -62,8 +63,9 @@ export default function PipeConfigPanel() {
       pipeType: data?.pipeType ?? '',
       baseLabels: data?.baseLabels ?? [],
       config: data?.config ?? {},
+      selectedNodeId: node?.id,
     }),
-    [data?.pipeType, data?.baseLabels, data?.config],
+    [data?.pipeType, data?.baseLabels, data?.config, node?.id],
   );
 
   const surrogateStrategies = useMemo(() => {
@@ -141,12 +143,14 @@ export default function PipeConfigPanel() {
       {/* Config form + strategies */}
       <div className="flex-1 overflow-y-auto p-4">
         {data.configSchema ? (
-          <SchemaForm
-            schema={data.configSchema}
-            formData={data.config}
-            onChange={(config) => updatePipeConfig(node.id, config)}
-            formContext={formContext}
-          />
+          <PipeEditorNodeContext.Provider value={node.id}>
+            <SchemaForm
+              schema={data.configSchema}
+              formData={data.config}
+              onChange={(config) => updatePipeConfig(node.id, config)}
+              formContext={formContext}
+            />
+          </PipeEditorNodeContext.Provider>
         ) : (
           <div className="text-xs text-gray-400">No configuration options</div>
         )}

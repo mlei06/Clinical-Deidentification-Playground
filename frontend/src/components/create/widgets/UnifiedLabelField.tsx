@@ -3,6 +3,8 @@ import { useState, useCallback } from 'react';
 import type { FieldProps } from '@rjsf/utils';
 import { labelColor } from '../../../lib/labelColors';
 import { useLabelSpace } from '../../../hooks/useLabelSpace';
+import { usePipeFormContextConfig } from '../../../hooks/usePipeFormContextConfig';
+import type { SchemaFormContext } from '../schemaFormContext';
 import CanonicalLabelSelect from './CanonicalLabelSelect';
 
 interface LabelSettings {
@@ -41,7 +43,7 @@ export default function UnifiedLabelField(props: FieldProps) {
     (schemaAny.ui_base_labels as string[]) || formContext?.baseLabels || [];
   const builtinPatterns: Record<string, string> =
     (schemaAny.ui_builtin_patterns as Record<string, string>) || {};
-  const config: Record<string, unknown> = formContext?.config ?? {};
+  const config = usePipeFormContextConfig(formContext as SchemaFormContext | undefined);
   const allowCustomLabels = schemaAny.ui_allow_custom_labels !== false;
 
   const { labels: allLabels, isLoading } = useLabelSpace(
@@ -49,6 +51,7 @@ export default function UnifiedLabelField(props: FieldProps) {
     config,
     baseLabels,
     labels,
+    { selectedNodeId: (formContext as SchemaFormContext | undefined)?.selectedNodeId },
   );
 
   const [expanded, setExpanded] = useState<Set<string>>(new Set());

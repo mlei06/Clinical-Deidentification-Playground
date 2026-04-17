@@ -136,7 +136,17 @@ export const usePipelineEditorStore = create<PipelineEditorState>((set, get) => 
   updatePipeConfig: (nodeId, config) =>
     set((s) => ({
       nodes: s.nodes.map((n) =>
-        n.id === nodeId ? { ...n, data: { ...n.data, config } } : n,
+        n.id === nodeId
+          ? {
+              ...n,
+              data: {
+                ...n.data,
+                // Shallow clone: @rjsf/core often mutates formData in place, so keeping the same
+                // reference breaks useMemo deps and label-space queries when e.g. model changes.
+                config: { ...config },
+              },
+            }
+          : n,
       ),
       isDirty: true,
     })),
