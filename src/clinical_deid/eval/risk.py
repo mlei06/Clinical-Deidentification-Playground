@@ -7,38 +7,93 @@ from clinical_deid.domain import PHISpan
 # Default risk weights reflecting HIPAA sensitivity (higher = more critical to detect)
 DEFAULT_RISK_WEIGHTS: dict[str, float] = {
     "SSN": 10.0,
+    "SIN": 10.0,
     "MRN": 8.0,
+    "BIOMETRIC": 8.0,
     "PATIENT": 7.0,
+    "NAME": 6.0,
     "PHONE": 6.0,
+    "FAX": 6.0,
     "EMAIL": 6.0,
     "ID": 5.0,
+    "IDNUM": 5.0,
+    "OHIP": 5.0,
+    "ACCOUNT": 5.0,
+    "LICENSE": 5.0,
+    "VEHICLE_ID": 5.0,
+    "DEVICE_ID": 5.0,
+    "URL": 4.0,
+    "IP_ADDRESS": 4.0,
     "DOCTOR": 4.0,
+    "ADDRESS": 4.0,
+    "STAFF": 3.0,
+    "HCW": 3.0,
+    "PERSON": 3.0,
     "DATE": 3.0,
+    "DATE_TIME": 3.0,
+    "ZIP_CODE": 3.0,
+    "POSTAL_CODE": 3.0,
+    "CITY": 2.0,
     "HOSPITAL": 2.0,
+    "ORGANIZATION": 2.0,
     "LOCATION": 2.0,
+    "STATE": 1.0,
+    "COUNTRY": 1.0,
     "AGE": 1.0,
 }
 
 # Map platform labels to HIPAA Safe Harbor identifier numbers (1-18)
+# §164.514(b)(2) — Safe Harbor identifiers, plus clinical additions:
+#   - Hospital/Organization names → #1 (Names) and #18 (other unique characteristic)
+#   - Age → #3 (Dates element; ages > 89 must be aggregated)
+#   - SIN (Canada) → treated equivalent to #7
+#   - OHIP → treated equivalent to #9 (health plan beneficiary number)
 LABEL_TO_HIPAA: dict[str, list[int]] = {
+    # #1 — Names
+    "NAME": [1],
     "PATIENT": [1],
     "DOCTOR": [1],
+    "STAFF": [1],
+    "HCW": [1],
+    "PERSON": [1],
+    "HOSPITAL": [1, 18],
+    "ORGANIZATION": [1, 18],
+    # #2 — Geographic data smaller than state
     "LOCATION": [2],
     "ADDRESS": [2],
+    "CITY": [2],
+    "STATE": [2],
+    "COUNTRY": [2],
     "ZIP": [2],
+    "ZIP_CODE": [2],
+    "POSTAL_CODE": [2],
+    # #3 — Dates (and ages > 89)
     "DATE": [3],
+    "DATE_TIME": [3],
+    "AGE": [3],
+    # #4-5 — Phone / Fax
     "PHONE": [4],
     "FAX": [5],
+    # #6 — Email
     "EMAIL": [6],
+    # #7 — SSN (and equivalents)
     "SSN": [7],
+    "SIN": [7],
+    # #8 — MRN
     "MRN": [8],
-    "ID": [8, 9, 10, 11, 18],
+    # #9-11, 18 — Beneficiary / Account / License / Other unique
+    "OHIP": [9],
     "ACCOUNT": [10],
     "LICENSE": [11],
+    "ID": [8, 9, 10, 11, 18],
+    "IDNUM": [18],
+    # #12-13 — Vehicle / Device
     "VEHICLE_ID": [12],
     "DEVICE_ID": [13],
+    # #14-15 — Web / IP
     "URL": [14],
     "IP_ADDRESS": [15],
+    # #16 — Biometric
     "BIOMETRIC": [16],
 }
 
