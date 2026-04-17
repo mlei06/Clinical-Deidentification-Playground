@@ -1,5 +1,7 @@
 # CLAUDE.md
 
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
 ## Project summary
 
 Clinical De-Identification Playground — a local-first platform for detecting and removing Protected Health Information (PHI) from clinical text. Compose detection pipelines from modular pipes, evaluate against gold-standard corpora, serve inference via HTTP API, and maintain an audit trail.
@@ -7,14 +9,28 @@ Clinical De-Identification Playground — a local-first platform for detecting a
 ## Quick start
 
 ```bash
+# Backend
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 clinical-deid setup          # verify deps, init DB, smoke test
 clinical-deid serve           # start API on localhost:8000
-pytest                        # run tests
+
+# Frontend (separate terminal)
+cd frontend
+npm install
+npm run dev                  # Vite dev server on localhost:3000
+
+# Tests & linting
+pytest                        # all tests
+pytest tests/test_api.py      # single file
+pytest -k "test_process"      # by name pattern
+ruff check src/               # lint Python
+cd frontend && npm run lint   # lint frontend
 ```
 
 Optional extras: `.[presidio]`, `.[ner]`, `.[llm]`, `.[scripts]`, `.[parquet]`, `.[all]`.
+
+Node.js 20.19+ or 22.12+ required for the frontend (Vite 8).
 
 ## Architecture
 
@@ -74,6 +90,18 @@ Pipelines are JSON documents with sequential steps — detectors chained into sp
   ]
 }
 ```
+
+### Frontend architecture
+
+React 19 + TypeScript + Vite 8 + Tailwind CSS v4. Key libraries:
+- **@xyflow/react** — drag-and-drop pipeline builder canvas
+- **@tanstack/react-query** — all API data fetching (queries + mutations)
+- **zustand** — client-side state (pipeline editor store)
+- **@rjsf/core** — auto-generated config forms from pipe JSON Schema
+- **react-router-dom v7** — SPA routing across 7 views
+- **recharts** — eval dashboard charts
+
+The Vite dev server (port 3000) proxies `/api/*` to `localhost:8000` with path rewrite (strips `/api` prefix). Frontend code calls `/api/pipelines`, which hits `localhost:8000/pipelines`.
 
 ### Three built-in profiles
 
@@ -225,30 +253,9 @@ Four matching modes: strict (exact start+end+label), exact boundary (ignore labe
 
 Also computes: risk-weighted recall (HIPAA severity weights), per-label breakdown, label confusion matrix, HIPAA Safe Harbor coverage report (18 identifiers), worst-document ranking.
 
-## What's built
+## Current status
 
-- Full pipe system with 11 cataloged pipe types (1 deprecated alias)
-- Pipeline composition (sequential chaining with 7 span merge/resolution strategies)
-- CLI with all subcommands (run, batch, eval, dict, dataset, audit, setup, serve)
-- FastAPI with all routes (pipelines, process, eval, audit, models, dictionaries, datasets, deploy, audit production proxy)
-- **Playground UI** — Vite + React + TypeScript frontend with 7 views: pipeline builder, inference (span highlighting + trace), eval dashboard (metrics/confusion/comparison), datasets (register/compose/transform/generate), dictionaries, deploy config (modes + allowlist), audit log viewer (stats, filters, local/production toggle)
-- Dataset HTTP API — register, browse, compose, transform, generate (LLM synthesis) via REST
-- Deploy configuration — inference modes mapped to pipelines, pipeline allowlist, production API URL
-- Audit production proxy — view remote production audit logs from the playground UI
-- Multi-mode evaluation with HIPAA coverage
-- Filesystem-backed pipeline, eval, and dataset storage
-- Unified audit trail (CLI + API write to same SQLite table)
-- Data ingestion (JSONL, BRAT, ASQ-PHI, MIMIC, PhysioNet)
-- LLM synthesis for generating training data
-- NeuroNER LSTM-CRF integration (Python 3.7 subprocess bridge)
-- **Training data export** — AnnotatedDocument to CoNLL, spaCy DocBin, HuggingFace JSONL (CLI + API)
-- **Custom NER pipe** — load trained spaCy/HuggingFace models from `models/` by name
-- **Canonical PHI labels** — `PHILabel` enum with HIPAA-based label space + `normalize()` for alias mapping
-- **Output mode separation** — redaction/surrogate decoupled from pipelines; applied via `output_mode` param on process endpoints
-- **`/process/redact`** — apply redaction/surrogate to user-corrected spans (post-editing export)
-- **`/process/scrub`** — zero-config log cleaning endpoint for upstream services
-- **Enriched audit** — `client_id`, `output_mode`, `service_type`, per-label `entity_counts` in audit records
-- 30+ test files
+The full pipe system (11 cataloged types), CLI, FastAPI, and Playground UI (7 views) are built and functional. Key capabilities: pipeline composition, multi-mode evaluation with HIPAA coverage, training data export (CoNLL/spaCy/HuggingFace), NeuroNER subprocess bridge, LLM synthesis, and unified audit trail.
 
 ## What's not built yet
 
@@ -261,14 +268,8 @@ Also computes: risk-weighted recall (HIPAA severity weights), per-label breakdow
 - Config via env vars with `CLINICAL_DEID_` prefix or `.env` file
 - Optional deps use `try/except ImportError` in `_register_builtins()`
 - Tests use `tmp_path` fixtures for isolated filesystem state
-- Entry points: `clinical-deid` (CLI), `clinical-deid-api` (server)
+- Entry points: `clinical-deid` (CLI), `clinical-deid-api` (server), `clinical-deid-production` (production server)
 
 ## Testing
-
-```bash
-pytest                     # all tests
-pytest tests/test_api.py   # specific file
-pytest -k "test_process"   # by name pattern
-```
 
 The `client` fixture in `conftest.py` sets up isolated temp dirs for pipelines, evaluations, and SQLite. Tests don't touch the real filesystem.
