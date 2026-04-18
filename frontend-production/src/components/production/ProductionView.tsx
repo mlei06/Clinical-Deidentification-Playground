@@ -12,18 +12,19 @@ export default function ProductionView() {
   const { reviewer, mode, docs, currentId, setReviewer, setMode } = useReviewQueue();
   const { data: modesData } = useModes();
 
-  // Auto-select default mode on first load.
+  // Auto-select default mode on first load, but only if it's available.
   useEffect(() => {
-    if (!mode && modesData?.default_mode) {
-      setMode(modesData.default_mode);
-    }
+    if (mode || !modesData?.default_mode) return;
+    const def = modesData.modes.find((m) => m.name === modesData.default_mode);
+    if (def?.available) setMode(modesData.default_mode);
   }, [modesData, mode, setMode]);
 
-  const pipelineName = useMemo(() => {
+  const selectedMode = useMemo(() => {
     if (!mode || !modesData) return null;
-    const m = modesData.modes.find((m) => m.name === mode);
-    return m?.pipeline ?? null;
+    return modesData.modes.find((m) => m.name === mode) ?? null;
   }, [mode, modesData]);
+
+  const pipelineName = selectedMode?.available ? selectedMode.pipeline : null;
 
   const { run, running } = useBatchDetect(pipelineName, reviewer);
 
@@ -54,11 +55,13 @@ export default function ProductionView() {
             disabled={!pipelineName || !reviewer.trim() || pendingCount === 0 || running}
             className="flex items-center gap-1 rounded bg-gray-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-gray-800 disabled:opacity-40"
             title={
-              !pipelineName
-                ? 'Pick an available mode'
-                : !reviewer.trim()
-                  ? 'Enter a reviewer name'
-                  : 'Detect spans for all pending docs'
+              selectedMode && !selectedMode.available
+                ? `Mode unavailable — missing: ${selectedMode.missing.join(', ')}`
+                : !pipelineName
+                  ? 'Pick an available mode'
+                  : !reviewer.trim()
+                    ? 'Enter a reviewer name'
+                    : 'Detect spans for all pending docs'
             }
           >
             {running ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />}

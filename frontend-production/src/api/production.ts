@@ -1,7 +1,6 @@
 import { apiFetch } from './client';
 import type {
   ModesResponse,
-  OutputMode,
   ProcessResponse,
   RedactRequest,
   RedactResponse,

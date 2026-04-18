@@ -9,6 +9,19 @@ export interface PHISpanResponse {
   source: string | null;
 }
 
+export interface TraceFrame {
+  path: string;
+  stage: string;
+  pipe_type: string;
+  branch_index: number | null;
+  extra: Record<string, unknown>;
+  document?: {
+    document: { id: string; text: string; metadata: Record<string, unknown> };
+    spans: { start: number; end: number; label: string; confidence: number | null; source: string | null }[];
+  };
+  elapsed_ms?: number;
+}
+
 export interface ProcessResponse {
   request_id: string;
   original_text: string;
@@ -16,7 +29,7 @@ export interface ProcessResponse {
   spans: PHISpanResponse[];
   pipeline_name: string;
   processing_time_ms: number;
-  intermediary_trace: unknown[] | null;
+  intermediary_trace: TraceFrame[] | null;
 }
 
 export interface BatchProcessResponse {
@@ -42,6 +55,10 @@ export interface ModeInfo {
   name: string;
   pipeline: string;
   description: string;
+  /** False when the backing pipeline file is missing or a pipe step has unmet deps. */
+  available: boolean;
+  /** Tags like ``pipe:foo``, ``model:bar``, or ``pipeline:baz`` explaining why unavailable. */
+  missing: string[];
 }
 
 export interface ModesResponse {
