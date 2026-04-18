@@ -1,27 +1,41 @@
 import { useQuery } from '@tanstack/react-query';
 import { useCallback, useMemo } from 'react';
 import { usePipelineEditorStore } from '../stores/pipelineEditorStore';
-import {
-  computePipeLabels,
-  fetchNeuronerLabelSpaceBundle,
-  fetchPresidioLabelSpaceBundle,
-} from '../api/pipelines';
+import { computePipeLabels, fetchLabelSpaceBundle } from '../api/pipelines';
+import { usePipeTypes } from './usePipeTypes';
 import { usePipeEditorNodeId } from '../components/create/PipeEditorNodeContext';
+import type { LabelSpaceBundle } from '../api/pipelines';
+import type { PipeTypeInfo } from '../api/types';
 
 /**
- * Fetches the dynamic label space for a detector pipe. Merges API results with
- * static ``baseLabels``.
+ * Fetches the dynamic label space for a detector pipe.
  *
- * NeuroNER & Presidio: one GET ``label-space-bundle`` per pipe (per session); switching ``model``
- * or editing ``entity_map`` recomputes client-side (no POST on each change).
+ * Strategy is driven by ``PipeTypeInfo.label_source`` from the catalog:
+ *   - ``bundle`` — one GET per session; switching ``model`` / editing ``entity_map``
+ *     recomputes client-side from the cached bundle.
+ *   - ``compute`` — POST ``/pipe-types/{name}/labels`` with the current config.
+ *   - ``none``   — return ``baseLabels`` as-is.
  *
- * Other detectors: POST ``/pipe-types/{name}/labels`` with config; catalog ``ui_base_labels`` is
- * not merged when that returns labels.
+ * Bundle key shape (raw NER tag vs. Presidio entity name) is read from
+ * ``PipeTypeInfo.bundle_key_semantics``; both follow the same merge rule:
+ * ``effective_map[key] ?? key``.
  */
 export type UseLabelSpaceOptions = {
-  /** When set, ``model`` / ``entity_map`` are read from the store so CoNLL vs i2b2 updates even if RJSF skips re-rendering this field. */
+  /** Selected node id — enables store-backed reads so model/entity_map updates trigger refetch. */
   selectedNodeId?: string;
 };
+
+function selectPipeTypeInfo(pipeTypes: PipeTypeInfo[] | undefined, name: string): PipeTypeInfo | undefined {
+  return pipeTypes?.find((p) => p.name === name);
+}
+
+function bundleLabels(bundle: LabelSpaceBundle, model: string, entityMap: Record<string, string>): string[] {
+  const keys = bundle.labels_by_model[model] ?? [];
+  const effective = { ...bundle.default_entity_map, ...entityMap };
+  const set = new Set<string>();
+  for (const k of keys) set.add(effective[k] ?? k);
+  return [...set].sort();
+}
 
 export function useLabelSpace(
   pipeType: string,
@@ -32,6 +46,11 @@ export function useLabelSpace(
 ) {
   const ctxNodeId = usePipeEditorNodeId();
   const selectedNodeId = options?.selectedNodeId ?? ctxNodeId;
+
+  const { data: pipeTypes } = usePipeTypes();
+  const info = selectPipeTypeInfo(pipeTypes, pipeType);
+  const labelSource = info?.label_source ?? 'compute';
+  const useBundle = labelSource === 'bundle' || labelSource === 'both';
 
   type StoreState = ReturnType<typeof usePipelineEditorStore.getState>;
 
@@ -56,7 +75,6 @@ export function useLabelSpace(
   );
 
   const modelLive = usePipelineEditorStore(selectModel);
-
   const entityMapLive = usePipelineEditorStore(selectEntityMap);
 
   const configFingerprint = JSON.stringify(config);
@@ -75,91 +93,49 @@ export function useLabelSpace(
     ].join('|');
   }, [selectedNodeId, modelLive, entityMapLive]);
 
-  const neuronerBundle = useQuery({
-    queryKey: ['neuroner-label-space-bundle'],
-    queryFn: () => fetchNeuronerLabelSpaceBundle(),
+  const bundleQuery = useQuery({
+    queryKey: ['label-space-bundle', pipeType],
+    queryFn: () => fetchLabelSpaceBundle(pipeType),
     staleTime: 5 * 60_000,
-    enabled: pipeType === 'neuroner_ner',
-  });
-
-  const presidioBundle = useQuery({
-    queryKey: ['presidio-label-space-bundle'],
-    queryFn: () => fetchPresidioLabelSpaceBundle(),
-    staleTime: 5 * 60_000,
-    enabled: pipeType === 'presidio_ner',
+    enabled: !!pipeType && useBundle,
   });
 
   const postLabels = useQuery({
     queryKey: ['pipe-labels', pipeType, configFingerprint, storeOverrideFingerprint],
     queryFn: () => computePipeLabels(pipeType, configWithoutMapping),
     staleTime: 30_000,
-    enabled: !!pipeType && pipeType !== 'neuroner_ner' && pipeType !== 'presidio_ner',
+    enabled: !!pipeType && (labelSource === 'compute' || labelSource === 'both'),
   });
 
   const labels = useMemo(() => {
-    // NeuroNER: raw manifest tags → entity_map → PHI names.
-    if (pipeType === 'neuroner_ner' && neuronerBundle.data) {
-      const bundle = neuronerBundle.data;
+    if (useBundle && bundleQuery.data) {
+      const bundle = bundleQuery.data;
       const modelName =
         modelLive ||
         (typeof config.model === 'string' && config.model) ||
         bundle.default_model;
-      const raw = bundle.labels_by_model[modelName] ?? [];
-      const defaultMap = bundle.default_entity_map;
-      const userMap = entityMapLive ?? (config.entity_map as Record<string, string> | undefined) ?? {};
-      const effectiveMap: Record<string, string> = { ...defaultMap, ...userMap };
-      const set = new Set<string>();
-      for (const r of raw) {
-        set.add(effectiveMap[r] ?? r);
-      }
-      return [...set].sort();
+      const userMap =
+        entityMapLive ?? (config.entity_map as Record<string, string> | undefined) ?? {};
+      return bundleLabels(bundle, modelName, userMap);
     }
 
-    if (pipeType === 'neuroner_ner' && neuronerBundle.isLoading) {
-      return [...baseLabels].sort();
-    }
-
-    // Presidio: bundle lists Presidio entity names per model (entity_map keys); same merge as above.
-    if (pipeType === 'presidio_ner' && presidioBundle.data) {
-      const bundle = presidioBundle.data;
-      const modelName =
-        modelLive ||
-        (typeof config.model === 'string' && config.model) ||
-        bundle.default_model;
-      const keys = bundle.labels_by_model[modelName] ?? [];
-      const defaultMap = bundle.default_entity_map;
-      const userMap = entityMapLive ?? (config.entity_map as Record<string, string> | undefined) ?? {};
-      const effectiveMap: Record<string, string> = { ...defaultMap, ...userMap };
-      const set = new Set<string>();
-      for (const k of keys) {
-        set.add(effectiveMap[k] ?? k);
-      }
-      return [...set].sort();
-    }
-
-    if (pipeType === 'presidio_ner' && presidioBundle.isLoading) {
+    if (useBundle && bundleQuery.isLoading) {
       return [...baseLabels].sort();
     }
 
     // POST /labels returns the full base label space for the current pipe config (e.g. presidio
     // model). Do not union with catalog ``ui_base_labels`` — those defaults are a fixed snapshot
-    // (e.g. spaCy lg) and would hide model switches (same issue avoided for NeuroNER above).
+    // and would hide model switches.
     if (postLabels.data?.labels != null && postLabels.data.labels.length > 0) {
       return [...postLabels.data.labels].sort();
     }
 
-    const set = new Set<string>(baseLabels);
-    if (postLabels.data?.labels) {
-      for (const l of postLabels.data.labels) set.add(l);
-    }
-    return [...set].sort();
+    return [...baseLabels].sort();
   }, [
     baseLabels,
-    pipeType,
-    neuronerBundle.data,
-    neuronerBundle.isLoading,
-    presidioBundle.data,
-    presidioBundle.isLoading,
+    useBundle,
+    bundleQuery.data,
+    bundleQuery.isLoading,
     postLabels.data,
     config.model,
     config.entity_map,
@@ -167,12 +143,7 @@ export function useLabelSpace(
     entityMapLive,
   ]);
 
-  const isLoading =
-    pipeType === 'neuroner_ner'
-      ? neuronerBundle.isLoading
-      : pipeType === 'presidio_ner'
-        ? presidioBundle.isLoading
-        : postLabels.isLoading;
+  const isLoading = useBundle ? bundleQuery.isLoading : postLabels.isLoading;
 
   return { labels, isLoading };
 }

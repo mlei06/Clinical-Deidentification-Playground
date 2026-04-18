@@ -11,7 +11,7 @@ from pydantic import BaseModel
 from clinical_deid.config import get_settings
 from clinical_deid.mode_config import DEFAULT_MODES_PATH, DeployConfig, ModeEntry, load_mode_config, save_mode_config
 from clinical_deid.pipeline_store import list_pipelines, load_pipeline_config
-from clinical_deid.pipes.registry import pipe_availability
+from clinical_deid.pipes.registry import pipe_availability, pipe_dependencies
 
 router = APIRouter(prefix="/deploy", tags=["deploy"])
 
@@ -78,10 +78,12 @@ def get_deploy_config() -> DeployConfigResponse:
 
 
 def _pipeline_missing_deps(config: dict[str, Any]) -> list[str]:
-    """Return a list of missing dependencies for a pipeline config.
+    """Return missing dependency tags for a pipeline config.
 
-    Checks each ``pipes`` entry: the pipe must be registered, and for
-    ``custom_ner`` the referenced model must exist under ``models/``.
+    Each ``pipes`` entry is checked for: registration, install/ready status, and
+    any per-pipe dependency hook declared on the catalog (``dependencies_fn``).
+    Returns tags like ``"pipe:foo"`` (uninstalled / not ready) and
+    ``"model:bar"`` (declared by the pipe's own dependency check).
     """
     avail = {entry["name"]: entry for entry in pipe_availability()}
     missing: list[str] = []
@@ -90,24 +92,10 @@ def _pipeline_missing_deps(config: dict[str, Any]) -> list[str]:
         if not pipe_type:
             continue
         info = avail.get(pipe_type)
-        if info is None:
+        if info is None or not info.get("installed") or not info.get("ready", True):
             missing.append(f"pipe:{pipe_type}")
             continue
-        if not info.get("installed"):
-            missing.append(f"pipe:{pipe_type}")
-            continue
-        if not info.get("ready", True):
-            missing.append(f"pipe:{pipe_type}")
-            continue
-        if pipe_type == "custom_ner":
-            model_name = (pipe.get("config") or {}).get("model_name")
-            if model_name:
-                try:
-                    from clinical_deid.models import get_model as _get_model
-
-                    _get_model(get_settings().models_dir, model_name)
-                except Exception:
-                    missing.append(f"model:{model_name}")
+        missing.extend(pipe_dependencies(pipe_type, pipe.get("config") or {}))
     return missing
 
 

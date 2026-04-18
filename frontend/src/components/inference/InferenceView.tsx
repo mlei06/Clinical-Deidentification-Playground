@@ -49,6 +49,7 @@ import {
   findConflictSets,
   mergeLabelPrioritySpans,
   resolveConflictKeepSpan,
+  resolveConflictDropAll,
   spanRangeKey,
   type SpanConflictSet,
 } from '../../lib/spanOverlapConflicts';
@@ -513,6 +514,20 @@ export default function InferenceView() {
     [result?.spans],
   );
 
+  /** Drop every candidate at the conflicting range — user decided none of the labels should apply here. */
+  const handleDropOverlapConflict = useCallback(
+    (range: { start: number; end: number }) => {
+      setEditedSpans((prev) => {
+        const base = prev ?? result?.spans ?? [];
+        return resolveConflictDropAll(base, range);
+      });
+      setRedactError(null);
+      setOverlapConflictPopover(null);
+      setConflictUI(null);
+    },
+    [result?.spans],
+  );
+
   /** Matches ``resolve_spans`` with strategy ``label_priority`` (see ``span_merge.merge_label_priority``). */
   const handleQuickResolveLabelPriority = useCallback(() => {
     setEditedSpans((prev) => {
@@ -913,6 +928,7 @@ export default function InferenceView() {
                   onActiveSpanKeyChange={setActiveSpanKey}
                   conflictSets={conflictSets}
                   onResolveConflict={handleResolveOverlapConflict}
+                  onDropConflict={handleDropOverlapConflict}
                   onQuickResolveLabelPriority={handleQuickResolveLabelPriority}
                   onUpdateOutput={handleUpdateOutput}
                 />
@@ -975,6 +991,7 @@ export default function InferenceView() {
         originalText={result?.original_text ?? ''}
         conflict={overlapConflictPopover?.conflict ?? null}
         onKeep={handleResolveOverlapConflict}
+        onDropAll={handleDropOverlapConflict}
       />
 
       {spanPopover && result && (

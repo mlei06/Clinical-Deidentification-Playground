@@ -1,0 +1,34 @@
+{
+  "pipes": [
+    {
+      "type": "regex_ner",
+      "config": {
+        "source_name": "regex_ner",
+        "skip_overlapping": false
+      }
+    },
+    {
+      "type": "whitelist",
+      "config": {
+        "source_name": "whitelist",
+        "skip_overlapping": false
+      }
+    },
+    {
+      "type": "blacklist",
+      "config": {
+        "dict_config": {
+          "disabled_dictionaries": [
+            "commonest_words",
+            "common_words",
+            "sno_edited"
+          ]
+        },
+        "match": "any_token",
+        "apply_to_labels": null,
+        "load_all_dictionaries": true
+      }
+    }
+  ],
+  "description": "test pipeline"
+}

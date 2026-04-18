@@ -307,3 +307,33 @@ def test_compute_pipe_labels_presidio_omits_neuroner_fields(client) -> None:
     assert isinstance(body["labels"], list)
     assert "neuroner_model" not in body
     assert "neuroner_manifest_labels" not in body
+
+
+def test_pipe_types_expose_label_source(client) -> None:
+    """Catalog metadata reaches the frontend so it can pick fetch strategy."""
+    r = client.get("/pipelines/pipe-types")
+    assert r.status_code == 200
+    by_name = {entry["name"]: entry for entry in r.json()}
+    # bundle detectors
+    assert by_name["presidio_ner"]["label_source"] == "bundle"
+    assert by_name["presidio_ner"]["bundle_key_semantics"] == "presidio_entity"
+    assert by_name["neuroner_ner"]["label_source"] == "bundle"
+    assert by_name["neuroner_ner"]["bundle_key_semantics"] == "ner_raw"
+    # compute detectors
+    assert by_name["regex_ner"]["label_source"] == "compute"
+    assert by_name["regex_ner"]["bundle_key_semantics"] is None
+    assert by_name["whitelist"]["label_source"] == "compute"
+    # span transformers / redactors do not expose a label space
+    assert by_name["resolve_spans"]["label_source"] == "none"
+    assert by_name["label_filter"]["label_source"] == "none"
+
+
+def test_label_space_bundle_404_for_compute_pipe(client) -> None:
+    """Pipes with ``label_source='compute'`` do not expose a bundle."""
+    r = client.get("/pipelines/pipe-types/regex_ner/label-space-bundle")
+    assert r.status_code == 404
+
+
+def test_label_space_bundle_404_for_unknown_pipe(client) -> None:
+    r = client.get("/pipelines/pipe-types/no_such_pipe/label-space-bundle")
+    assert r.status_code == 404

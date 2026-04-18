@@ -69,12 +69,19 @@ Pipelines should only predict spans. Redaction (tag replacement) and surrogate (
 
 ### Pipe registry
 
-Pipes are registered by name: `register("my_pipe", MyConfig, MyPipe)`. After registration, the pipe works in pipeline JSON configs, the API, CLI, and evaluation — zero other code changes.
+Pipes are registered by name via the catalog. After registration, the pipe works in pipeline JSON configs, the API, CLI, and evaluation — zero other code changes.
 
-Adding a new pipe is 3 steps:
-1. Pydantic config class
-2. Pipe class with `forward()` method
-3. `register()` call in `registry.py`
+Adding a new pipe — checklist (the contract test in `tests/test_registry_contract.py` enforces this):
+
+1. **Pydantic config class** in your pipe module.
+2. **Pipe class** with `forward(doc) -> AnnotatedDocument`.
+3. **`PipeCatalogEntry`** appended to `_CATALOG` in `registry.py` with the dotted import paths.
+4. **`default_base_labels_fn`** — only for detectors; returns the label space when no config is supplied.
+5. **`label_source`** — one of `"none"` (transformers/redactors), `"compute"` (POST /labels per config), `"bundle"` (one GET, switch models client-side), or `"both"`.
+6. **`label_space_bundle_fn` + `bundle_key_semantics`** — required when `label_source` is `"bundle"`/`"both"`. The fn returns `{labels_by_model, default_entity_map, default_model}`. Semantics is `"ner_raw"` (raw NER tags, e.g. NeuroNER) or `"presidio_entity"` (Presidio entity names).
+7. **`dynamic_options_fns`** (optional) — `{source_token: "module:fn"}` for any config field that declares `ui_options_source`. The fn returns `list[str]`.
+8. **`dependencies_fn`** (optional) — `(config) -> list[str]`. Each tag (e.g. `"model:foo"`) marks a missing runtime dep so deploy health can flag broken modes.
+9. **`check_ready`** (optional) — `() -> (ok, details)` for runtime-only deps not visible to Python imports (venvs, downloaded models, embeddings).
 
 ### Pipeline composition
 
@@ -175,7 +182,8 @@ All pipeline routes use **name-based** paths (not UUIDs):
 |--------|------|-------------|
 | `GET` | `/health` | Liveness |
 | `GET` | `/pipelines/pipe-types` | Pipe catalog with JSON Schema |
-| `POST` | `/pipelines/pipe-types/{name}/labels` | Compute label space for a detector |
+| `POST` | `/pipelines/pipe-types/{name}/labels` | Compute label space for a detector (any `label_source`) |
+| `GET` | `/pipelines/pipe-types/{name}/label-space-bundle` | Per-model label bundle for detectors with `label_source: bundle` |
 | `GET` | `/pipelines/ner/builtins` | Bundled regex / whitelist label names |
 | `POST` | `/pipelines/whitelist/parse-lists` | Parse uploaded list files for whitelist config |
 | `POST` | `/pipelines/blacklist/parse-wordlists` | Merge uploads into blacklist terms |

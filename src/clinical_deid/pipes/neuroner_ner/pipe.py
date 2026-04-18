@@ -158,6 +158,36 @@ def default_base_labels() -> list[str]:
     return sorted(set(DEFAULT_ENTITY_MAP.values()))
 
 
+def list_neuroner_model_names() -> list[str]:
+    """Names of NeuroNER model directories under ``models/neuroner/`` (for select widgets)."""
+    from clinical_deid.config import get_settings
+
+    models_dir = (get_settings().models_dir / "neuroner").resolve()
+    if not models_dir.is_dir():
+        return []
+    return sorted(p.name for p in models_dir.iterdir() if p.is_dir())
+
+
+def build_neuroner_label_space_bundle() -> dict[str, Any]:
+    """Payload for the generic ``GET …/neuroner_ner/label-space-bundle``.
+
+    ``labels_by_model`` holds raw NeuroNER tags from each ``model_manifest.json``;
+    the client merges with ``default_entity_map`` to project to canonical PHI labels.
+    """
+    from clinical_deid.config import get_settings
+    from clinical_deid.models import list_models
+
+    labels_by_model: dict[str, list[str]] = {}
+    for info in list_models(get_settings().models_dir, framework="neuroner"):
+        labels_by_model[info.name] = sorted(info.labels)
+    cfg = NeuroNerConfig()
+    return {
+        "labels_by_model": labels_by_model,
+        "default_entity_map": dict(DEFAULT_ENTITY_MAP),
+        "default_model": cfg.model,
+    }
+
+
 class NeuroNerConfig(BaseModel):
     """Configuration for the NeuroNER LSTM-CRF detector pipe.
 

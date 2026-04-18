@@ -262,3 +262,18 @@ class CustomNerPipe(ConfigurablePipe):
 def default_base_labels() -> list[str]:
     """Return empty list — labels come from the model manifest at runtime."""
     return []
+
+
+def custom_ner_dependencies(config: dict[str, Any]) -> list[str]:
+    """Return ``["model:<name>"]`` if the configured model is not registered, else ``[]``."""
+    from clinical_deid.config import get_settings
+    from clinical_deid.models import get_model
+
+    model_name = (config or {}).get("model_name")
+    if not model_name:
+        return []
+    try:
+        get_model(get_settings().models_dir, model_name)
+    except Exception:
+        return [f"model:{model_name}"]
+    return []

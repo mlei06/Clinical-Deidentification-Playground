@@ -77,6 +77,9 @@ export interface CreatePipelineRequest {
   config: PipelineConfig;
 }
 
+export type LabelSource = 'none' | 'compute' | 'bundle' | 'both';
+export type BundleKeySemantics = 'ner_raw' | 'presidio_entity';
+
 export interface PipeTypeInfo {
   name: string;
   description: string;
@@ -86,6 +89,10 @@ export interface PipeTypeInfo {
   installed: boolean;
   config_schema: Record<string, unknown> | null;
   base_labels: string[] | null;
+  /** How the playground discovers this pipe's label space. */
+  label_source: LabelSource;
+  /** For ``label_source: 'bundle'``: how to interpret ``labels_by_model`` keys. */
+  bundle_key_semantics: BundleKeySemantics | null;
   deprecated?: boolean;
 }
 

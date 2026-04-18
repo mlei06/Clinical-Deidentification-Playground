@@ -2,11 +2,15 @@ import { useState, useMemo } from 'react';
 import { clsx } from 'clsx';
 import { ChevronRight, ChevronDown, Clock } from 'lucide-react';
 import SpanHighlighter from '../shared/SpanHighlighter';
+import LabelBadge from '../shared/LabelBadge';
+import { labelColor } from '../../lib/labelColors';
 import {
   diffSpans,
   diffTextWords,
-  segmentSpanDiff,
+  buildSpanDiffUnits,
+  buildSpanDiffSegments,
   computeFrameDiffStats,
+  type SpanDiffUnit,
   type FrameDiffStats,
   type TextSeg,
 } from '../../lib/traceDiff';
@@ -57,34 +61,125 @@ function DiffStatsBadge({ stats }: { stats: FrameDiffStats }) {
   );
 }
 
-function SpanDiffView({
-  text,
-  added,
-  removed,
-}: {
+function describeKept(span: PHISpanResponse): string {
+  const conf = span.confidence != null ? ` (${(span.confidence * 100).toFixed(0)}%)` : '';
+  const src = span.source ? ` — ${span.source}` : '';
+  return `${span.label}${conf}${src}`;
+}
+
+function describeAdded(span: PHISpanResponse, currentPipe: string): string {
+  const rule = span.source && span.source !== currentPipe ? ` — rule: ${span.source}` : '';
+  return `${span.label} — added by ${currentPipe}${rule}`;
+}
+
+function describeRemoved(span: PHISpanResponse, currentPipe: string): string {
+  const origin = span.source ? ` — was detected by ${span.source}` : '';
+  return `${span.label} — removed by ${currentPipe}${origin}`;
+}
+
+function describePrimary(unit: SpanDiffUnit<PHISpanResponse>, currentPipe: string): string {
+  switch (unit.status) {
+    case 'kept':
+      return describeKept(unit.primary);
+    case 'added':
+      return describeAdded(unit.primary, currentPipe);
+    case 'removed':
+      return describeRemoved(unit.primary, currentPipe);
+  }
+}
+
+interface DiffMarkProps {
+  unit: SpanDiffUnit<PHISpanResponse>;
+  currentPipe: string;
   text: string;
-  added: { start: number; end: number; label: string }[];
-  removed: { start: number; end: number; label: string }[];
-}) {
+}
+
+/**
+ * One ``<mark>`` per diff unit. Uses the canonical category color so the
+ * highlight matches stage-1 ``SpanHighlighter`` exactly. ``removed`` units
+ * apply ``line-through`` and ``opacity: 0.5`` to the entire mark — text and
+ * label badge inherit both, keeping the strike on the document text and the
+ * badge text in sync.
+ */
+function DiffMark({ unit, currentPipe, text }: DiffMarkProps) {
+  const c = labelColor(unit.primary.label);
+  const isRemoved = unit.status === 'removed';
+  /** Single ``diff-removed`` cascade lives on the ``<mark>``: opacity-50 +
+   *  line-through dims and strikes everything inside (bg, border, document
+   *  text, label badge) by the same amount, using the *same* category colors
+   *  the absolute view uses for kept spans. The badge container also gets the
+   *  line-through class explicitly so the strike crosses absolutely-positioned
+   *  text in browsers that don't propagate text-decoration through abs boxes. */
+  return (
+    <mark
+      className={clsx(
+        'relative inline rounded-sm border px-0.5',
+        isRemoved && 'opacity-50 line-through',
+      )}
+      style={{
+        backgroundColor: c.bg,
+        borderColor: c.border,
+        color: c.text,
+      }}
+      title={describePrimary(unit, currentPipe)}
+    >
+      <span
+        className={clsx(
+          'absolute -top-4 left-0 flex items-center gap-1 whitespace-nowrap',
+          isRemoved && 'line-through',
+        )}
+      >
+        {unit.removedSiblings.map((r, j) => (
+          <span
+            key={`sib-${j}-${r.label}`}
+            /** When the mark itself is already removed, siblings inherit the
+             *  cascade. Apply our own dim/strike only when the primary is an
+             *  *added* span at the same range (a reclassification). */
+            className={isRemoved ? undefined : 'opacity-50 line-through'}
+          >
+            <LabelBadge label={r.label} title={describeRemoved(r, currentPipe)} />
+          </span>
+        ))}
+        <LabelBadge label={unit.primary.label} title={describePrimary(unit, currentPipe)} />
+      </span>
+      {text}
+    </mark>
+  );
+}
+
+interface SpanDiffViewProps {
+  text: string;
+  currentSpans: PHISpanResponse[];
+  added: PHISpanResponse[];
+  removed: PHISpanResponse[];
+  currentPipe: string;
+}
+
+function SpanDiffView({ text, currentSpans, added, removed, currentPipe }: SpanDiffViewProps) {
+  const units = useMemo(
+    () => buildSpanDiffUnits(currentSpans, added, removed),
+    [currentSpans, added, removed],
+  );
   const segments = useMemo(
-    () => segmentSpanDiff(text, added, removed),
-    [text, added, removed],
+    () => buildSpanDiffSegments(text, units),
+    [text, units],
   );
   return (
-    <div className="whitespace-pre-wrap break-words font-mono text-xs leading-relaxed text-gray-700">
-      {segments.map((seg, i) => (
-        <span
-          key={i}
-          className={clsx(
-            seg.state === 'added' && 'rounded bg-emerald-100 px-0.5 text-emerald-900',
-            seg.state === 'removed' &&
-              'rounded bg-rose-100 px-0.5 text-rose-800 line-through',
-          )}
-        >
-          {seg.text}
-        </span>
-      ))}
-    </div>
+    <pre className="whitespace-pre-wrap break-words font-mono text-sm leading-relaxed">
+      {segments.map((seg, i) => {
+        if (seg.kind === 'plain') {
+          return <span key={i}>{seg.text}</span>;
+        }
+        return (
+          <DiffMark
+            key={i}
+            unit={seg.unit}
+            currentPipe={currentPipe}
+            text={seg.text}
+          />
+        );
+      })}
+    </pre>
   );
 }
 
@@ -122,15 +217,24 @@ export default function TraceTimeline({ frames }: TraceTimelineProps) {
 
   const frameStats = useMemo(() => {
     return frames.map((frame, i) => {
+      if (!frame.document) return null;
       const prior = i > 0 ? frames[i - 1] : null;
-      if (!prior?.document || !frame.document) return null;
-      const priorDoc = prior.document;
-      const curDoc = frame.document;
+      /** First stage has no predecessor — treat its full output as "added" so
+       *  the diff badge reads ``+N`` instead of falling back to the gray
+       *  span-count label. */
+      if (!prior?.document) {
+        return {
+          addedSpans: frame.document.spans.length,
+          removedSpans: 0,
+          textChanged: false,
+          charDelta: 0,
+        };
+      }
       return computeFrameDiffStats(
-        priorDoc.document.text,
-        priorDoc.spans,
-        curDoc.document.text,
-        curDoc.spans,
+        prior.document.document.text,
+        prior.document.spans,
+        frame.document.document.text,
+        frame.document.spans,
       );
     });
   }, [frames]);
@@ -211,11 +315,18 @@ export default function TraceTimeline({ frames }: TraceTimelineProps) {
                     stats.textChanged ? (
                       <TextDiffView segs={diffTextWords(priorDoc.text, doc.text)} />
                     ) : (
-                      <SpanDiffView
-                        text={doc.text}
-                        added={diffSpans(priorDoc.spans, doc.spans).added}
-                        removed={diffSpans(priorDoc.spans, doc.spans).removed}
-                      />
+                      (() => {
+                        const { added, removed } = diffSpans(priorDoc.spans, doc.spans);
+                        return (
+                          <SpanDiffView
+                            text={doc.text}
+                            currentSpans={doc.spans}
+                            added={added}
+                            removed={removed}
+                            currentPipe={frame.pipe_type}
+                          />
+                        );
+                      })()
                     )
                   ) : (
                     <SpanHighlighter text={doc.text} spans={doc.spans} />

@@ -13,6 +13,8 @@ interface ConflictResolutionPopoverProps {
   originalText: string;
   conflict: SpanConflictSet | null;
   onKeep: (kept: PHISpanResponse) => void;
+  /** Drop every candidate at the conflicting range — user decided no label applies here. */
+  onDropAll?: (range: { start: number; end: number }) => void;
 }
 
 export default function ConflictResolutionPopover({
@@ -22,6 +24,7 @@ export default function ConflictResolutionPopover({
   originalText,
   conflict,
   onKeep,
+  onDropAll,
 }: ConflictResolutionPopoverProps) {
   const [surrogateSnippets, setSurrogateSnippets] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
@@ -153,6 +156,17 @@ export default function ConflictResolutionPopover({
           );
         })}
       </ul>
+
+      {onDropAll && (
+        <button
+          type="button"
+          onClick={() => onDropAll({ start: conflict.start, end: conflict.end })}
+          className="mb-2 w-full rounded border border-red-200 bg-white py-1.5 text-[11px] font-medium text-red-700 hover:bg-red-50"
+          title="Remove every candidate span at this range"
+        >
+          Keep none — drop spans
+        </button>
+      )}
 
       <button
         type="button"

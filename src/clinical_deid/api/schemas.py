@@ -169,23 +169,20 @@ class ComputeLabelsResponse(BaseModel):
         ...,
         description="Canonical detector labels after entity_map (inputs to label_mapping).",
     )
-    neuroner_model: str | None = Field(
-        default=None,
-        description="NeuroNER: effective ``model`` from the request config (echo for debugging).",
-    )
-    neuroner_manifest_labels: list[str] | None = Field(
-        default=None,
-        description="NeuroNER: raw ``labels`` from ``model_manifest.json`` when the model is registered.",
-    )
 
 
-class NeuronerLabelSpaceBundle(BaseModel):
-    """One GET payload so the UI can derive label space for any model without a POST per switch."""
+class LabelSpaceBundle(BaseModel):
+    """One GET payload so the UI can derive label space for any model without a POST per switch.
+
+    Used by detectors that declare ``label_source in {'bundle', 'both'}`` in the catalog.
+    Key shape (raw NER tag vs. Presidio entity name) is signaled by the catalog
+    ``bundle_key_semantics`` field on the corresponding ``PipeTypeInfo`` entry.
+    """
 
     labels_by_model: dict[str, list[str]] = Field(
         description=(
-            "Neo: raw tags from each ``model_manifest.json``. Presidio: Presidio entity names per "
-            "known model (``entity_map`` keys); merge with ``default_entity_map`` on the client."
+            "Per-model label keys before ``entity_map`` projection. The semantics of these keys "
+            "(raw NER tag vs. Presidio entity) are described by ``PipeTypeInfo.bundle_key_semantics``."
         ),
     )
     default_entity_map: dict[str, str] = Field(
@@ -203,6 +200,14 @@ class PipeTypeInfo(BaseModel):
     installed: bool
     config_schema: dict[str, Any] | None = None
     base_labels: list[str] | None = None
+    label_source: str = Field(
+        default="none",
+        description="How the playground discovers this pipe's label space: 'none', 'compute', 'bundle', or 'both'.",
+    )
+    bundle_key_semantics: str | None = Field(
+        default=None,
+        description="For bundle pipes: 'ner_raw' (raw NER tags) or 'presidio_entity' (Presidio entity names).",
+    )
     deprecated: bool = False
 
 

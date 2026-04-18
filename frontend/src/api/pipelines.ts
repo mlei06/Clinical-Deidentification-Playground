@@ -46,8 +46,6 @@ export function listPipeTypes(): Promise<PipeTypeInfo[]> {
 
 export interface ComputePipeLabelsResponse {
   labels: string[];
-  neuroner_model?: string | null;
-  neuroner_manifest_labels?: string[] | null;
 }
 
 export function computePipeLabels(
@@ -60,20 +58,15 @@ export function computePipeLabels(
   });
 }
 
-/** Per-model keys into ``entity_map`` + defaults — NeuroNER (raw tags) or Presidio (entity names). One GET per session. */
+/** Per-model label keys + default ``entity_map`` for any detector with ``label_source: 'bundle'``.
+ * Key shape (raw NER tag vs. Presidio entity) is signaled by ``PipeTypeInfo.bundle_key_semantics``.
+ */
 export interface LabelSpaceBundle {
   labels_by_model: Record<string, string[]>;
   default_entity_map: Record<string, string>;
   default_model: string;
 }
 
-/** @deprecated alias — use ``LabelSpaceBundle`` */
-export type NeuronerLabelSpaceBundle = LabelSpaceBundle;
-
-export function fetchNeuronerLabelSpaceBundle(): Promise<LabelSpaceBundle> {
-  return apiFetch('/pipelines/pipe-types/neuroner_ner/label-space-bundle');
-}
-
-export function fetchPresidioLabelSpaceBundle(): Promise<LabelSpaceBundle> {
-  return apiFetch('/pipelines/pipe-types/presidio_ner/label-space-bundle');
+export function fetchLabelSpaceBundle(pipeType: string): Promise<LabelSpaceBundle> {
+  return apiFetch(`/pipelines/pipe-types/${encodeURIComponent(pipeType)}/label-space-bundle`);
 }

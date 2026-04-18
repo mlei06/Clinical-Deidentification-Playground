@@ -157,6 +157,15 @@ export function resolveConflictKeepSpan(
   return next;
 }
 
+/** After resolution: drop every span at this range — the user opted to keep none of the candidates. */
+export function resolveConflictDropAll(
+  spans: PHISpanResponse[],
+  range: { start: number; end: number },
+): PHISpanResponse[] {
+  const rk = spanRangeKey(range.start, range.end);
+  return spans.filter((s) => spanRangeKey(s.start, s.end) !== rk);
+}
+
 export function rangeHasUnresolvedConflict(
   conflictSets: SpanConflictSet[],
   start: number,

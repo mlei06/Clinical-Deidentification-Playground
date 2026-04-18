@@ -20,9 +20,12 @@ from __future__ import annotations
 
 import importlib
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
+
+LabelSource = Literal["none", "compute", "bundle", "both"]
+BundleKeySemantics = Literal["ner_raw", "presidio_entity"]
 
 from pydantic import BaseModel
 
@@ -77,6 +80,25 @@ class PipeCatalogEntry:
     # Zero-arg callable returning ``list[str]`` of default base labels.
     # Only meaningful for detector-role entries.
     default_base_labels_fn: str | None = None  # "module.path:function_name"
+    # How the playground discovers this detector's label space:
+    #   "none"    — no label-space UI (span_transformers, redactors)
+    #   "compute" — POST /pipe-types/{name}/labels with a config
+    #   "bundle"  — GET /pipe-types/{name}/label-space-bundle (one fetch, switch models client-side)
+    #   "both"    — bundle for fast switching; POST also available
+    label_source: LabelSource = "none"
+    # Zero-arg callable returning a ``LabelSpaceBundle``-shaped dict.
+    # Required when ``label_source in {"bundle", "both"}``.
+    label_space_bundle_fn: str | None = None  # "module.path:function_name"
+    # How the bundle's ``labels_by_model`` keys should be interpreted by the
+    # frontend before merging with ``entity_map``.  Required for "bundle"/"both".
+    bundle_key_semantics: BundleKeySemantics | None = None
+    # Map from ``ui_options_source`` token to a zero-arg callable returning
+    # ``list[str]``.  Used by the catalog to populate ``enum`` values for
+    # dynamic select widgets without the router knowing the source name.
+    dynamic_options_fns: dict[str, str] = field(default_factory=dict)
+    # Optional callable taking ``(config: dict | None) -> list[str]`` returning
+    # missing-dependency tags (e.g. ``"model:foo"``) for deploy health checks.
+    dependencies_fn: str | None = None  # "module.path:function_name"
     deprecated: bool = False
 
 
@@ -90,6 +112,7 @@ _CATALOG: list[PipeCatalogEntry] = [
         config_path="clinical_deid.pipes.regex_ner.pipe:RegexNerConfig",
         pipe_path="clinical_deid.pipes.regex_ner.pipe:RegexNerPipe",
         default_base_labels_fn="clinical_deid.pipes.regex_ner.pipe:default_base_labels",
+        label_source="compute",
     ),
     PipeCatalogEntry(
         name="whitelist",
@@ -100,6 +123,7 @@ _CATALOG: list[PipeCatalogEntry] = [
         config_path="clinical_deid.pipes.whitelist.pipe:WhitelistConfig",
         pipe_path="clinical_deid.pipes.whitelist.pipe:WhitelistPipe",
         default_base_labels_fn="clinical_deid.pipes.whitelist.pipe:default_base_labels",
+        label_source="compute",
     ),
     PipeCatalogEntry(
         name="label_mapper",
@@ -149,6 +173,9 @@ _CATALOG: list[PipeCatalogEntry] = [
         config_path="clinical_deid.pipes.presidio_ner.pipe:PresidioNerConfig",
         pipe_path="clinical_deid.pipes.presidio_ner.pipe:PresidioNerPipe",
         default_base_labels_fn="clinical_deid.pipes.presidio_ner.pipe:default_base_labels",
+        label_source="bundle",
+        label_space_bundle_fn="clinical_deid.pipes.presidio_ner.pipe:build_presidio_label_space_bundle",
+        bundle_key_semantics="presidio_entity",
     ),
     PipeCatalogEntry(
         name="consistency_propagator",
@@ -170,6 +197,7 @@ _CATALOG: list[PipeCatalogEntry] = [
         config_path="clinical_deid.pipes.llm_ner:LlmNerConfig",
         pipe_path="clinical_deid.pipes.llm_ner:LlmNerPipe",
         default_base_labels_fn="clinical_deid.pipes.llm_ner:default_base_labels",
+        label_source="compute",
     ),
     PipeCatalogEntry(
         name="neuroner_ner",
@@ -181,6 +209,12 @@ _CATALOG: list[PipeCatalogEntry] = [
         pipe_path="clinical_deid.pipes.neuroner_ner.pipe:NeuroNerPipe",
         check_ready="clinical_deid.pipes.neuroner_ner.pipe:check_neuroner_ready",
         default_base_labels_fn="clinical_deid.pipes.neuroner_ner.pipe:default_base_labels",
+        label_source="bundle",
+        label_space_bundle_fn="clinical_deid.pipes.neuroner_ner.pipe:build_neuroner_label_space_bundle",
+        bundle_key_semantics="ner_raw",
+        dynamic_options_fns={
+            "neuroner_models": "clinical_deid.pipes.neuroner_ner.pipe:list_neuroner_model_names",
+        },
     ),
     PipeCatalogEntry(
         name="custom_ner",
@@ -191,6 +225,8 @@ _CATALOG: list[PipeCatalogEntry] = [
         config_path="clinical_deid.pipes.custom_ner.pipe:CustomNerConfig",
         pipe_path="clinical_deid.pipes.custom_ner.pipe:CustomNerPipe",
         default_base_labels_fn="clinical_deid.pipes.custom_ner.pipe:default_base_labels",
+        label_source="compute",
+        dependencies_fn="clinical_deid.pipes.custom_ner.pipe:custom_ner_dependencies",
     ),
 ]
 
@@ -231,6 +267,63 @@ def compute_base_labels(pipe_name: str, config: dict[str, Any] | None = None) ->
             pass
 
     return []
+
+
+def get_catalog_entry(pipe_name: str) -> PipeCatalogEntry | None:
+    """Return the catalog entry for *pipe_name*, or ``None`` if unknown."""
+    for entry in _CATALOG:
+        if entry.name == pipe_name:
+            return entry
+    return None
+
+
+def get_label_space_bundle(pipe_name: str) -> dict[str, Any] | None:
+    """Build the label-space bundle for *pipe_name*.
+
+    Returns ``None`` when the pipe is unknown or does not declare a bundle
+    (``label_source not in {'bundle', 'both'}`` or no ``label_space_bundle_fn``).
+    """
+    entry = get_catalog_entry(pipe_name)
+    if entry is None or entry.label_source not in ("bundle", "both"):
+        return None
+    if entry.label_space_bundle_fn is None:
+        return None
+    fn = _import_dotted(entry.label_space_bundle_fn)
+    return fn()
+
+
+def resolve_dynamic_options(source: str) -> list[str] | None:
+    """Look up a ``ui_options_source`` token across all catalog entries.
+
+    Returns the resolver's output (``list[str]``) or ``None`` if no entry
+    declares this source.  Falls back to ``None`` if the resolver raises.
+    """
+    for entry in _CATALOG:
+        dotted = entry.dynamic_options_fns.get(source)
+        if dotted is None:
+            continue
+        try:
+            fn = _import_dotted(dotted)
+            return fn()
+        except Exception:
+            return None
+    return None
+
+
+def pipe_dependencies(pipe_name: str, config: dict[str, Any] | None) -> list[str]:
+    """Return missing-dependency tags for a single pipe given its config.
+
+    Each tag is a string like ``"model:foo"``.  Empty list means the pipe
+    has no declared dependency check or all dependencies resolve.
+    """
+    entry = get_catalog_entry(pipe_name)
+    if entry is None or entry.dependencies_fn is None:
+        return []
+    try:
+        fn = _import_dotted(entry.dependencies_fn)
+        return list(fn(config or {}))
+    except Exception as exc:
+        return [f"dependency_check_error:{pipe_name}:{exc}"]
 
 
 def pipe_availability() -> list[dict[str, Any]]:
@@ -277,6 +370,8 @@ def pipe_availability() -> list[dict[str, Any]]:
             "ready": ready,
             "ready_details": ready_details,
             "base_labels": base_labels,
+            "label_source": entry.label_source,
+            "bundle_key_semantics": entry.bundle_key_semantics,
             "deprecated": entry.deprecated,
         })
     return out

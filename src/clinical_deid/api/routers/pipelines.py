@@ -6,8 +6,7 @@ all operate on the filesystem — no database.
 
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
@@ -16,7 +15,7 @@ from clinical_deid.api.schemas import (
     ComputeLabelsRequest,
     ComputeLabelsResponse,
     CreatePipelineRequest,
-    NeuronerLabelSpaceBundle,
+    LabelSpaceBundle,
     NerBuiltinInfo,
     ParseListFileResult,
     ParseListFilesResponse,
@@ -35,7 +34,14 @@ from clinical_deid.pipeline_store import (
 )
 from clinical_deid.dictionary_store import DictionaryStore
 from clinical_deid.pipes.regex_ner import builtin_regex_label_names
-from clinical_deid.pipes.registry import compute_base_labels, load_pipeline, pipe_availability, registered_pipes
+from clinical_deid.pipes.registry import (
+    compute_base_labels,
+    get_label_space_bundle,
+    load_pipeline,
+    pipe_availability,
+    registered_pipes,
+    resolve_dynamic_options,
+)
 from clinical_deid.pipes.ui_schema import pipe_config_json_schema
 from clinical_deid.pipes.whitelist.lists import parse_list_file
 
@@ -150,27 +156,20 @@ def _inject_dict_info(config_schema: dict) -> None:
             ]
 
 
-_OPTIONS_SOURCE_RESOLVERS: dict[str, Any] = {
-    "neuroner_models": lambda: sorted(
-        p.name for p in Path("models/neuroner").resolve().iterdir() if p.is_dir()
-    )
-    if Path("models/neuroner").resolve().is_dir()
-    else [],
-}
-
-
 def _inject_dynamic_options(config_schema: dict) -> None:
-    """Populate ``enum`` for properties that declare a ``ui_options_source``."""
+    """Populate ``enum`` for properties that declare a ``ui_options_source``.
+
+    Resolvers are looked up via the catalog (``PipeCatalogEntry.dynamic_options_fns``)
+    so each pipe owns its own option sources — no central registry to update when
+    adding a new detector.
+    """
     for prop in config_schema.get("properties", {}).values():
         if not isinstance(prop, dict):
             continue
         source = prop.get("ui_options_source")
         if not source:
             continue
-        resolver = _OPTIONS_SOURCE_RESOLVERS.get(source)
-        if resolver is None:
-            continue
-        options = resolver()
+        options = resolve_dynamic_options(source)
         if options:
             prop["enum"] = options
 
@@ -178,71 +177,38 @@ def _inject_dynamic_options(config_schema: dict) -> None:
 @router.post(
     "/pipe-types/{name}/labels",
     response_model=ComputeLabelsResponse,
-    response_model_exclude_none=True,
 )
 def compute_pipe_labels(name: str, body: ComputeLabelsRequest | None = None) -> ComputeLabelsResponse:
     """Compute the effective base labels for a pipe type given optional config.
 
-    For NeuroNER, ``labels`` are **post-``entity_map``** names (what ``label_mapping`` keys use).
-    ``neuroner_manifest_labels`` are the raw tags from ``model_manifest.json`` for comparison.
+    Returns post-``entity_map`` canonical labels (the keys of ``label_mapping``).  For
+    detectors with ``label_source == 'bundle'``, prefer the bundle endpoint instead —
+    it lets the client switch models without a server round-trip.
     """
     config = body.config if body else None
     labels = compute_base_labels(name, config)
-    neuroner_model: str | None = None
-    neuroner_manifest_labels: list[str] | None = None
-    if name == "neuroner_ner":
-        from clinical_deid.config import get_settings
-        from clinical_deid.models import get_model
-        from clinical_deid.pipes.neuroner_ner.pipe import NeuroNerConfig
-
-        cfg = NeuroNerConfig.model_validate(config or {})
-        neuroner_model = cfg.model
-        try:
-            info = get_model(get_settings().models_dir, cfg.model)
-            if info.framework == "neuroner" and info.labels:
-                neuroner_manifest_labels = sorted(info.labels)
-        except (KeyError, ValueError, OSError):
-            pass
-    return ComputeLabelsResponse(
-        labels=labels,
-        neuroner_model=neuroner_model,
-        neuroner_manifest_labels=neuroner_manifest_labels,
-    )
+    return ComputeLabelsResponse(labels=labels)
 
 
 @router.get(
-    "/pipe-types/neuroner_ner/label-space-bundle",
-    response_model=NeuronerLabelSpaceBundle,
+    "/pipe-types/{name}/label-space-bundle",
+    response_model=LabelSpaceBundle,
 )
-def neuroner_label_space_bundle() -> NeuronerLabelSpaceBundle:
-    """Return manifest labels for every NeuroNER model plus the default ``entity_map``.
+def pipe_label_space_bundle(name: str) -> LabelSpaceBundle:
+    """Return the per-model label space for a detector that declares ``label_source = bundle``.
 
-    The playground uses this once per session so changing ``model`` does not require another request.
+    The catalog routes the request to that pipe's ``label_space_bundle_fn``.  The
+    response shape is identical for every detector — frontend reads
+    ``PipeTypeInfo.bundle_key_semantics`` to know whether keys are raw NER tags
+    or Presidio entity names.
     """
-    from clinical_deid.models import list_models
-    from clinical_deid.pipes.neuroner_ner.pipe import DEFAULT_ENTITY_MAP, NeuroNerConfig
-
-    labels_by_model: dict[str, list[str]] = {}
-    for info in list_models(get_settings().models_dir, framework="neuroner"):
-        labels_by_model[info.name] = sorted(info.labels)
-    cfg = NeuroNerConfig()
-    return NeuronerLabelSpaceBundle(
-        labels_by_model=labels_by_model,
-        default_entity_map=dict(DEFAULT_ENTITY_MAP),
-        default_model=cfg.model,
-    )
-
-
-@router.get(
-    "/pipe-types/presidio_ner/label-space-bundle",
-    response_model=NeuronerLabelSpaceBundle,
-)
-def presidio_label_space_bundle() -> NeuronerLabelSpaceBundle:
-    """Per known Presidio backend model: ``entity_map`` keys + default map (same shape as NeuroNER)."""
-    from clinical_deid.pipes.presidio_ner.pipe import build_presidio_label_space_bundle
-
-    data = build_presidio_label_space_bundle()
-    return NeuronerLabelSpaceBundle(**data)
+    bundle = get_label_space_bundle(name)
+    if bundle is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"pipe {name!r} does not expose a label-space bundle",
+        )
+    return LabelSpaceBundle(**bundle)
 
 
 @router.get("/ner/builtins", response_model=NerBuiltinInfo)

@@ -33,6 +33,8 @@ interface SpanEditorProps {
   /** Same-range label overlaps (client-detected). */
   conflictSets?: SpanConflictSet[];
   onResolveConflict?: (kept: PHISpanResponse) => void;
+  /** Drop every candidate at the conflicting range — user decided no label applies here. */
+  onDropConflict?: (range: { start: number; end: number }) => void;
   /** Greedy merge using label priority (same idea as ``resolve_spans`` / ``label_priority``). */
   onQuickResolveLabelPriority?: () => void;
   /** Commit current spans and regenerate the Output pane via ``/process/redact``. */
@@ -54,9 +56,11 @@ export default function SpanEditor({
   onActiveSpanKeyChange = () => {},
   conflictSets = [],
   onResolveConflict,
+  onDropConflict,
   onQuickResolveLabelPriority,
   onUpdateOutput,
 }: SpanEditorProps) {
+  const DROP_ALL_CHOICE = '__drop_all__';
   const [collapsedLabels, setCollapsedLabels] = useState<Set<string>>(new Set());
   const [collapsedConflicts, setCollapsedConflicts] = useState(false);
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
@@ -157,7 +161,13 @@ export default function SpanEditor({
   const confirmConflictResolution = (cs: SpanConflictSet) => {
     const rk = spanRangeKey(cs.start, cs.end);
     const key = conflictChoice[rk];
-    if (!key || !onResolveConflict) return;
+    if (!key) return;
+    if (key === DROP_ALL_CHOICE) {
+      if (!onDropConflict) return;
+      onDropConflict({ start: cs.start, end: cs.end });
+      return;
+    }
+    if (!onResolveConflict) return;
     const kept = cs.spans.find((s) => phiSpanKey(s) === key);
     if (!kept) return;
     onResolveConflict(kept);
@@ -325,15 +335,45 @@ export default function SpanEditor({
                           </label>
                         );
                       })}
+                      {onDropConflict && (
+                        <label className="flex cursor-pointer items-start gap-2 text-[10px] text-gray-700">
+                          <input
+                            type="radio"
+                            name={`conflict-${rk}`}
+                            className="mt-0.5"
+                            checked={conflictChoice[rk] === DROP_ALL_CHOICE}
+                            onChange={() =>
+                              setConflictChoice((prev) => ({
+                                ...prev,
+                                [rk]: DROP_ALL_CHOICE,
+                              }))
+                            }
+                          />
+                          <span className="text-red-700">
+                            <span className="font-semibold">Keep none</span>
+                            <span className="text-gray-500"> (drop every span at this range)</span>
+                          </span>
+                        </label>
+                      )}
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => confirmConflictResolution(cs)}
-                      disabled={!onResolveConflict}
-                      className="mt-2 w-full rounded bg-amber-600 px-2 py-1.5 text-[10px] font-medium text-white hover:bg-amber-700 disabled:opacity-40"
-                    >
-                      Confirm resolution
-                    </button>
+                    {(() => {
+                      const dropMode = conflictChoice[rk] === DROP_ALL_CHOICE;
+                      return (
+                        <button
+                          type="button"
+                          onClick={() => confirmConflictResolution(cs)}
+                          disabled={dropMode ? !onDropConflict : !onResolveConflict}
+                          className={clsx(
+                            'mt-2 w-full rounded px-2 py-1.5 text-[10px] font-medium text-white disabled:opacity-40',
+                            dropMode
+                              ? 'bg-red-600 hover:bg-red-700'
+                              : 'bg-amber-600 hover:bg-amber-700',
+                          )}
+                        >
+                          {dropMode ? 'Drop spans' : 'Confirm resolution'}
+                        </button>
+                      );
+                    })()}
                   </div>
                 );
               })}
