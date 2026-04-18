@@ -3,15 +3,14 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 from pydantic import BaseModel
 
 from clinical_deid.config import get_settings
+from clinical_deid.deploy_health import pipeline_missing_deps
 from clinical_deid.mode_config import DEFAULT_MODES_PATH, DeployConfig, ModeEntry, load_mode_config, save_mode_config
 from clinical_deid.pipeline_store import list_pipelines, load_pipeline_config
-from clinical_deid.pipes.registry import pipe_availability, pipe_dependencies
 
 router = APIRouter(prefix="/deploy", tags=["deploy"])
 
@@ -77,28 +76,6 @@ def get_deploy_config() -> DeployConfigResponse:
     )
 
 
-def _pipeline_missing_deps(config: dict[str, Any]) -> list[str]:
-    """Return missing dependency tags for a pipeline config.
-
-    Each ``pipes`` entry is checked for: registration, install/ready status, and
-    any per-pipe dependency hook declared on the catalog (``dependencies_fn``).
-    Returns tags like ``"pipe:foo"`` (uninstalled / not ready) and
-    ``"model:bar"`` (declared by the pipe's own dependency check).
-    """
-    avail = {entry["name"]: entry for entry in pipe_availability()}
-    missing: list[str] = []
-    for pipe in config.get("pipes", []) or []:
-        pipe_type = pipe.get("type")
-        if not pipe_type:
-            continue
-        info = avail.get(pipe_type)
-        if info is None or not info.get("installed") or not info.get("ready", True):
-            missing.append(f"pipe:{pipe_type}")
-            continue
-        missing.extend(pipe_dependencies(pipe_type, pipe.get("config") or {}))
-    return missing
-
-
 @router.get("/health", response_model=DeployHealthResponse)
 def get_deploy_health() -> DeployHealthResponse:
     """Report per-mode availability so the UI can gray out broken modes.
@@ -112,7 +89,7 @@ def get_deploy_health() -> DeployHealthResponse:
     for name, entry in cfg.modes.items():
         try:
             pipeline_cfg = load_pipeline_config(pipelines_dir, entry.pipeline)
-            missing = _pipeline_missing_deps(pipeline_cfg)
+            missing = pipeline_missing_deps(pipeline_cfg)
         except FileNotFoundError:
             missing = [f"pipeline:{entry.pipeline}"]
         out.append(

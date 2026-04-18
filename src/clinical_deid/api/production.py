@@ -45,7 +45,8 @@ from clinical_deid.api.schemas import (
 )
 from clinical_deid.config import get_settings
 from clinical_deid.db import init_db
-from clinical_deid.mode_config import ModeConfig, ModeEntry, load_mode_config
+from clinical_deid.deploy_health import mode_missing_deps
+from clinical_deid.mode_config import ModeConfig, load_mode_config
 from clinical_deid.pipeline_store import list_pipelines, load_pipeline_config
 
 logger = logging.getLogger("clinical_deid.production")
@@ -56,9 +57,19 @@ logger = logging.getLogger("clinical_deid.production")
 
 
 class ModeInfo(BaseModel):
+    """Mode descriptor with runtime availability.
+
+    ``available`` is ``False`` when the backing pipeline file is missing or one
+    of its pipes has unmet dependencies (uninstalled optional extras, missing
+    models, etc.).  ``missing`` lists the dependency tags so the UI can
+    explain why a mode is disabled.
+    """
+
     name: str
     pipeline: str
     description: str = ""
+    available: bool = True
+    missing: list[str] = Field(default_factory=list)
 
 
 class ModesResponse(BaseModel):
@@ -106,15 +117,26 @@ def _resolve_pipeline(target: str) -> str:
 
 @router.get("/modes", response_model=ModesResponse)
 def list_modes() -> ModesResponse:
-    """List configured inference modes and their backing pipelines."""
+    """List configured inference modes with per-mode availability.
+
+    ``available``/``missing`` let the UI gray out modes whose pipeline file is
+    absent or whose pipes have unmet dependencies.
+    """
     cfg = _mode_config
-    return ModesResponse(
-        modes=[
-            ModeInfo(name=name, pipeline=entry.pipeline, description=entry.description)
-            for name, entry in sorted(cfg.modes.items())
-        ],
-        default_mode=cfg.default_mode,
-    )
+    pipelines_dir = get_settings().pipelines_dir
+    modes: list[ModeInfo] = []
+    for name, entry in sorted(cfg.modes.items()):
+        missing = mode_missing_deps(cfg, pipelines_dir, name)
+        modes.append(
+            ModeInfo(
+                name=name,
+                pipeline=entry.pipeline,
+                description=entry.description,
+                available=not missing,
+                missing=missing,
+            )
+        )
+    return ModesResponse(modes=modes, default_mode=cfg.default_mode)
 
 
 # -- Pipelines (read-only) -------------------------------------------------

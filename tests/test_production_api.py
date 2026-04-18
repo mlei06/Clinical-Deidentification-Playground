@@ -76,6 +76,44 @@ def test_list_modes(prod_client):
     names = [m["name"] for m in data["modes"]]
     assert "fast" in names
     assert "accurate" in names
+    # Every mode ships availability info so the UI can gray out broken ones.
+    for m in data["modes"]:
+        assert "available" in m
+        assert "missing" in m
+    # Both modes back onto test-regex (regex_ner + resolve_spans) which is
+    # always installed, so they should both report available.
+    by_name = {m["name"]: m for m in data["modes"]}
+    assert by_name["fast"]["available"] is True
+    assert by_name["fast"]["missing"] == []
+
+
+def test_list_modes_marks_broken_mode_unavailable(prod_client, tmp_path):
+    """A mode whose pipeline file is missing reports ``available=False``."""
+    # The fixture already created a pipelines/ dir. Point a new modes.json at
+    # a non-existent pipeline and reload.
+    import json
+
+    modes = {
+        "modes": {
+            "fast": {"pipeline": "test-regex", "description": "ok"},
+            "ghost": {"pipeline": "nope", "description": "missing pipeline"},
+        },
+        "default_mode": "fast",
+    }
+    modes_path = tmp_path / "modes_broken.json"
+    modes_path.write_text(json.dumps(modes))
+
+    from clinical_deid.api.production import create_production_app
+
+    app = create_production_app(modes_path=str(modes_path))
+    from fastapi.testclient import TestClient
+
+    with TestClient(app) as tc:
+        resp = tc.get("/modes")
+        assert resp.status_code == 200
+        by_name = {m["name"]: m for m in resp.json()["modes"]}
+        assert by_name["ghost"]["available"] is False
+        assert any(tag.startswith("pipeline:") for tag in by_name["ghost"]["missing"])
 
 
 # -- Pipelines (read-only) -------------------------------------------------
