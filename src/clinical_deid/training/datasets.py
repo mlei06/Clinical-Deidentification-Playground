@@ -1,0 +1,205 @@
+"""AnnotatedDocument → HF Dataset + label alignment."""
+
+from __future__ import annotations
+
+import logging
+import random
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Iterable
+
+from clinical_deid.domain import AnnotatedDocument, PHISpan
+
+if TYPE_CHECKING:
+    import datasets as hf_datasets
+    from transformers import PreTrainedTokenizerFast
+
+    from clinical_deid.training.config import TrainingConfig
+
+logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Label derivation
+# ---------------------------------------------------------------------------
+
+
+def derive_label_list(
+    docs: Iterable[AnnotatedDocument],
+    override: list[str] | None,
+) -> list[str]:
+    """Return ordered BIO list [O, B-L1, I-L1, B-L2, I-L2, ...].
+
+    O is always index 0. Labels are sorted for determinism.
+    """
+    if override is not None:
+        canonical = sorted(override)
+    else:
+        found: set[str] = set()
+        for doc in docs:
+            for span in doc.spans:
+                found.add(span.label)
+        canonical = sorted(found)
+
+    bio: list[str] = ["O"]
+    for label in canonical:
+        bio.append(f"B-{label}")
+        bio.append(f"I-{label}")
+    return bio
+
+
+# ---------------------------------------------------------------------------
+# Subword alignment
+# ---------------------------------------------------------------------------
+
+
+def _find_covering_span(tok_start: int, spans: list[PHISpan]) -> PHISpan | None:
+    """Return the longest span that covers tok_start, or None."""
+    best: PHISpan | None = None
+    for span in spans:
+        if span.start <= tok_start < span.end:
+            if best is None or (span.end - span.start) > (best.end - best.start):
+                best = span
+    return best
+
+
+def tokenize_and_align(
+    doc: AnnotatedDocument,
+    tokenizer: "PreTrainedTokenizerFast",
+    bio_label_to_id: dict[str, int],
+    max_length: int,
+) -> dict[str, list[int]]:
+    """Return {input_ids, attention_mask, labels} with subword-aligned labels.
+
+    Algorithm (word-level, using fast tokenizer word_ids()):
+    - Special tokens (word_id is None) → -100
+    - Continuation subwords (same word_id as previous token) → -100
+    - First subword of each word:
+        - No span covers the word → O
+        - Span covers the word and word starts at/before span.start → B-<label>
+        - Span covers the word and word starts after span.start → I-<label>
+    """
+    from clinical_deid.training.errors import SlowTokenizerUnsupported
+
+    if not tokenizer.is_fast:
+        raise SlowTokenizerUnsupported(
+            f"{tokenizer.__class__.__name__} is not a fast tokenizer. "
+            "Only fast tokenizers (which expose word_ids()) are supported."
+        )
+
+    text = doc.document.text
+    spans = sorted(doc.spans, key=lambda s: (s.start, -(s.end - s.start)))
+
+    enc = tokenizer(
+        text,
+        truncation=True,
+        max_length=max_length,
+        return_offsets_mapping=True,
+    )
+
+    word_ids: list[int | None] = enc.word_ids()
+    offset_mapping: list[tuple[int, int]] = enc["offset_mapping"]
+
+    if len(enc["input_ids"]) == max_length:
+        logger.warning(
+            "Document %r was truncated at %d tokens; tail may have lost entity labels.",
+            doc.document.id,
+            max_length,
+        )
+
+    label_ids: list[int] = []
+    prev_word_id: int | None = None
+    o_id = bio_label_to_id.get("O", 0)
+
+    for i, word_id in enumerate(word_ids):
+        if word_id is None:
+            label_ids.append(-100)
+        elif word_id == prev_word_id:
+            # Continuation subword of the same original word → loss ignored
+            label_ids.append(-100)
+        else:
+            # First subword of a new original word
+            tok_start, _tok_end = offset_mapping[i]
+            covering = _find_covering_span(tok_start, spans)
+
+            if covering is None:
+                label_ids.append(o_id)
+            elif tok_start <= covering.start:
+                # This word starts at or before the span start → first word of span
+                label_ids.append(bio_label_to_id.get(f"B-{covering.label}", o_id))
+            else:
+                # This word is inside the span but not the first word
+                label_ids.append(bio_label_to_id.get(f"I-{covering.label}", o_id))
+
+        prev_word_id = word_id
+
+    return {
+        "input_ids": enc["input_ids"],
+        "attention_mask": enc["attention_mask"],
+        "labels": label_ids,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Dataset builder
+# ---------------------------------------------------------------------------
+
+
+def build_hf_datasets(
+    cfg: "TrainingConfig",
+    datasets_dir: Path,
+    tokenizer: "PreTrainedTokenizerFast",
+) -> "tuple[hf_datasets.Dataset, hf_datasets.Dataset | None, list[str]]":
+    """Return (train_ds, eval_ds_or_None, bio_labels).
+
+    Loads documents, derives label space, tokenizes everything.
+    """
+    import datasets as hf_datasets
+
+    from clinical_deid.dataset_store import load_dataset_documents
+    from clinical_deid.training.errors import EmptyDataset, NoLabelsFound
+
+    # Load documents
+    train_docs = load_dataset_documents(datasets_dir, cfg.train_dataset)
+    if not train_docs:
+        raise EmptyDataset(f"Dataset {cfg.train_dataset!r} has no documents.")
+
+    eval_docs: list[AnnotatedDocument] | None = None
+
+    if cfg.eval_dataset is not None:
+        eval_docs = load_dataset_documents(datasets_dir, cfg.eval_dataset)
+        if cfg.eval_fraction is not None:
+            logger.warning(
+                "Both eval_dataset and eval_fraction are set; using eval_dataset and ignoring eval_fraction."
+            )
+    elif cfg.eval_fraction is not None:
+        rng = random.Random(cfg.hyperparams.seed)
+        shuffled = list(train_docs)
+        rng.shuffle(shuffled)
+        split = int(len(shuffled) * (1.0 - cfg.eval_fraction))
+        train_docs = shuffled[:split]
+        eval_docs = shuffled[split:]
+        if not train_docs:
+            raise EmptyDataset("After eval_fraction split, train set is empty.")
+
+    # Derive label space from all available documents
+    all_docs: list[AnnotatedDocument] = list(train_docs)
+    if eval_docs:
+        all_docs.extend(eval_docs)
+
+    bio_labels = derive_label_list(all_docs, cfg.labels)
+    if bio_labels == ["O"]:
+        raise NoLabelsFound(
+            "No PHI labels found in the dataset. "
+            "Ensure the dataset has annotated spans before training."
+        )
+
+    bio_label_to_id: dict[str, int] = {label: i for i, label in enumerate(bio_labels)}
+    max_length = cfg.hyperparams.max_length
+
+    def _encode(docs: list[AnnotatedDocument]) -> list[dict[str, Any]]:
+        return [tokenize_and_align(doc, tokenizer, bio_label_to_id, max_length) for doc in docs]
+
+    train_ds = hf_datasets.Dataset.from_list(_encode(train_docs))
+    eval_ds = hf_datasets.Dataset.from_list(_encode(eval_docs)) if eval_docs else None
+
+    return train_ds, eval_ds, bio_labels

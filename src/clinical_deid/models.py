@@ -29,6 +29,13 @@ class ModelInfo:
     metrics: dict[str, Any] = field(default_factory=dict)
     device: str = "cpu"
     created_at: str | None = None
+    # v2 fields — all optional; absent on v1 manifests
+    schema_version: int | None = None
+    parent_model: str | None = None
+    tokenizer: str | None = None
+    has_crf: bool = False
+    training_config: dict[str, Any] | None = None
+    training_meta: dict[str, Any] = field(default_factory=dict)
 
 
 def _load_manifest(manifest_path: Path) -> ModelInfo:
@@ -69,6 +76,12 @@ def _load_manifest(manifest_path: Path) -> ModelInfo:
         metrics=raw.get("metrics", {}),
         device=raw.get("device", "cpu"),
         created_at=raw.get("created_at"),
+        schema_version=raw.get("schema_version"),
+        parent_model=raw.get("parent_model"),
+        tokenizer=raw.get("tokenizer"),
+        has_crf=raw.get("has_crf", False),
+        training_config=raw.get("training_config"),
+        training_meta=raw.get("training", {}),
     )
 
 

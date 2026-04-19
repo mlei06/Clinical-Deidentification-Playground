@@ -45,9 +45,16 @@ llm = [
 parquet = [
     "pyarrow>=14.0.0",
 ]
+train = [
+    "transformers>=4.44.0",
+    "torch>=2.2.0",
+    "datasets>=2.20.0",
+    "seqeval>=1.2.2",
+    "accelerate>=0.33.0",
+]
 # Everything
 all = [
-    "clinical-deid-playground[dev,presidio,ner,llm,parquet]",
+    "clinical-deid-playground[dev,presidio,ner,llm,parquet,train]",
 ]
 
 [project.scripts]
@@ -63,6 +70,9 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+markers = [
+    "train: requires the [train] extra (transformers, torch, datasets, seqeval)",
+]
 
 [tool.ruff]
 target-version = "py311"
