@@ -1,0 +1,38 @@
+{
+  "name": "physionet-test",
+  "description": "PhysioNet de-identified nursing notes — test split (366 docs)",
+  "data_path": "/mnt/c/Users/zglei-test/vsee/Clinical-Deidentification-Playground/data/corpora/physionet-brat/test",
+  "format": "brat-dir",
+  "document_count": 366,
+  "total_spans": 276,
+  "labels": [
+    "AGE",
+    "CITY",
+    "DATE",
+    "HOSPITAL",
+    "NAME",
+    "ORGANIZATION",
+    "PHONE",
+    "PROFESSION",
+    "STATE"
+  ],
+  "analytics": {
+    "document_count": 366,
+    "total_spans": 276,
+    "unique_label_count": 9,
+    "label_counts": {
+      "NAME": 95,
+      "DATE": 81,
+      "LOCATION": 36,
+      "HOSPITAL": 25,
+      "AGE": 19,
+      "PHONE": 8,
+      "CITY": 5,
+      "PROFESSION": 3,
+      "STATE": 3,
+      "ORGANIZATION": 1
+    }
+  },
+  "metadata": {},
+  "created_at": "2026-04-19T00:00:00.000000+00:00"
+}

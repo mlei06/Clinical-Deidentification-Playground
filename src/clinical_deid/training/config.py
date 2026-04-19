@@ -30,10 +30,12 @@ class TrainingHyperparams(BaseModel):
 class TrainingConfig(BaseModel):
     base_model: str
     train_dataset: str
+    extra_train_datasets: list[str] = Field(default_factory=list)
     eval_dataset: str | None = None
     eval_fraction: float | None = None
     output_name: str
     labels: list[str] | None = None
+    label_remap: dict[str, str] | None = None
     freeze_encoder: bool = False
     hyperparams: TrainingHyperparams = Field(default_factory=TrainingHyperparams)
     device: str | None = None  # None → auto-detect: cuda→mps→cpu
@@ -57,4 +59,10 @@ class TrainingConfig(BaseModel):
                 raise ValueError("'O' is implicit and must not appear in labels")
         if self.eval_fraction is not None and not (0.0 < self.eval_fraction < 1.0):
             raise ValueError("eval_fraction must be in (0, 1)")
+        if self.label_remap is not None:
+            for src, tgt in self.label_remap.items():
+                if not src.strip() or not tgt.strip():
+                    raise ValueError("label_remap keys and values must be non-empty")
+                if src == "O" or tgt == "O":
+                    raise ValueError("'O' cannot appear in label_remap")
         return self

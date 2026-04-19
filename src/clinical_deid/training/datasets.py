@@ -140,6 +140,20 @@ def tokenize_and_align(
 
 
 # ---------------------------------------------------------------------------
+# Label remapping
+# ---------------------------------------------------------------------------
+
+
+def _remap_doc(doc: AnnotatedDocument, remap: dict[str, str]) -> AnnotatedDocument:
+    """Return a new AnnotatedDocument with span labels rewritten via remap."""
+    new_spans = [
+        PHISpan(start=s.start, end=s.end, label=remap.get(s.label, s.label))
+        for s in doc.spans
+    ]
+    return AnnotatedDocument(document=doc.document, spans=new_spans)
+
+
+# ---------------------------------------------------------------------------
 # Dataset builder
 # ---------------------------------------------------------------------------
 
@@ -163,6 +177,14 @@ def build_hf_datasets(
     if not train_docs:
         raise EmptyDataset(f"Dataset {cfg.train_dataset!r} has no documents.")
 
+    for extra_name in cfg.extra_train_datasets:
+        extra = load_dataset_documents(datasets_dir, extra_name)
+        if not extra:
+            logger.warning("Extra train dataset %r has no documents; skipping.", extra_name)
+        else:
+            train_docs = list(train_docs) + extra
+            logger.info("Merged %d docs from extra train dataset %r.", len(extra), extra_name)
+
     eval_docs: list[AnnotatedDocument] | None = None
 
     if cfg.eval_dataset is not None:
@@ -180,6 +202,12 @@ def build_hf_datasets(
         eval_docs = shuffled[split:]
         if not train_docs:
             raise EmptyDataset("After eval_fraction split, train set is empty.")
+
+    # Apply label remap to all docs before deriving label space
+    if cfg.label_remap:
+        train_docs = [_remap_doc(doc, cfg.label_remap) for doc in train_docs]
+        if eval_docs:
+            eval_docs = [_remap_doc(doc, cfg.label_remap) for doc in eval_docs]
 
     # Derive label space from all available documents
     all_docs: list[AnnotatedDocument] = list(train_docs)

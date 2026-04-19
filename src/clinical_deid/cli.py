@@ -1050,6 +1050,8 @@ def _models_dir():
 @train.command(name="run")
 @click.option("--base", "base_model", required=False, default=None, help="HF Hub id or 'local:<name>'.")
 @click.option("--train-dataset", required=False, default=None, help="Registered dataset name.")
+@click.option("--extra-train-dataset", "extra_train_datasets", multiple=True,
+              help="Additional dataset(s) to merge into training (repeatable).")
 @click.option("--output", "output_name", required=False, default=None, help="Output model name.")
 @click.option("--eval-dataset", default=None, help="Separate eval dataset name.")
 @click.option("--eval-fraction", type=float, default=None, help="Fraction of train set to use for eval.")
@@ -1065,6 +1067,7 @@ def _models_dir():
 def train_run(
     base_model: str | None,
     train_dataset: str | None,
+    extra_train_datasets: tuple[str, ...],
     output_name: str | None,
     eval_dataset: str | None,
     eval_fraction: float | None,
@@ -1100,16 +1103,9 @@ def train_run(
     from clinical_deid.training.runner import run_training
 
     if config_path is not None:
-        flag_overrides = {
-            k: v for k, v in {
-                "base_model": base_model,
-                "train_dataset": train_dataset,
-                "output_name": output_name,
-            }.items()
-            if v is not None
-        }
         if any([eval_dataset, eval_fraction, epochs, learning_rate,
-                per_device_train_batch_size, max_length, freeze_encoder, device, overwrite]):
+                per_device_train_batch_size, max_length, freeze_encoder, device, overwrite,
+                extra_train_datasets]):
             click.echo("Error: --config cannot be combined with other flags.", err=True)
             raise SystemExit(1)
         raw = json.loads(Path(config_path).read_text(encoding="utf-8"))
@@ -1140,6 +1136,7 @@ def train_run(
             cfg = TrainingConfig(
                 base_model=base_model,
                 train_dataset=train_dataset,
+                extra_train_datasets=list(extra_train_datasets),
                 output_name=output_name,
                 eval_dataset=eval_dataset,
                 eval_fraction=eval_fraction,
