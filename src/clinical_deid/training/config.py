@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -38,6 +39,7 @@ class TrainingConfig(BaseModel):
     labels: list[str] | None = None
     label_remap: dict[str, str] | None = None
     freeze_encoder: bool = False
+    segmentation: Literal["truncate", "sentence"] = "truncate"
     hyperparams: TrainingHyperparams = Field(default_factory=TrainingHyperparams)
     device: str | None = None  # None → auto-detect: cuda→mps→cpu
     overwrite: bool = False

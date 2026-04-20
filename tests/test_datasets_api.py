@@ -326,6 +326,74 @@ def test_transform_missing_source(client):
     assert resp.status_code == 404
 
 
+def test_dataset_schema_endpoint(client, tmp_path):
+    jsonl = _write_sample_jsonl(tmp_path / "data" / "sample.jsonl")
+    client.post(
+        "/datasets",
+        json={"name": "schema-src", "data_path": str(jsonl), "format": "jsonl"},
+    )
+    resp = client.get("/datasets/schema-src/schema")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["dataset"] == "schema-src"
+    assert body["document_count"] == 5
+    by_label = {x["label"]: x["count"] for x in body["labels"]}
+    assert by_label["PERSON"] == 5
+    assert by_label["DATE"] == 5
+
+
+def test_transform_preview_endpoint(client, tmp_path):
+    jsonl = _write_sample_jsonl(tmp_path / "data" / "sample.jsonl", count=3)
+    client.post(
+        "/datasets",
+        json={"name": "pv-src", "data_path": str(jsonl), "format": "jsonl"},
+    )
+    resp = client.post(
+        "/datasets/transform/preview",
+        json={
+            "source_dataset": "pv-src",
+            "keep_labels": ["PERSON"],
+            "label_mapping": {"PERSON": "NAME"},
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    p = resp.json()
+    assert p["source_document_count"] == 3
+    assert p["spans_dropped_by_filter"] == 3  # DATE dropped
+    assert p["spans_kept_after_filter"] == 3
+    assert p["spans_renamed"] == 3
+    assert "conflicts" in p
+    assert p["projected_document_count"] == 3
+
+    clash = client.post(
+        "/datasets/transform/preview",
+        json={
+            "source_dataset": "pv-src",
+            "drop_labels": ["PERSON"],
+            "label_mapping": {"PERSON": "PER"},
+        },
+    )
+    assert clash.status_code == 200
+    assert len(clash.json()["conflicts"]) >= 1
+
+
+def test_transform_preview_rejects_drop_and_keep(client, tmp_path):
+    jsonl = _write_sample_jsonl(tmp_path / "data" / "sample.jsonl", count=2)
+    client.post(
+        "/datasets",
+        json={"name": "both-src", "data_path": str(jsonl), "format": "jsonl"},
+    )
+    resp = client.post(
+        "/datasets/transform/preview",
+        json={
+            "source_dataset": "both-src",
+            "drop_labels": ["DATE"],
+            "keep_labels": ["PERSON"],
+        },
+    )
+    assert resp.status_code == 422
+
+
 # ---------------------------------------------------------------------------
 # dataset_store unit tests
 # ---------------------------------------------------------------------------

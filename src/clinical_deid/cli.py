@@ -1061,6 +1061,10 @@ def _models_dir():
 @click.option("--batch-size", "per_device_train_batch_size", type=int, default=None)
 @click.option("--max-length", type=int, default=None)
 @click.option("--freeze-encoder", is_flag=True, default=False)
+@click.option("--segmentation", type=click.Choice(["truncate", "sentence"]), default=None,
+              help="How to split docs for training. 'truncate' (default) crops long "
+                   "docs at max-length; 'sentence' splits into sentences and trains "
+                   "one example per sentence.")
 @click.option("--device", default=None, help="cpu | cuda | cuda:N | mps")
 @click.option("--overwrite", is_flag=True, default=False)
 @click.option("--config", "config_path", type=click.Path(exists=True), default=None,
@@ -1078,6 +1082,7 @@ def train_run(
     per_device_train_batch_size: int | None,
     max_length: int | None,
     freeze_encoder: bool,
+    segmentation: str | None,
     device: str | None,
     overwrite: bool,
     config_path: str | None,
@@ -1106,8 +1111,8 @@ def train_run(
 
     if config_path is not None:
         if any([eval_dataset, eval_fraction, test_dataset, epochs, learning_rate,
-                per_device_train_batch_size, max_length, freeze_encoder, device, overwrite,
-                extra_train_datasets]):
+                per_device_train_batch_size, max_length, freeze_encoder, segmentation,
+                device, overwrite, extra_train_datasets]):
             click.echo("Error: --config cannot be combined with other flags.", err=True)
             raise SystemExit(1)
         raw = json.loads(Path(config_path).read_text(encoding="utf-8"))
@@ -1135,7 +1140,7 @@ def train_run(
             hp_overrides["max_length"] = max_length
 
         try:
-            cfg = TrainingConfig(
+            cfg_kwargs: dict = dict(
                 base_model=base_model,
                 train_dataset=train_dataset,
                 extra_train_datasets=list(extra_train_datasets),
@@ -1148,6 +1153,9 @@ def train_run(
                 overwrite=overwrite,
                 hyperparams=TrainingHyperparams(**hp_overrides) if hp_overrides else TrainingHyperparams(),
             )
+            if segmentation is not None:
+                cfg_kwargs["segmentation"] = segmentation
+            cfg = TrainingConfig(**cfg_kwargs)
         except Exception as exc:
             click.echo(f"Error: {exc}", err=True)
             raise SystemExit(1)

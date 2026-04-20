@@ -55,7 +55,11 @@ def run_training(
         ) from exc
 
     from clinical_deid.training.base_model import resolve_base_model
-    from clinical_deid.training.datasets import build_hf_datasets, tokenize_and_align
+    from clinical_deid.training.datasets import (
+        _prepare_training_units,
+        build_hf_datasets,
+        tokenize_and_align,
+    )
     from clinical_deid.training.errors import OutputExists, TrainingError
     from clinical_deid.training.manifest import write_manifest_v2
     from clinical_deid.training.metrics import build_metrics_report, make_compute_metrics
@@ -232,9 +236,10 @@ def run_training(
                 if cfg.label_remap:
                     from clinical_deid.training.datasets import _remap_doc
                     test_docs = [_remap_doc(doc, cfg.label_remap) for doc in test_docs]
+                test_units = _prepare_training_units(test_docs, cfg.segmentation)
                 test_encoded = [
-                    tokenize_and_align(doc, tokenizer, label2id, cfg.hyperparams.max_length)
-                    for doc in test_docs
+                    tokenize_and_align(unit, tokenizer, label2id, cfg.hyperparams.max_length)
+                    for unit in test_units
                 ]
                 import datasets as hf_datasets
                 test_ds = hf_datasets.Dataset.from_list(test_encoded)
@@ -298,6 +303,7 @@ def run_training(
             test_dataset=cfg.test_dataset,
             test_documents=test_doc_count,
             test_metrics=test_metrics,
+            segmentation=cfg.segmentation,
         )
 
         # Step 17: atomic promotion

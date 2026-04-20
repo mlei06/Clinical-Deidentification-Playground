@@ -32,6 +32,7 @@ def write_manifest_v2(
     test_dataset: str | None = None,
     test_documents: int = 0,
     test_metrics: dict[str, Any] | None = None,
+    segmentation: str = "truncate",
 ) -> Path:
     """Write model_manifest.json v2 and return the path."""
     manifest: dict[str, Any] = {
@@ -59,6 +60,7 @@ def write_manifest_v2(
             "train_runtime_sec": round(train_runtime_sec, 2),
             "bio_labels": bio_labels,
             "head_reinitialised": head_reinitialised,
+            "segmentation": segmentation,
         },
         "metrics": metrics,
         "test_metrics": test_metrics,

@@ -73,6 +73,22 @@ class CustomNerConfig(BaseModel):
             ui_widget="text",
         ),
     )
+    segmentation: Literal["auto", "truncate", "sentence"] = Field(
+        default="auto",
+        title="Segmentation",
+        description=(
+            "How to segment input for HuggingFace inference. 'auto' uses the "
+            "mode the model was trained with (from its manifest). 'sentence' "
+            "splits text into sentences and runs inference per sentence. "
+            "'truncate' runs one forward pass and truncates at the model's "
+            "context window."
+        ),
+        json_schema_extra=field_ui(
+            ui_group="Detection",
+            ui_order=5,
+            ui_widget="select",
+        ),
+    )
     label_mapping: dict[str, str | None] = DETECTOR_LABEL_MAPPING
 
 
@@ -99,6 +115,7 @@ def _resolve_model_path(model_name: str, framework: str | None) -> tuple[Path, d
         "framework": info.framework,
         "labels": info.labels,
         "device": info.device,
+        "trained_segmentation": info.training_meta.get("segmentation"),
     }
 
 
@@ -138,6 +155,31 @@ def _predict_spacy(
                 source=source,
             ))
     return spans
+
+
+def _resolve_segmentation_mode(
+    requested: str,
+    trained: str | None,
+    model_name: str,
+) -> str:
+    """Resolve the effective inference segmentation mode.
+
+    - ``auto`` → use the mode recorded in the manifest; default to ``truncate``
+      for older manifests that don't record it.
+    - explicit ``truncate``/``sentence`` → honored; log a warning when it
+      differs from the mode the model was trained with, since context
+      statistics at inference will not match training.
+    """
+    if requested == "auto":
+        return trained or "truncate"
+    if trained and trained != requested:
+        logger.warning(
+            "custom_ner: model %r was trained with segmentation=%r but "
+            "inference is configured with segmentation=%r. Context at "
+            "inference will differ from training.",
+            model_name, trained, requested,
+        )
+    return requested
 
 
 def _load_huggingface_model(model_path: Path, device: str) -> Any:
@@ -182,6 +224,40 @@ def _predict_huggingface(
     return spans
 
 
+def _predict_huggingface_by_sentence(
+    pipe: Any,
+    text: str,
+    threshold: float,
+    source: str,
+) -> list[PHISpan]:
+    """Run the HF NER pipeline per sentence, remapping offsets to doc coords."""
+    from clinical_deid.training.segmentation import sentence_offsets
+
+    bounds = sentence_offsets(text)
+    if not bounds:
+        return []
+
+    spans: list[PHISpan] = []
+    for sent_start, sent_end in bounds:
+        sub_text = text[sent_start:sent_end]
+        if not sub_text:
+            continue
+        results = pipe(sub_text)
+        for ent in results:
+            score = ent.get("score", 1.0)
+            if score < threshold:
+                continue
+            label = ent.get("entity_group") or ent.get("entity", "UNK")
+            spans.append(PHISpan(
+                start=ent["start"] + sent_start,
+                end=ent["end"] + sent_start,
+                label=label,
+                confidence=round(score, 4),
+                source=source,
+            ))
+    return spans
+
+
 # ---------------------------------------------------------------------------
 # Pipe
 # ---------------------------------------------------------------------------
@@ -199,6 +275,7 @@ class CustomNerPipe(ConfigurablePipe):
         self._model: Any = None
         self._manifest: dict[str, Any] | None = None
         self._framework: str | None = None
+        self._segmentation: str = "truncate"
 
     def _ensure_loaded(self) -> None:
         if self._model is not None:
@@ -215,6 +292,11 @@ class CustomNerPipe(ConfigurablePipe):
         elif self._framework == "huggingface":
             device = self._config.device or manifest.get("device", "cpu")
             self._model = _load_huggingface_model(model_path, device)
+            self._segmentation = _resolve_segmentation_mode(
+                self._config.segmentation,
+                manifest.get("trained_segmentation"),
+                self._config.model_name,
+            )
         else:
             raise ValueError(
                 f"Unsupported framework {self._framework!r} for custom_ner. "
@@ -251,7 +333,12 @@ class CustomNerPipe(ConfigurablePipe):
         if self._framework == "spacy":
             raw_spans = _predict_spacy(self._model, text, threshold, source)
         elif self._framework == "huggingface":
-            raw_spans = _predict_huggingface(self._model, text, threshold, source)
+            if self._segmentation == "sentence":
+                raw_spans = _predict_huggingface_by_sentence(
+                    self._model, text, threshold, source
+                )
+            else:
+                raw_spans = _predict_huggingface(self._model, text, threshold, source)
         else:
             raw_spans = []
 

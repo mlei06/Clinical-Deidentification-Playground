@@ -368,6 +368,43 @@ export interface TransformRequest {
   description?: string;
 }
 
+export interface DatasetLabelFrequency {
+  label: string;
+  count: number;
+}
+
+export interface DatasetSchemaResponse {
+  dataset: string;
+  document_count: number;
+  total_spans: number;
+  labels: DatasetLabelFrequency[];
+}
+
+export interface TransformPreviewRequest {
+  source_dataset: string;
+  drop_labels?: string[];
+  keep_labels?: string[];
+  label_mapping?: Record<string, string>;
+  target_documents?: number;
+  boost_label?: string;
+  boost_extra_copies?: number;
+  resplit?: Record<string, number>;
+  strip_splits?: boolean;
+  seed?: number;
+}
+
+export interface TransformPreviewResponse {
+  source_document_count: number;
+  source_span_count: number;
+  spans_dropped_by_filter: number;
+  spans_kept_after_filter: number;
+  spans_renamed: number;
+  projected_document_count: number;
+  projected_span_count: number;
+  split_document_counts: Record<string, number> | null;
+  conflicts: string[];
+}
+
 export interface GenerateRequest {
   output_name: string;
   count: number;

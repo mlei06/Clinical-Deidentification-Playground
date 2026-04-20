@@ -4,6 +4,7 @@ import type {
   RegisterDatasetRequest,
   ComposeRequest,
   TransformRequest,
+  TransformPreviewRequest,
   GenerateRequest,
   ExportTrainingRequest,
 } from '../api/types';
@@ -19,6 +20,14 @@ export function useDataset(name: string | null) {
   return useQuery({
     queryKey: ['datasets', name],
     queryFn: () => api.getDataset(name!),
+    enabled: !!name,
+  });
+}
+
+export function useDatasetSchema(name: string | null) {
+  return useQuery({
+    queryKey: ['datasets', name, 'schema'],
+    queryFn: () => api.getDatasetSchema(name!),
     enabled: !!name,
   });
 }
@@ -79,6 +88,12 @@ export function useTransformDataset() {
   return useMutation({
     mutationFn: (req: TransformRequest) => api.transformDataset(req),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['datasets'] }),
+  });
+}
+
+export function usePreviewTransform() {
+  return useMutation({
+    mutationFn: (req: TransformPreviewRequest) => api.previewTransform(req),
   });
 }
 

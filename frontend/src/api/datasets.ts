@@ -7,6 +7,9 @@ import type {
   RegisterDatasetRequest,
   ComposeRequest,
   TransformRequest,
+  TransformPreviewRequest,
+  TransformPreviewResponse,
+  DatasetSchemaResponse,
   GenerateRequest,
   ExportTrainingRequest,
   ExportTrainingResponse,
@@ -25,6 +28,10 @@ export function listDatasets(params?: {
 
 export function getDataset(name: string): Promise<DatasetDetail> {
   return apiFetch(`/datasets/${encodeURIComponent(name)}`);
+}
+
+export function getDatasetSchema(name: string): Promise<DatasetSchemaResponse> {
+  return apiFetch(`/datasets/${encodeURIComponent(name)}/schema`);
 }
 
 export function registerDataset(req: RegisterDatasetRequest): Promise<DatasetDetail> {
@@ -72,6 +79,15 @@ export function composeDatasets(req: ComposeRequest): Promise<DatasetDetail> {
 
 export function transformDataset(req: TransformRequest): Promise<DatasetDetail> {
   return apiFetch('/datasets/transform', { method: 'POST', body: JSON.stringify(req) });
+}
+
+export function previewTransform(
+  req: TransformPreviewRequest,
+): Promise<TransformPreviewResponse> {
+  return apiFetch('/datasets/transform/preview', {
+    method: 'POST',
+    body: JSON.stringify(req),
+  });
 }
 
 export function generateDataset(req: GenerateRequest): Promise<DatasetDetail> {

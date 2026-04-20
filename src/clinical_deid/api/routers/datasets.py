@@ -97,6 +97,49 @@ class TransformRequest(BaseModel):
     description: str = ""
 
 
+class TransformPreviewRequest(BaseModel):
+    """Dry-run the same transforms as ``TransformRequest`` (no write)."""
+
+    source_dataset: str
+    drop_labels: list[str] | None = None
+    keep_labels: list[str] | None = None
+    label_mapping: dict[str, str] | None = None
+    target_documents: int | None = None
+    boost_label: str | None = None
+    boost_extra_copies: int = 0
+    resplit: dict[str, float] | None = None
+    strip_splits: bool = False
+    seed: int = 42
+
+
+class DatasetLabelFrequency(BaseModel):
+    label: str
+    count: int
+
+
+class DatasetSchemaResponse(BaseModel):
+    """Unique span labels and counts for building transform UI controls."""
+
+    dataset: str
+    document_count: int
+    total_spans: int
+    labels: list[DatasetLabelFrequency]
+
+
+class TransformPreviewResponse(BaseModel):
+    """Summary counts for filter / mapping / projected corpus size."""
+
+    source_document_count: int
+    source_span_count: int
+    spans_dropped_by_filter: int
+    spans_kept_after_filter: int
+    spans_renamed: int
+    projected_document_count: int
+    projected_span_count: int
+    split_document_counts: dict[str, int] | None = None
+    conflicts: list[str] = Field(default_factory=list)
+
+
 class GenerateRequest(BaseModel):
     """Generate synthetic clinical notes via LLM and register as a dataset."""
 
@@ -232,6 +275,43 @@ def remove_dataset(name: str) -> None:
 # ---------------------------------------------------------------------------
 # Analytics & preview
 # ---------------------------------------------------------------------------
+
+
+@router.get("/{name}/schema", response_model=DatasetSchemaResponse)
+def get_dataset_schema(name: str) -> DatasetSchemaResponse:
+    """Return label frequencies for schema discovery (dropdowns, chips).
+
+    Uses cached manifest analytics when available; otherwise loads documents once
+    to compute ``label_counts``.
+    """
+    from clinical_deid.analytics.stats import compute_dataset_analytics
+
+    ds_dir = _datasets_dir()
+    try:
+        manifest = load_dataset_manifest(ds_dir, name)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    analytics_blob = manifest.get("analytics") or {}
+    label_counts: dict[str, int] = dict(analytics_blob.get("label_counts") or {})
+    if not label_counts and manifest.get("total_spans", 0) > 0:
+        try:
+            docs = load_dataset_documents(ds_dir, name)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to load dataset for schema: {exc}",
+            ) from exc
+        label_counts = dict(compute_dataset_analytics(docs).label_counts)
+
+    ordered = sorted(label_counts.items(), key=lambda x: (-x[1], x[0]))
+    labels = [DatasetLabelFrequency(label=k, count=v) for k, v in ordered]
+    return DatasetSchemaResponse(
+        dataset=name,
+        document_count=int(manifest.get("document_count", 0)),
+        total_spans=int(manifest.get("total_spans", 0)),
+        labels=labels,
+    )
 
 
 @router.post("/{name}/refresh", response_model=DatasetDetail)
@@ -426,6 +506,44 @@ def compose_datasets(body: ComposeRequest) -> DatasetDetail:
 # ---------------------------------------------------------------------------
 # Transform endpoint
 # ---------------------------------------------------------------------------
+
+
+@router.post("/transform/preview", response_model=TransformPreviewResponse)
+def preview_transform_dataset(body: TransformPreviewRequest) -> TransformPreviewResponse:
+    """Dry-run transform: span keep/drop/rename counts and projected corpus size."""
+    from clinical_deid.transform.ops import compute_transform_preview
+
+    ds_dir = _datasets_dir()
+    try:
+        docs = load_dataset_documents(ds_dir, body.source_dataset)
+    except FileNotFoundError:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Source dataset {body.source_dataset!r} not found",
+        ) from None
+    if not docs:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Source dataset {body.source_dataset!r} is empty",
+        )
+
+    try:
+        raw = compute_transform_preview(
+            docs,
+            drop_labels=body.drop_labels,
+            keep_labels=body.keep_labels,
+            label_mapping=body.label_mapping,
+            target_documents=body.target_documents,
+            boost_label=body.boost_label,
+            boost_extra_copies=body.boost_extra_copies,
+            resplit=body.resplit,
+            strip_splits=body.strip_splits,
+            seed=body.seed,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    return TransformPreviewResponse(**raw)
 
 
 @router.post("/transform", response_model=DatasetDetail, status_code=201)

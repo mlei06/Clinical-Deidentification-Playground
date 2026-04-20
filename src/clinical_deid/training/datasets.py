@@ -225,9 +225,47 @@ def build_hf_datasets(
     max_length = cfg.hyperparams.max_length
 
     def _encode(docs: list[AnnotatedDocument]) -> list[dict[str, Any]]:
-        return [tokenize_and_align(doc, tokenizer, bio_label_to_id, max_length) for doc in docs]
+        examples = _prepare_training_units(docs, cfg.segmentation)
+        return [tokenize_and_align(d, tokenizer, bio_label_to_id, max_length) for d in examples]
 
     train_ds = hf_datasets.Dataset.from_list(_encode(train_docs))
     eval_ds = hf_datasets.Dataset.from_list(_encode(eval_docs)) if eval_docs else None
 
     return train_ds, eval_ds, bio_labels
+
+
+def _prepare_training_units(
+    docs: list[AnnotatedDocument],
+    segmentation: str,
+) -> list[AnnotatedDocument]:
+    """Return the per-example AnnotatedDocuments to feed the tokenizer.
+
+    ``truncate`` passes documents through untouched (Trainer sees one example
+    per document; the tokenizer truncates at max_length).
+    ``sentence`` splits each document into per-sentence sub-documents via
+    clinical_deid.training.segmentation.split_doc_into_sentences; each
+    sentence becomes its own training example.
+    """
+    if segmentation == "truncate":
+        return list(docs)
+    if segmentation == "sentence":
+        from clinical_deid.training.segmentation import split_doc_into_sentences
+
+        units: list[AnnotatedDocument] = []
+        for doc in docs:
+            sub = split_doc_into_sentences(doc)
+            if not sub:
+                logger.warning(
+                    "Document %r produced no sentences; skipping.", doc.document.id
+                )
+                continue
+            units.extend(sub)
+        if not units:
+            from clinical_deid.training.errors import EmptyDataset
+
+            raise EmptyDataset(
+                "Sentence segmentation produced zero examples. "
+                "All documents may be whitespace-only."
+            )
+        return units
+    raise ValueError(f"Unknown segmentation mode: {segmentation!r}")

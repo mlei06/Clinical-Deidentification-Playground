@@ -33,9 +33,9 @@ export default function AnalyticsDashboard({ dataset }: AnalyticsDashboardProps)
     return <div className="text-sm text-gray-400">No analytics available</div>;
   }
 
-  const labelEntries = Object.entries(a.label_counts).sort((a, b) => b[1] - a[1]);
-  const spanHistEntries = Object.entries(a.span_length_histogram);
-  const docBySpanEntries = Object.entries(a.documents_by_span_count);
+  const labelEntries = Object.entries(a.label_counts ?? {}).sort((a, b) => b[1] - a[1]);
+  const spanHistEntries = Object.entries(a.span_length_histogram ?? {});
+  const docBySpanEntries = Object.entries(a.documents_by_span_count ?? {});
 
   return (
     <div className="flex flex-col gap-5">
@@ -43,16 +43,24 @@ export default function AnalyticsDashboard({ dataset }: AnalyticsDashboardProps)
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <StatCard label="Documents" value={a.document_count} />
         <StatCard label="Total Spans" value={a.total_spans} sub={`${a.unique_label_count} unique labels`} />
-        <StatCard
-          label="Avg Spans / Doc"
-          value={a.spans_per_document.mean.toFixed(1)}
-          sub={`std ${a.spans_per_document.std.toFixed(1)}`}
-        />
-        <StatCard
-          label="Overlapping Docs"
-          value={a.documents_with_overlapping_spans}
-          sub={`${a.overlapping_span_pairs} span pairs`}
-        />
+        {a.spans_per_document ? (
+          <StatCard
+            label="Avg Spans / Doc"
+            value={a.spans_per_document.mean.toFixed(1)}
+            sub={`std ${a.spans_per_document.std.toFixed(1)}`}
+          />
+        ) : (
+          <StatCard label="Avg Spans / Doc" value="—" sub="refresh to compute" />
+        )}
+        {a.documents_with_overlapping_spans != null ? (
+          <StatCard
+            label="Overlapping Docs"
+            value={a.documents_with_overlapping_spans}
+            sub={`${a.overlapping_span_pairs} span pairs`}
+          />
+        ) : (
+          <StatCard label="Overlapping Docs" value="—" sub="refresh to compute" />
+        )}
       </div>
 
       {/* Numeric distributions */}
@@ -71,10 +79,10 @@ export default function AnalyticsDashboard({ dataset }: AnalyticsDashboardProps)
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-50">
-            <NumericRow label="Char length" stats={a.character_length} />
-            <NumericRow label="Token count" stats={a.token_count_estimate} />
-            <NumericRow label="Spans / doc" stats={a.spans_per_document} />
-            <NumericRow label="Span length (chars)" stats={a.span_character_length} />
+            {a.character_length && <NumericRow label="Char length" stats={a.character_length} />}
+            {a.token_count_estimate && <NumericRow label="Token count" stats={a.token_count_estimate} />}
+            {a.spans_per_document && <NumericRow label="Spans / doc" stats={a.spans_per_document} />}
+            {a.span_character_length && <NumericRow label="Span length (chars)" stats={a.span_character_length} />}
           </tbody>
         </table>
       </div>
