@@ -42,7 +42,7 @@ def merge_adjacent_names(annotations: list[BratT], text_content: str) -> list[Br
     cur = list(sorted_anns[0])
 
     for next_ann in sorted_anns[1:]:
-        if cur[2] in ("NAME", "PATIENT") and next_ann[2] in ("NAME", "PATIENT"):
+        if cur[2] == "NAME" and next_ann[2] == "NAME":
             between_text = text_content[cur[1] : next_ann[0]]
             if between_text == " ":
                 cur[1] = next_ann[1]

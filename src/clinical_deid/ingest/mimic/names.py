@@ -1,4 +1,4 @@
-"""Synthetic multi-locale person names (from Neuroner MIMIC data-generation scripts)."""
+"""Synthetic multi-locale person names."""
 
 from __future__ import annotations
 
@@ -17,60 +17,51 @@ locale_weights = {
     "ar_EG": 0.05,
 }
 
-custom_names = {
-    "zh_CN": {
-        "first": ["Wei", "Jing", "Ming", "Li", "Xiao", "Bo", "Ying"],
-        "last": ["Wang", "Chen", "Zhao", "Liu", "Huang", "Zhang"],
-    },
-    "ja_JP": {
-        "first": ["Haruto", "Yui", "Souta", "Sakura", "Ren", "Hina"],
-        "last": ["Takahashi", "Yamamoto", "Kobayashi", "Tanaka"],
-    },
-    "ko_KR": {
-        "first": ["Minjun", "Seo-yeon", "Jisoo", "Hyunwoo", "Eunji"],
-        "last": ["Kim", "Lee", "Park", "Choi", "Jung"],
-    },
-    "hi_IN": {
-        "first": ["Aarav", "Diya", "Vivaan", "Anaya", "Rohan"],
-        "last": ["Patel", "Sharma", "Mehta", "Reddy", "Singh"],
-    },
-    "ar_EG": {
-        "first": ["Omar", "Youssef", "Laila", "Amira", "Hassan"],
-        "last": ["Mahmoud", "Fahmy", "Nassar", "Saad"],
-    },
-}
-
-_fakers = {loc: Faker(loc) for loc in locale_weights if loc.startswith("en")}
+# Faker instances for all locales (non-English may produce transliterated names)
+_fakers: dict[str, Faker] = {}
 
 
-def generate_name() -> str:
-    locale = random.choices(
-        population=list(locale_weights.keys()),
-        weights=list(locale_weights.values()),
+def _get_locale_faker(locale: str) -> Faker:
+    if locale not in _fakers:
+        _fakers[locale] = Faker(locale)
+    return _fakers[locale]
+
+
+def generate_name(locale: str | None = None) -> str:
+    """Return a synthetic name in one of several clinical-note surface forms."""
+    if locale is None:
+        locale = random.choices(
+            population=list(locale_weights.keys()),
+            weights=list(locale_weights.values()),
+            k=1,
+        )[0]
+
+    fake = _get_locale_faker(locale)
+    try:
+        first = fake.first_name()
+        last = fake.last_name()
+    except Exception:
+        # Fallback to en_US if locale provider fails
+        fake = _get_locale_faker("en_US")
+        first = fake.first_name()
+        last = fake.last_name()
+
+    # Surface form weights: full_title most common, last_only and title_last
+    # common in clinical notes, full_lower rare but present
+    format_style = random.choices(
+        ["full_title", "last_only", "title_last", "initial_title", "full_lower"],
+        weights=[0.45, 0.20, 0.15, 0.12, 0.08],
         k=1,
     )[0]
 
-    if locale.startswith("en"):
-        fake = _fakers[locale]
-        first = fake.first_name()
-        last = fake.last_name()
-    else:
-        first = random.choice(custom_names[locale]["first"])
-        last = random.choice(custom_names[locale]["last"])
-
-    format_style = random.choice(
-        [
-            "full_title",
-            "full_lower",
-            "initial_title",
-            "initial_lower",
-        ]
-    )
-
     if format_style == "full_title":
         return f"{first.capitalize()} {last.capitalize()}"
-    if format_style == "full_lower":
-        return f"{first.lower()} {last.lower()}"
+    if format_style == "last_only":
+        return last.capitalize()
+    if format_style == "title_last":
+        title = random.choice(["Dr.", "Mr.", "Ms.", "Mrs."])
+        return f"{title} {last.capitalize()}"
     if format_style == "initial_title":
         return f"{first[0].upper()}. {last.capitalize()}"
-    return f"{first[0].lower()}. {last.lower()}"
+    # full_lower
+    return f"{first.lower()} {last.lower()}"

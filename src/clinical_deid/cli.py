@@ -1055,6 +1055,7 @@ def _models_dir():
 @click.option("--output", "output_name", required=False, default=None, help="Output model name.")
 @click.option("--eval-dataset", default=None, help="Separate eval dataset name.")
 @click.option("--eval-fraction", type=float, default=None, help="Fraction of train set to use for eval.")
+@click.option("--eval-test-dataset", "test_dataset", default=None, help="Held-out test dataset evaluated once after training.")
 @click.option("--epochs", type=float, default=None)
 @click.option("--lr", "learning_rate", type=float, default=None)
 @click.option("--batch-size", "per_device_train_batch_size", type=int, default=None)
@@ -1071,6 +1072,7 @@ def train_run(
     output_name: str | None,
     eval_dataset: str | None,
     eval_fraction: float | None,
+    test_dataset: str | None,
     epochs: float | None,
     learning_rate: float | None,
     per_device_train_batch_size: int | None,
@@ -1103,7 +1105,7 @@ def train_run(
     from clinical_deid.training.runner import run_training
 
     if config_path is not None:
-        if any([eval_dataset, eval_fraction, epochs, learning_rate,
+        if any([eval_dataset, eval_fraction, test_dataset, epochs, learning_rate,
                 per_device_train_batch_size, max_length, freeze_encoder, device, overwrite,
                 extra_train_datasets]):
             click.echo("Error: --config cannot be combined with other flags.", err=True)
@@ -1140,6 +1142,7 @@ def train_run(
                 output_name=output_name,
                 eval_dataset=eval_dataset,
                 eval_fraction=eval_fraction,
+                test_dataset=test_dataset,
                 freeze_encoder=freeze_encoder,
                 device=device,
                 overwrite=overwrite,

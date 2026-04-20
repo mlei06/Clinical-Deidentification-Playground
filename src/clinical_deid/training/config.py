@@ -33,6 +33,7 @@ class TrainingConfig(BaseModel):
     extra_train_datasets: list[str] = Field(default_factory=list)
     eval_dataset: str | None = None
     eval_fraction: float | None = None
+    test_dataset: str | None = None
     output_name: str
     labels: list[str] | None = None
     label_remap: dict[str, str] | None = None

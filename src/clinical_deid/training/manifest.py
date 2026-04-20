@@ -29,6 +29,9 @@ def write_manifest_v2(
     train_runtime_sec: float,
     head_reinitialised: bool,
     metrics: dict[str, Any],
+    test_dataset: str | None = None,
+    test_documents: int = 0,
+    test_metrics: dict[str, Any] | None = None,
 ) -> Path:
     """Write model_manifest.json v2 and return the path."""
     manifest: dict[str, Any] = {
@@ -48,6 +51,8 @@ def write_manifest_v2(
             "eval_dataset": eval_dataset,
             "eval_fraction": eval_fraction,
             "eval_documents": eval_documents,
+            "test_dataset": test_dataset,
+            "test_documents": test_documents,
             "seed": seed,
             "device_used": device_used,
             "total_steps": total_steps,
@@ -56,6 +61,7 @@ def write_manifest_v2(
             "head_reinitialised": head_reinitialised,
         },
         "metrics": metrics,
+        "test_metrics": test_metrics,
     }
     path = model_dir / "model_manifest.json"
     path.write_text(

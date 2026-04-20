@@ -4,24 +4,60 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
+from datetime import date
 from pathlib import Path
 
 from clinical_deid.ingest.mimic.brat_merge import BratT, merge_brat_directory_flat
 from clinical_deid.ingest.mimic.faker_providers import getrandformat
 from clinical_deid.ingest.mimic.placeholders import extract_placeholders
+from clinical_deid.ingest.mimic.profile import NoteProfile, make_note_profile
 from clinical_deid.ingest.mimic.replacement import get_placeholder_entity, get_replaced_text
 from clinical_deid.ingest.mimic.split import split_brat_directory_to_corpus
 
 logger = logging.getLogger(__name__)
 
 
-def process_note_text(note_text: str, *, note_id: str | None = None) -> tuple[str, list[BratT]]:
-    """
-    Replace ``[**...**]`` placeholders with synthetic spans; return deidentified text and BRAT tuples.
+def _parse_chartdate(value: object) -> date | None:
+    """Try to parse NOTEEVENTS CHARTDATE to a date; return None on failure."""
+    if value is None:
+        return None
+    try:
+        import pandas as pd
 
-    ``note_id`` is only used for logging hooks / future use.
+        if pd.isna(value):
+            return None
+    except Exception:
+        pass
+    try:
+        from datetime import datetime
+
+        s = str(value).strip()
+        for fmt in ("%Y-%m-%d", "%Y-%m-%d %H:%M:%S", "%m/%d/%Y"):
+            try:
+                return datetime.strptime(s, fmt).date()
+            except ValueError:
+                continue
+    except Exception:
+        pass
+    return None
+
+
+def process_note_text(
+    note_text: str,
+    *,
+    note_id: str | None = None,
+    profile: NoteProfile | None = None,
+) -> tuple[str, list[BratT]]:
+    """Replace ``[**...**]`` placeholders with synthetic spans.
+
+    Returns (deidentified_text, brat_tuples).
+
+    If ``profile`` is None a fresh one is generated, giving each note a
+    consistent synthetic identity (same patient name/MRN/dates throughout).
     """
-    del note_id
+    if profile is None:
+        profile = make_note_profile()
+
     placeholders = extract_placeholders(note_text)
     placeholders.sort(key=lambda x: x["start"])
 
@@ -32,49 +68,42 @@ def process_note_text(note_text: str, *, note_id: str | None = None) -> tuple[st
 
     for p in placeholders:
         entity_type = get_placeholder_entity(p["content"])
-        if (
-            not entity_type
-            or entity_type.strip() == ""
-            or entity_type.lower() == "blank"
-        ):
-            continue
 
-        output = get_replaced_text(entity_type, randformat_dict)
-        if not output:
-            continue
+        adj_start = p["start"] + offset
+        adj_end = p["end"] + offset
+        orig_length = p["end"] - p["start"]
 
-        replacement, brat_entity_type = output
-        orig_start = p["start"]
-        orig_end = p["end"]
-        orig_length = orig_end - orig_start
-        repl_length = len(replacement)
+        output = get_replaced_text(entity_type, randformat_dict, profile)
 
-        adj_start = orig_start + offset
-        adj_end = orig_end + offset
+        if output is None:
+            # Unrecognised placeholder: strip the bracket entirely, no BRAT span
+            replacement = ""
+            brat_entity_type = None
+            logger.debug("stripped unrecognised placeholder %r in %s", p["content"], note_id)
+        else:
+            replacement, brat_entity_type = output
 
         processed_text = processed_text[:adj_start] + replacement + processed_text[adj_end:]
-
-        new_start = adj_start
-        new_end = adj_start + repl_length
-        replacements.append((new_start, new_end, brat_entity_type, replacement))
-
+        repl_length = len(replacement)
         offset += repl_length - orig_length
 
-    # Replace newlines with spaces, then adjust replacement offsets to match
+        # Skip BLANK and empty replacements
+        if brat_entity_type and brat_entity_type != "BLANK" and replacement:
+            replacements.append((adj_start, adj_start + repl_length, brat_entity_type, replacement))
+
+    # Collapse newlines to spaces (1:1 char mapping keeps span offsets valid)
     final_text = processed_text.replace("\n", " ")
     return final_text, replacements
 
 
 def write_brat_note(output_dir: Path, note_id: str, text: str, spans: list[BratT]) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
-    txt_path = output_dir / f"{note_id}.txt"
-    ann_path = output_dir / f"{note_id}.ann"
-    txt_path.write_text(text, encoding="utf-8")
+    (output_dir / f"{note_id}.txt").write_text(text, encoding="utf-8")
     lines = [
-        f"T{i}\t{entity_type} {start} {end}\t{surface}\n"
-        for i, (start, end, entity_type, surface) in enumerate(spans, 1)
+        f"T{i}\t{etype} {start} {end}\t{surface}\n"
+        for i, (start, end, etype, surface) in enumerate(spans, 1)
     ]
-    ann_path.write_text("".join(lines), encoding="utf-8")
+    (output_dir / f"{note_id}.ann").write_text("".join(lines), encoding="utf-8")
 
 
 def process_noteevents_to_brat_flat(
@@ -87,9 +116,9 @@ def process_noteevents_to_brat_flat(
     id_formatter: Callable[[int, object], str] | None = None,
     progress_every: int = 1000,
 ) -> int:
-    """
-    Stream ``csv_path`` and write paired BRAT files into flat ``output_dir``.
+    """Stream ``csv_path`` and write paired BRAT files into flat ``output_dir``.
 
+    Uses CHARTDATE column (if present) to anchor synthetic dates per note.
     Returns number of notes written.
     """
     try:
@@ -117,7 +146,13 @@ def process_noteevents_to_brat_flat(
                 continue
             note_text = str(raw)
             note_id = fmt(chunk_num, idx)
-            processed_text, replacements = process_note_text(note_text, note_id=note_id)
+
+            admit_date = _parse_chartdate(row.get("CHARTDATE"))
+            profile = make_note_profile(admit_date=admit_date)
+
+            processed_text, replacements = process_note_text(
+                note_text, note_id=note_id, profile=profile
+            )
             write_brat_note(output_dir, note_id, processed_text, replacements)
             notes_written += 1
             if progress_every and notes_written % progress_every == 0:
@@ -142,10 +177,6 @@ def run_noteevents_pipeline(
     test_ratio: float = 0.20,
     split_seed: int = 42,
 ) -> None:
-    """
-    End-to-end: flat BRAT under ``output_root`` → optional in-place PATIENT merge →
-    optional move into ``train``/``valid``/``test`` (same root), matching the Neuroner script.
-    """
     output_root.mkdir(parents=True, exist_ok=True)
     process_noteevents_to_brat_flat(
         csv_path,

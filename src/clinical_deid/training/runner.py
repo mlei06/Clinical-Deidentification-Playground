@@ -55,7 +55,7 @@ def run_training(
         ) from exc
 
     from clinical_deid.training.base_model import resolve_base_model
-    from clinical_deid.training.datasets import build_hf_datasets
+    from clinical_deid.training.datasets import build_hf_datasets, tokenize_and_align
     from clinical_deid.training.errors import OutputExists, TrainingError
     from clinical_deid.training.manifest import write_manifest_v2
     from clinical_deid.training.metrics import build_metrics_report, make_compute_metrics
@@ -221,6 +221,35 @@ def run_training(
                 pred_output.predictions, pred_output.label_ids, id2label
             )
 
+        # Step 12b: held-out test set evaluation
+        test_metrics: dict | None = None
+        test_doc_count = 0
+        if cfg.test_dataset is not None:
+            from clinical_deid.dataset_store import load_dataset_documents
+            test_docs = load_dataset_documents(datasets_dir, cfg.test_dataset)
+            test_doc_count = len(test_docs)
+            if test_docs:
+                if cfg.label_remap:
+                    from clinical_deid.training.datasets import _remap_doc
+                    test_docs = [_remap_doc(doc, cfg.label_remap) for doc in test_docs]
+                test_encoded = [
+                    tokenize_and_align(doc, tokenizer, label2id, cfg.hyperparams.max_length)
+                    for doc in test_docs
+                ]
+                import datasets as hf_datasets
+                test_ds = hf_datasets.Dataset.from_list(test_encoded)
+                print(f"\nEvaluating on test set ({test_doc_count} documents)...")
+                test_pred = trainer.predict(test_ds)
+                test_metrics = build_metrics_report(
+                    test_pred.predictions, test_pred.label_ids, id2label
+                )
+                overall = test_metrics.get("overall", {})
+                print(
+                    f"Test — P: {overall.get('precision', 0):.4f}  "
+                    f"R: {overall.get('recall', 0):.4f}  "
+                    f"F1: {overall.get('f1', 0):.4f}"
+                )
+
         # Step 13: save model + tokenizer
         trainer.save_model(str(staging_model_dir))
         tokenizer.save_pretrained(str(staging_model_dir))
@@ -266,6 +295,9 @@ def run_training(
             train_runtime_sec=train_runtime_sec,
             head_reinitialised=head_reinitialised,
             metrics=metrics,
+            test_dataset=cfg.test_dataset,
+            test_documents=test_doc_count,
+            test_metrics=test_metrics,
         )
 
         # Step 17: atomic promotion

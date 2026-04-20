@@ -318,6 +318,7 @@ def getrandformat() -> dict[str, Any]:
         "abrv": random.choice([True, False]),
         "hospital_prefix": random.choice([True, False]),
         "hospital_suffix": random.choice([True, False]),
+        "date_range_fmt": random.choice(["iso", "iso", "slash", "alpha"]),
     }
 
 
