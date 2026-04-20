@@ -34,6 +34,18 @@ def read_brat_ann(ann_path: Path) -> list[BratT]:
     return annotations
 
 
+def _dedup_words(text: str) -> str:
+    """Remove consecutive duplicate words: 'Heather Heather Cochran' → 'Heather Cochran'."""
+    words = text.split()
+    if not words:
+        return text
+    result = [words[0]]
+    for w in words[1:]:
+        if w.lower() != result[-1].lower():
+            result.append(w)
+    return " ".join(result)
+
+
 def merge_adjacent_names(annotations: list[BratT], text_content: str) -> list[BratT]:
     if not annotations:
         return annotations
@@ -46,7 +58,7 @@ def merge_adjacent_names(annotations: list[BratT], text_content: str) -> list[Br
             between_text = text_content[cur[1] : next_ann[0]]
             if between_text == " ":
                 cur[1] = next_ann[1]
-                cur[3] = cur[3] + " " + next_ann[3]
+                cur[3] = _dedup_words(cur[3] + " " + next_ann[3])
             else:
                 merged.append(tuple(cur))  # type: ignore[arg-type]
                 cur = list(next_ann)
