@@ -1,4 +1,4 @@
-import { apiFetch } from './client';
+import { apiBaseUrl, apiFetch, authHeaders } from './client';
 import type {
   DictionaryInfo,
   DictionaryPreview,
@@ -56,7 +56,11 @@ export async function uploadDictionary(
   form.append('name', name);
   if (label) form.append('label', label);
 
-  const res = await fetch('/api/dictionaries', { method: 'POST', body: form });
+  const res = await fetch(`${apiBaseUrl()}/dictionaries`, {
+    method: 'POST',
+    body: form,
+    headers: authHeaders(),
+  });
   if (!res.ok) {
     const body = await res.json().catch(() => ({ detail: res.statusText }));
     throw new Error(body.detail ?? res.statusText);

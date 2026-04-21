@@ -8,6 +8,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
+from clinical_deid.api.auth import require_admin
 from clinical_deid.api.deps import SessionDep
 from clinical_deid.config import get_settings
 from clinical_deid.eval_store import EvalResultInfo, list_eval_results, load_eval_result, save_eval_result
@@ -17,7 +18,7 @@ from clinical_deid.tables import AuditLogRecord
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/eval", tags=["evaluation"])
+router = APIRouter(prefix="/eval", tags=["evaluation"], dependencies=[require_admin])
 
 
 def _eval_dataset_source_with_splits(base: str, splits: list[str] | None) -> str:

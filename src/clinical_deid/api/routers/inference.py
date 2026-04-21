@@ -6,6 +6,7 @@ import logging
 
 from fastapi import APIRouter, HTTPException
 
+from clinical_deid.api.auth import require_admin
 from clinical_deid.api.schemas import (
     SavedInferenceRunDetail,
     SavedInferenceRunSummary,
@@ -21,7 +22,7 @@ from clinical_deid.inference_store import (
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/inference", tags=["inference"])
+router = APIRouter(prefix="/inference", tags=["inference"], dependencies=[require_admin])
 
 
 @router.get("/runs", response_model=list[SavedInferenceRunSummary])

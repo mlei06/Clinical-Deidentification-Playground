@@ -22,7 +22,14 @@ async def lifespan(_app: FastAPI):
 
 def create_app() -> FastAPI:
     """Application factory — defers settings access until called."""
+    from clinical_deid.api.auth import auth_enabled
     from clinical_deid.config import get_settings
+
+    # When API keys are configured, don't expose anonymous /docs or /redoc.
+    # (Local dev with no keys keeps them for convenience.)
+    docs_kwargs: dict[str, str | None] = {}
+    if auth_enabled():
+        docs_kwargs = {"docs_url": None, "redoc_url": None, "openapi_url": None}
 
     application = FastAPI(
         title="Clinical De-Identification Playground",
@@ -33,6 +40,7 @@ def create_app() -> FastAPI:
             "Planned: playground UI (try text + evaluate on local paths or uploads) and eval APIs—see docs."
         ),
         lifespan=lifespan,
+        **docs_kwargs,
     )
 
     # CORS — configured via settings (env var CLINICAL_DEID_CORS_ORIGINS or .env).

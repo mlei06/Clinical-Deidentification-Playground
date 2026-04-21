@@ -1,4 +1,27 @@
-const BASE_URL = '/api';
+const BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? '/api';
+const API_KEY = import.meta.env.VITE_API_KEY as string | undefined;
+
+export function apiBaseUrl(): string {
+  return BASE_URL;
+}
+
+/** Merge auth + default headers. Exported so multipart uploads that must set
+ *  their own Content-Type (or leave it to the browser for FormData) can still
+ *  attach the API key. */
+export function authHeaders(extra?: HeadersInit): HeadersInit {
+  const merged: Record<string, string> = {};
+  if (extra) {
+    const iter =
+      extra instanceof Headers
+        ? Array.from(extra.entries())
+        : Array.isArray(extra)
+          ? extra
+          : Object.entries(extra);
+    for (const [k, v] of iter) merged[k] = v;
+  }
+  if (API_KEY) merged['X-API-Key'] = API_KEY;
+  return merged;
+}
 
 export class ApiError extends Error {
   status: number;
@@ -18,10 +41,10 @@ export async function apiFetch<T>(
 ): Promise<T> {
   const res = await fetch(`${BASE_URL}${path}`, {
     ...init,
-    headers: {
+    headers: authHeaders({
       'Content-Type': 'application/json',
-      ...init?.headers,
-    },
+      ...(init?.headers ?? {}),
+    }),
   });
 
   if (!res.ok) {

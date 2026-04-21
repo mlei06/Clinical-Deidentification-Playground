@@ -29,6 +29,22 @@ class Settings(BaseSettings):
         default=["http://localhost:3000", "http://127.0.0.1:3000"],
         description="Allowed CORS origins for the API.",
     )
+    #: API keys with admin scope. When empty AND ``inference_api_keys`` is empty, auth is disabled.
+    admin_api_keys: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Admin-scope API keys. Accepted as 'Authorization: Bearer <key>' or 'X-API-Key: <key>'. "
+            "Admin scope covers all mutation routes and also satisfies inference-scoped routes."
+        ),
+    )
+    #: API keys with inference scope. When empty AND ``admin_api_keys`` is empty, auth is disabled.
+    inference_api_keys: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Inference-scope API keys. Accepted as 'Authorization: Bearer <key>' or 'X-API-Key: <key>'. "
+            "Inference scope covers /process/* (subject to the deploy allowlist)."
+        ),
+    )
 
     #: For :class:`~clinical_deid.synthesis.client.OpenAICompatibleChatClient`. Loaded from ``.env`` or the environment. Either ``OPENAI_API_KEY`` or ``CLINICAL_DEID_OPENAI_API_KEY`` may be set.
     openai_api_key: str | None = Field(

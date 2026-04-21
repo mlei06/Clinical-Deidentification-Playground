@@ -11,6 +11,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
+from clinical_deid.api.auth import require_admin, require_authenticated
 from clinical_deid.api.schemas import (
     BlacklistMergeResponse,
     ComputeLabelsRequest,
@@ -50,7 +51,7 @@ from clinical_deid.pipes.registry import (
 from clinical_deid.pipes.ui_schema import pipe_config_json_schema
 from clinical_deid.pipes.whitelist.lists import parse_list_file
 
-router = APIRouter(prefix="/pipelines", tags=["pipelines"])
+router = APIRouter(prefix="/pipelines", tags=["pipelines"], dependencies=[require_authenticated])
 
 MAX_UPLOAD_BYTES = 2 * 1024 * 1024  # 2 MB per file
 
@@ -230,7 +231,7 @@ def ner_builtins() -> NerBuiltinInfo:
     )
 
 
-@router.post("/whitelist/parse-lists", response_model=ParseListFilesResponse)
+@router.post("/whitelist/parse-lists", response_model=ParseListFilesResponse, dependencies=[require_admin])
 async def whitelist_parse_lists(
     files: Annotated[list[UploadFile], File()],
     labels: Annotated[list[str], Form()],
@@ -257,7 +258,7 @@ async def whitelist_parse_lists(
     return ParseListFilesResponse(results=results)
 
 
-@router.post("/blacklist/parse-wordlists", response_model=BlacklistMergeResponse)
+@router.post("/blacklist/parse-wordlists", response_model=BlacklistMergeResponse, dependencies=[require_admin])
 async def blacklist_parse_wordlists(
     files: Annotated[list[UploadFile], File()],
 ) -> BlacklistMergeResponse:
@@ -281,7 +282,7 @@ async def blacklist_parse_wordlists(
 # ---------------------------------------------------------------------------
 
 
-@router.post("", response_model=PipelineDetail, status_code=201)
+@router.post("", response_model=PipelineDetail, status_code=201, dependencies=[require_admin])
 def create_pipeline(body: CreatePipelineRequest) -> PipelineDetail:
     """Create a named pipeline (writes JSON file)."""
     _validate_config(body.config)
@@ -312,7 +313,7 @@ def get_pipeline(pipeline_name: str) -> PipelineDetail:
     return PipelineDetail(name=pipeline_name, config=config)
 
 
-@router.put("/{pipeline_name}", response_model=PipelineDetail)
+@router.put("/{pipeline_name}", response_model=PipelineDetail, dependencies=[require_admin])
 def update_pipeline(pipeline_name: str, body: UpdatePipelineRequest) -> PipelineDetail:
     pdir = _pipelines_dir()
     path = pdir / f"{pipeline_name}.json"
@@ -326,7 +327,7 @@ def update_pipeline(pipeline_name: str, body: UpdatePipelineRequest) -> Pipeline
     return PipelineDetail(name=pipeline_name, config=config)
 
 
-@router.delete("/{pipeline_name}", status_code=204)
+@router.delete("/{pipeline_name}", status_code=204, dependencies=[require_admin])
 def delete_pipeline_endpoint(pipeline_name: str) -> None:
     try:
         delete_pipeline(_pipelines_dir(), pipeline_name)
@@ -334,7 +335,7 @@ def delete_pipeline_endpoint(pipeline_name: str) -> None:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
-@router.post("/{pipeline_name}/validate", response_model=ValidatePipelineResponse)
+@router.post("/{pipeline_name}/validate", response_model=ValidatePipelineResponse, dependencies=[require_admin])
 def validate_pipeline(pipeline_name: str, body: ValidatePipelineRequest) -> ValidatePipelineResponse:
     pdir = _pipelines_dir()
     path = pdir / f"{pipeline_name}.json"

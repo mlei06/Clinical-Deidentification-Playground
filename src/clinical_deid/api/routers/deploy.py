@@ -7,12 +7,13 @@ from pathlib import Path
 from fastapi import APIRouter
 from pydantic import BaseModel
 
+from clinical_deid.api.auth import require_admin, require_authenticated
 from clinical_deid.config import get_settings
 from clinical_deid.deploy_health import pipeline_missing_deps
 from clinical_deid.mode_config import DEFAULT_MODES_PATH, DeployConfig, ModeEntry, load_mode_config, save_mode_config
 from clinical_deid.pipeline_store import list_pipelines, load_pipeline_config
 
-router = APIRouter(prefix="/deploy", tags=["deploy"])
+router = APIRouter(prefix="/deploy", tags=["deploy"], dependencies=[require_authenticated])
 
 
 # ---------------------------------------------------------------------------
@@ -111,7 +112,7 @@ def list_available_pipeline_names() -> list[str]:
     return [p.name for p in list_pipelines(get_settings().pipelines_dir)]
 
 
-@router.put("", response_model=DeployConfigResponse)
+@router.put("", response_model=DeployConfigResponse, dependencies=[require_admin])
 def update_deploy_config(body: UpdateDeployConfigRequest) -> DeployConfigResponse:
     """Write an updated deploy configuration."""
     modes = {

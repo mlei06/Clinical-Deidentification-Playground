@@ -14,11 +14,12 @@ from typing import Any
 import httpx
 from fastapi import APIRouter, HTTPException, Query
 
+from clinical_deid.api.auth import require_admin
 from clinical_deid.mode_config import DEFAULT_MODES_PATH, load_mode_config
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/audit/production", tags=["audit-production"])
+router = APIRouter(prefix="/audit/production", tags=["audit-production"], dependencies=[require_admin])
 
 _CLIENT_TIMEOUT = 15.0  # seconds
 

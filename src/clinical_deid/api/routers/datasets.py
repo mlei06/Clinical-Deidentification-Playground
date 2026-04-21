@@ -8,6 +8,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
+from clinical_deid.api.auth import require_admin
 from clinical_deid.config import get_settings
 from clinical_deid.dataset_store import (
     DatasetFormat,
@@ -23,7 +24,7 @@ from clinical_deid.dataset_store import (
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/datasets", tags=["datasets"])
+router = APIRouter(prefix="/datasets", tags=["datasets"], dependencies=[require_admin])
 
 
 # ---------------------------------------------------------------------------

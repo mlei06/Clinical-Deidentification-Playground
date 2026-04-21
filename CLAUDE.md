@@ -276,7 +276,7 @@ The full pipe system (11 cataloged types), CLI, FastAPI, and Playground UI (7 vi
 - Config via env vars with `CLINICAL_DEID_` prefix or `.env` file
 - Optional deps use `try/except ImportError` in `_register_builtins()`
 - Tests use `tmp_path` fixtures for isolated filesystem state
-- Entry points: `clinical-deid` (CLI), `clinical-deid-api` (server), `clinical-deid-production` (production server)
+- Entry points: `clinical-deid` (CLI), `clinical-deid-api` (server)
 
 ## Testing
 
