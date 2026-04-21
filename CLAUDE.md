@@ -146,8 +146,8 @@ src/clinical_deid/
     blacklist/           # False-positive filtering
     presidio_ner/        # Presidio wrapper (optional)
     presidio_anonymizer/ # Presidio redaction (optional)
-    neuroner_ner/        # NeuroNER LSTM-CRF wrapper (Python 3.7 subprocess)
-    custom_ner/          # Load trained spaCy/HuggingFace models from models/
+    neuroner_ner/        # NeuroNER LSTM-CRF (Docker HTTP sidecar)
+    huggingface_ner/     # Load trained Hugging Face token-classification models from models/huggingface/
     llm_ner.py           # LLM-prompted detection (optional)
     consistency_propagator.py  # Document-level span propagation
     surrogate/           # Realistic fake data replacement (optional)
@@ -263,7 +263,7 @@ Also computes: risk-weighted recall (HIPAA severity weights), per-label breakdow
 
 ## Current status
 
-The full pipe system (11 cataloged types), CLI, FastAPI, and Playground UI (7 views) are built and functional. Key capabilities: pipeline composition, multi-mode evaluation with HIPAA coverage, training data export (CoNLL/spaCy/HuggingFace), NeuroNER subprocess bridge, LLM synthesis, and unified audit trail.
+The full pipe system (11 cataloged types), CLI, FastAPI, and Playground UI (7 views) are built and functional. Key capabilities: pipeline composition, multi-mode evaluation with HIPAA coverage, training data export (CoNLL/spaCy/HuggingFace), NeuroNER HTTP sidecar integration, LLM synthesis, and unified audit trail.
 
 ## What's not built yet
 

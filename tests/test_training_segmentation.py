@@ -224,23 +224,23 @@ def test_training_config_rejects_unknown_segmentation():
 
 
 def test_resolve_segmentation_auto_uses_manifest():
-    from clinical_deid.pipes.custom_ner.pipe import _resolve_segmentation_mode
+    from clinical_deid.pipes.huggingface_ner.pipe import _resolve_segmentation_mode
 
     assert _resolve_segmentation_mode("auto", "sentence", "m") == "sentence"
     assert _resolve_segmentation_mode("auto", "truncate", "m") == "truncate"
 
 
 def test_resolve_segmentation_auto_defaults_to_truncate_for_old_manifest():
-    from clinical_deid.pipes.custom_ner.pipe import _resolve_segmentation_mode
+    from clinical_deid.pipes.huggingface_ner.pipe import _resolve_segmentation_mode
 
     assert _resolve_segmentation_mode("auto", None, "m") == "truncate"
 
 
 def test_resolve_segmentation_mismatch_warns(caplog):
     import logging
-    from clinical_deid.pipes.custom_ner.pipe import _resolve_segmentation_mode
+    from clinical_deid.pipes.huggingface_ner.pipe import _resolve_segmentation_mode
 
-    with caplog.at_level(logging.WARNING, logger="clinical_deid.pipes.custom_ner.pipe"):
+    with caplog.at_level(logging.WARNING, logger="clinical_deid.pipes.huggingface_ner.pipe"):
         mode = _resolve_segmentation_mode("sentence", "truncate", "my-model")
     assert mode == "sentence"
     assert any("my-model" in rec.message for rec in caplog.records)
@@ -249,9 +249,9 @@ def test_resolve_segmentation_mismatch_warns(caplog):
 
 def test_resolve_segmentation_match_no_warning(caplog):
     import logging
-    from clinical_deid.pipes.custom_ner.pipe import _resolve_segmentation_mode
+    from clinical_deid.pipes.huggingface_ner.pipe import _resolve_segmentation_mode
 
-    with caplog.at_level(logging.WARNING, logger="clinical_deid.pipes.custom_ner.pipe"):
+    with caplog.at_level(logging.WARNING, logger="clinical_deid.pipes.huggingface_ner.pipe"):
         mode = _resolve_segmentation_mode("sentence", "sentence", "m")
     assert mode == "sentence"
     assert not any("segmentation" in rec.message for rec in caplog.records)
@@ -278,7 +278,7 @@ class _FakeHFPipeline:
 
 
 def test_predict_huggingface_by_sentence_remaps_to_doc_coords():
-    from clinical_deid.pipes.custom_ner.pipe import _predict_huggingface_by_sentence
+    from clinical_deid.pipes.huggingface_ner.pipe import _predict_by_sentence
 
     # Two sentences. Predictions are *sentence-local*; we assert they land
     # at the correct *document* offsets after remap.
@@ -297,7 +297,7 @@ def test_predict_huggingface_by_sentence_remaps_to_doc_coords():
         [{"start": 0, "end": 8, "entity_group": "NAME", "score": 0.95}],
     ])
 
-    spans = _predict_huggingface_by_sentence(fake, text, threshold=0.0, source="custom_ner:fake")
+    spans = _predict_by_sentence(fake, text, source="huggingface_ner:fake", entity_map={})
 
     assert len(spans) == 2
 
@@ -318,10 +318,3 @@ def test_predict_huggingface_by_sentence_remaps_to_doc_coords():
     assert fake.calls[1].startswith("Jane Doe")
 
 
-def test_predict_huggingface_by_sentence_threshold_filters():
-    from clinical_deid.pipes.custom_ner.pipe import _predict_huggingface_by_sentence
-
-    text = "Jane Doe arrived."
-    fake = _FakeHFPipeline([[{"start": 0, "end": 8, "entity_group": "NAME", "score": 0.3}]])
-    spans = _predict_huggingface_by_sentence(fake, text, threshold=0.5, source="s")
-    assert spans == []

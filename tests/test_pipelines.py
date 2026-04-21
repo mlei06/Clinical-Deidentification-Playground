@@ -45,7 +45,10 @@ def test_create_pipeline(client) -> None:
     assert r.status_code == 201, r.text
     body = r.json()
     assert body["name"] == "test-regex"
-    assert body["config"] == REGEX_WHITELIST
+    assert body["config"]["pipes"] == REGEX_WHITELIST["pipes"]
+    assert "output_label_space" in body["config"]
+    assert isinstance(body["config"]["output_label_space"], list)
+    assert "output_label_space_updated_at" in body["config"]
 
 
 def test_create_pipeline_duplicate_name(client) -> None:
@@ -80,8 +83,10 @@ def test_get_pipeline(client) -> None:
     client.post("/pipelines", json={"name": "get-me", "config": REGEX_WHITELIST})
     r = client.get("/pipelines/get-me")
     assert r.status_code == 200
-    assert r.json()["name"] == "get-me"
-    assert r.json()["config"] == REGEX_WHITELIST
+    data = r.json()
+    assert data["name"] == "get-me"
+    assert data["config"]["pipes"] == REGEX_WHITELIST["pipes"]
+    assert "output_label_space" in data["config"]
 
 
 def test_get_pipeline_not_found(client) -> None:
@@ -93,7 +98,9 @@ def test_update_pipeline_config(client) -> None:
     client.post("/pipelines", json={"name": "upd", "config": REGEX_WHITELIST})
     r = client.put("/pipelines/upd", json={"config": LABEL_MAPPER_CONFIG})
     assert r.status_code == 200
-    assert r.json()["config"] == LABEL_MAPPER_CONFIG
+    cfg = r.json()["config"]
+    assert cfg["pipes"] == LABEL_MAPPER_CONFIG["pipes"]
+    assert "output_label_space" in cfg
 
 
 def test_update_pipeline_not_found(client) -> None:
@@ -124,7 +131,11 @@ def test_validate_pipeline(client) -> None:
 
     r = client.post("/pipelines/val/validate", json={"config": LABEL_MAPPER_CONFIG})
     assert r.status_code == 200
-    assert r.json()["valid"] is True
+    v = r.json()
+    assert v["valid"] is True
+    assert v.get("output_label_space") is not None
+    assert isinstance(v["output_label_space"], list)
+    assert "TELEPHONE" in v["output_label_space"]
 
     r = client.post(
         "/pipelines/val/validate",

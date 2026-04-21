@@ -201,10 +201,13 @@ _CATALOG: list[PipeCatalogEntry] = [
     ),
     PipeCatalogEntry(
         name="neuroner_ner",
-        description="Clinical PHI detection via NeuroNER LSTM-CRF (i2b2, MIMIC models; Python 3.7 subprocess)",
+        description="Clinical PHI detection via NeuroNER LSTM-CRF (Docker HTTP sidecar)",
         role="detector",
         extra=None,
-        install_hint="Run ./scripts/setup_neuroner.sh (Python 3.7 venv + models + GloVe embeddings)",
+        install_hint=(
+            "Inference: docker compose -f docker/neuroner/compose.yaml up -d. "
+            "Training: ./scripts/setup_neuroner.sh"
+        ),
         config_path="clinical_deid.pipes.neuroner_ner.pipe:NeuroNerConfig",
         pipe_path="clinical_deid.pipes.neuroner_ner.pipe:NeuroNerPipe",
         check_ready="clinical_deid.pipes.neuroner_ner.pipe:check_neuroner_ready",
@@ -217,16 +220,30 @@ _CATALOG: list[PipeCatalogEntry] = [
         },
     ),
     PipeCatalogEntry(
-        name="custom_ner",
-        description="Load a trained NER model (spaCy or HuggingFace) from models/ directory",
+        name="huggingface_ner",
+        description="Hugging Face token-classification model loaded from models/huggingface/",
         role="detector",
         extra=None,
-        install_hint="Train or place a model under models/{spacy,huggingface}/{name}/ with model_manifest.json",
-        config_path="clinical_deid.pipes.custom_ner.pipe:CustomNerConfig",
-        pipe_path="clinical_deid.pipes.custom_ner.pipe:CustomNerPipe",
-        default_base_labels_fn="clinical_deid.pipes.custom_ner.pipe:default_base_labels",
-        label_source="compute",
-        dependencies_fn="clinical_deid.pipes.custom_ner.pipe:custom_ner_dependencies",
+        install_hint=(
+            "Place a trained model under models/huggingface/{name}/ with model_manifest.json. "
+            "Requires: pip install transformers torch"
+        ),
+        config_path="clinical_deid.pipes.huggingface_ner.pipe:HuggingfaceNerConfig",
+        pipe_path="clinical_deid.pipes.huggingface_ner.pipe:HuggingfaceNerPipe",
+        default_base_labels_fn="clinical_deid.pipes.huggingface_ner.pipe:default_base_labels",
+        label_source="bundle",
+        label_space_bundle_fn=(
+            "clinical_deid.pipes.huggingface_ner.pipe:build_huggingface_label_space_bundle"
+        ),
+        bundle_key_semantics="ner_raw",
+        dynamic_options_fns={
+            "huggingface_models": (
+                "clinical_deid.pipes.huggingface_ner.pipe:list_huggingface_model_names"
+            ),
+        },
+        dependencies_fn=(
+            "clinical_deid.pipes.huggingface_ner.pipe:huggingface_ner_dependencies"
+        ),
     ),
 ]
 

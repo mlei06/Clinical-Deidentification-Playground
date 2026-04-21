@@ -100,11 +100,21 @@ def tokenize_and_align(
     offset_mapping: list[tuple[int, int]] = enc["offset_mapping"]
 
     if len(enc["input_ids"]) == max_length:
-        logger.warning(
-            "Document %r was truncated at %d tokens; tail may have lost entity labels.",
-            doc.document.id,
-            max_length,
-        )
+        meta = doc.document.metadata or {}
+        if meta.get("sentence_index") is not None:
+            logger.warning(
+                "Sentence unit %r exceeded max_length=%d after tokenization; tail was "
+                "truncated and entity labels beyond the cut may be lost. "
+                "Raise hyperparams.max_length or split very long sentences separately.",
+                doc.document.id,
+                max_length,
+            )
+        else:
+            logger.warning(
+                "Document %r was truncated at %d tokens; tail may have lost entity labels.",
+                doc.document.id,
+                max_length,
+            )
 
     label_ids: list[int] = []
     prev_word_id: int | None = None

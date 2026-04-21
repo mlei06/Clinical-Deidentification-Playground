@@ -117,13 +117,17 @@ def test_manifest_contents(trained_model):
 
 
 @pytest.mark.train
-def test_custom_ner_loads_and_predicts(trained_model, tmp_path):
-    """Trained model is loadable by CustomNerPipe without errors."""
-    model_dir, models_dir, _ = trained_model
+def test_huggingface_ner_loads_and_predicts(trained_model, tmp_path, monkeypatch):
+    """Trained model is loadable by HuggingfaceNerPipe without errors."""
+    _, models_dir, _ = trained_model
 
-    from clinical_deid.pipes.custom_ner.pipe import CustomNerPipe
+    monkeypatch.setenv("CLINICAL_DEID_MODELS_DIR", str(models_dir))
+    from clinical_deid.config import reset_settings
+    reset_settings()
 
-    pipe = CustomNerPipe({"model_name": "tiny-phi-v1"}, models_dir=models_dir)
+    from clinical_deid.pipes.huggingface_ner.pipe import HuggingfaceNerPipe
+
+    pipe = HuggingfaceNerPipe({"model": "tiny-phi-v1"})
     doc = AnnotatedDocument(
         document=Document(id="smoke", text="Patient John Smith called."),
         spans=[],

@@ -44,6 +44,14 @@ class ValidatePipelineRequest(BaseModel):
 class ValidatePipelineResponse(BaseModel):
     valid: bool
     error: str | None = None
+    output_label_space: list[str] | None = Field(
+        default=None,
+        description="Symbolic output span labels after detector remaps and label_mapper/filter (when valid).",
+    )
+    output_label_space_updated_at: str | None = Field(
+        default=None,
+        description="ISO-8601 timestamp when output_label_space was computed (validate preview only).",
+    )
 
 
 # ---------------------------------------------------------------------------

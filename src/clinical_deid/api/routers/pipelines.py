@@ -6,6 +6,7 @@ all operate on the filesystem — no database.
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Annotated
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
@@ -34,6 +35,10 @@ from clinical_deid.pipeline_store import (
 )
 from clinical_deid.dictionary_store import DictionaryStore
 from clinical_deid.pipes.regex_ner import builtin_regex_label_names
+from clinical_deid.pipes.label_space import (
+    enrich_pipeline_config_with_label_space,
+    effective_output_labels_from_pipeline,
+)
 from clinical_deid.pipes.registry import (
     compute_base_labels,
     get_label_space_bundle,
@@ -91,10 +96,13 @@ def list_pipe_types() -> list[PipeTypeInfo]:
         config_cls = reg.get(entry["name"])
         if config_cls is not None:
             config_schema = pipe_config_json_schema(config_cls)
-        base_labels = entry.get("base_labels")
-        if config_schema and base_labels:
-            _inject_base_labels(config_schema, base_labels, entry["name"])
         if config_schema:
+            # Always inject ui_pipe_type so bundle-mode detectors (whose default
+            # base_labels may be empty until a model is selected) can still wire
+            # the label-mapping widget to the per-pipe label-space bundle.
+            _inject_base_labels(
+                config_schema, entry.get("base_labels") or [], entry["name"]
+            )
             _inject_dict_info(config_schema)
             _inject_dynamic_options(config_schema)
         result.append(PipeTypeInfo(**entry, config_schema=config_schema))
@@ -277,12 +285,13 @@ async def blacklist_parse_wordlists(
 def create_pipeline(body: CreatePipelineRequest) -> PipelineDetail:
     """Create a named pipeline (writes JSON file)."""
     _validate_config(body.config)
+    config_to_save = enrich_pipeline_config_with_label_space(body.config)
     pdir = _pipelines_dir()
     path = pdir / f"{body.name}.json"
     if path.exists():
         raise HTTPException(status_code=409, detail="pipeline name already exists")
-    save_pipeline_config(pdir, body.name, body.config)
-    return PipelineDetail(name=body.name, config=body.config)
+    save_pipeline_config(pdir, body.name, config_to_save)
+    return PipelineDetail(name=body.name, config=config_to_save)
 
 
 @router.get("", response_model=list[PipelineDetail])
@@ -311,7 +320,8 @@ def update_pipeline(pipeline_name: str, body: UpdatePipelineRequest) -> Pipeline
         raise HTTPException(status_code=404, detail=f"pipeline {pipeline_name!r} not found")
     if body.config is not None:
         _validate_config(body.config)
-        save_pipeline_config(pdir, pipeline_name, body.config)
+        config_to_save = enrich_pipeline_config_with_label_space(body.config)
+        save_pipeline_config(pdir, pipeline_name, config_to_save)
     config = load_pipeline_config(pdir, pipeline_name)
     return PipelineDetail(name=pipeline_name, config=config)
 
@@ -332,7 +342,12 @@ def validate_pipeline(pipeline_name: str, body: ValidatePipelineRequest) -> Vali
         raise HTTPException(status_code=404, detail=f"pipeline {pipeline_name!r} not found")
     config = body.config if body.config else load_pipeline_config(pdir, pipeline_name)
     try:
-        load_pipeline(config)
-        return ValidatePipelineResponse(valid=True)
+        pl = load_pipeline(config)
+        labels = sorted(effective_output_labels_from_pipeline(pl))
+        return ValidatePipelineResponse(
+            valid=True,
+            output_label_space=labels,
+            output_label_space_updated_at=datetime.now(timezone.utc).isoformat(),
+        )
     except Exception as exc:
         return ValidatePipelineResponse(valid=False, error=str(exc))

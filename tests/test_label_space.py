@@ -1,0 +1,40 @@
+"""Symbolic pipeline output label space (detectors + label_mapper + label_filter)."""
+
+from __future__ import annotations
+
+from clinical_deid.pipes.label_space import (
+    effective_output_labels_from_pipeline,
+    try_effective_output_labels_from_config,
+)
+from clinical_deid.pipes.registry import load_pipeline
+
+
+def test_label_mapper_renames_phone() -> None:
+    cfg = {
+        "pipes": [
+            {"type": "regex_ner"},
+            {"type": "label_mapper", "config": {"mapping": {"PHONE": "TELEPHONE"}}},
+        ]
+    }
+    pl = load_pipeline(cfg)
+    labs = effective_output_labels_from_pipeline(pl)
+    assert "TELEPHONE" in labs
+    assert "PHONE" not in labs
+
+
+def test_label_filter_keep() -> None:
+    cfg = {
+        "pipes": [
+            {"type": "regex_ner"},
+            {"type": "label_filter", "config": {"keep": ["PHONE"]}},
+        ]
+    }
+    pl = load_pipeline(cfg)
+    labs = effective_output_labels_from_pipeline(pl)
+    assert labs == {"PHONE"}
+
+
+def test_try_effective_from_config_empty_pipeline() -> None:
+    labels, err = try_effective_output_labels_from_config({"pipes": []})
+    assert err is None
+    assert labels == []
