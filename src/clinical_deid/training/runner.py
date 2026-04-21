@@ -173,11 +173,11 @@ def run_training(
             seed=hp.seed,
             report_to="none",
         )
-        # warmup_ratio removed in transformers 5.x; use warmup_steps
-        if "warmup_ratio" in ta_params:
-            ta_kwargs["warmup_ratio"] = hp.warmup_ratio
-        else:
+        # Prefer warmup_steps (transformers v5.2+ deprecates warmup_ratio)
+        if "warmup_steps" in ta_params:
             ta_kwargs["warmup_steps"] = warmup_steps
+        elif "warmup_ratio" in ta_params:
+            ta_kwargs["warmup_ratio"] = hp.warmup_ratio
 
         if hp.eval_steps is not None:
             ta_kwargs["eval_steps"] = hp.eval_steps
