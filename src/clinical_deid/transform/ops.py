@@ -4,6 +4,7 @@ import random
 from copy import deepcopy
 
 from clinical_deid.domain import AnnotatedDocument, Document, PHISpan
+from clinical_deid.pipes.detector_label_mapping import remap_span_labels
 from clinical_deid.transform.splits import reassign_splits
 
 
@@ -52,13 +53,13 @@ def apply_label_mapping(
     """Replace span labels present in ``mapping``; others unchanged."""
     if not mapping:
         return list(docs)
-    out: list[AnnotatedDocument] = []
-    for ad in docs:
-        new_spans = [
-            s.model_copy(update={"label": mapping.get(s.label, s.label)}) for s in ad.spans
-        ]
-        out.append(AnnotatedDocument(document=ad.document, spans=new_spans))
-    return out
+    return [
+        AnnotatedDocument(
+            document=ad.document,
+            spans=remap_span_labels(list(ad.spans), mapping),
+        )
+        for ad in docs
+    ]
 
 
 def random_resize(
@@ -119,6 +120,28 @@ def boost_docs_with_label(
             out.append(
                 clone_annotated_document(ad, f"{ad.document.id}__{id_prefix}{counter}"),
             )
+    return out
+
+
+def filter_documents_by_splits(
+    docs: list[AnnotatedDocument],
+    splits: list[str] | None,
+) -> list[AnnotatedDocument]:
+    """Keep only documents whose ``metadata['split']`` is in *splits*.
+
+    When *splits* is empty or ``None``, returns *docs* unchanged. Documents
+    without a string ``split`` key are excluded when filtering is active.
+    """
+    if not splits:
+        return list(docs)
+    allow = {s.strip() for s in splits if s and str(s).strip()}
+    if not allow:
+        return list(docs)
+    out: list[AnnotatedDocument] = []
+    for ad in docs:
+        sp = ad.document.metadata.get("split")
+        if isinstance(sp, str) and sp in allow:
+            out.append(ad)
     return out
 
 

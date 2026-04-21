@@ -32,12 +32,19 @@ def detector_label_mapping_field(**ui: Any) -> Any:
 DETECTOR_LABEL_MAPPING = detector_label_mapping_field()
 
 
-def apply_detector_label_mapping(
+def remap_span_labels(
     spans: list[PHISpan],
     mapping: dict[str, str | None],
+    *,
+    drop_unmapped: bool = False,
 ) -> list[PHISpan]:
-    """Apply *mapping* to span labels; null values remove the span."""
-    if not mapping:
+    """Single primitive for span-label remap.
+
+    - Key present with non-null value → relabel.
+    - Key present with null value → drop the span.
+    - Key absent → kept as-is, unless *drop_unmapped* is True (then dropped).
+    """
+    if not mapping and not drop_unmapped:
         return spans
     out: list[PHISpan] = []
     for s in spans:
@@ -46,9 +53,37 @@ def apply_detector_label_mapping(
             if new_label is None:
                 continue
             out.append(s.model_copy(update={"label": new_label}))
-        else:
+        elif not drop_unmapped:
             out.append(s)
     return out
+
+
+def remap_label_set(
+    labels: set[str] | frozenset[str],
+    mapping: dict[str, str | None],
+    *,
+    drop_unmapped: bool = False,
+) -> set[str]:
+    """Set-valued twin of :func:`remap_span_labels` — the symbolic label transform."""
+    if not mapping and not drop_unmapped:
+        return set(labels)
+    out: set[str] = set()
+    for lab in labels:
+        if lab in mapping:
+            v = mapping[lab]
+            if v is not None:
+                out.add(v)
+        elif not drop_unmapped:
+            out.add(lab)
+    return out
+
+
+def apply_detector_label_mapping(
+    spans: list[PHISpan],
+    mapping: dict[str, str | None],
+) -> list[PHISpan]:
+    """Apply *mapping* to span labels; null values remove the span."""
+    return remap_span_labels(spans, mapping, drop_unmapped=False)
 
 
 def accumulate_spans(
@@ -81,14 +116,4 @@ def effective_detector_labels(
     mapping: dict[str, str | None],
 ) -> set[str]:
     """Labels that can appear after applying *mapping* to spans whose base labels are in *base_labels*."""
-    if not mapping:
-        return set(base_labels)
-    out: set[str] = set()
-    for lab in base_labels:
-        if lab in mapping:
-            v = mapping[lab]
-            if v is not None:
-                out.add(v)
-        else:
-            out.add(lab)
-    return out
+    return remap_label_set(base_labels, mapping, drop_unmapped=False)

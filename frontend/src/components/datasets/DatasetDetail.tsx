@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { RefreshCw, Loader2, Download } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { RefreshCw, Loader2, Download, FlaskConical } from 'lucide-react';
 import { useDataset, useRefreshAnalytics, useExportDataset } from '../../hooks/useDatasets';
 import AnalyticsDashboard from './AnalyticsDashboard';
 import DocumentBrowser from './DocumentBrowser';
@@ -70,6 +71,14 @@ export default function DatasetDetail({ name }: DatasetDetailProps) {
           )}
         </div>
         <div className="flex items-center gap-2">
+          <Link
+            to={`/evaluate?dataset=${encodeURIComponent(name)}`}
+            className="inline-flex items-center gap-1.5 rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 shadow-sm hover:bg-gray-50"
+            title="Open Evaluate with this dataset selected"
+          >
+            <FlaskConical size={13} />
+            Evaluate
+          </Link>
           <div className="flex items-center gap-1 rounded-md border border-gray-200 p-0.5">
             <select
               value={exportFormat}

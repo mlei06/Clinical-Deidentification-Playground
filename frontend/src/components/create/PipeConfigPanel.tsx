@@ -5,6 +5,7 @@ import { labelColor } from '../../lib/labelColors';
 import SchemaForm from './SchemaForm';
 import type { SchemaFormContext } from './schemaFormContext';
 import { PipeEditorNodeContext } from './PipeEditorNodeContext';
+import HuggingfaceModelInfo from './HuggingfaceModelInfo';
 
 const MIN_WIDTH = 280;
 const MAX_WIDTH = 640;
@@ -157,6 +158,10 @@ export default function PipeConfigPanel() {
 
         {surrogateStrategies && (
           <SurrogateStrategies strategies={surrogateStrategies} />
+        )}
+
+        {data.pipeType === 'huggingface_ner' && typeof data.config?.model === 'string' && (
+          <HuggingfaceModelInfo selectedModel={data.config.model as string} />
         )}
       </div>
 

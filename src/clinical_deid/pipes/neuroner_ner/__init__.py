@@ -1,4 +1,4 @@
-"""PHI detection via NeuroNER LSTM-CRF (TensorFlow 1.x, subprocess bridge)."""
+"""PHI detection via NeuroNER LSTM-CRF (Docker HTTP sidecar)."""
 
 from clinical_deid.pipes.neuroner_ner.pipe import (
     NeuroNerConfig,

@@ -383,9 +383,23 @@ def batch(
 @main.command(name="eval")
 @click.option(
     "--corpus",
-    required=True,
+    required=False,
     type=click.Path(exists=True),
-    help="Gold-standard corpus (JSONL or brat dir).",
+    default=None,
+    help="Gold-standard corpus (JSONL or brat dir). Use exactly one of --corpus or --dataset.",
+)
+@click.option(
+    "--dataset",
+    "dataset_name",
+    required=False,
+    default=None,
+    help="Registered dataset name (see: clinical-deid dataset list). Use exactly one of --corpus or --dataset.",
+)
+@click.option(
+    "--dataset-splits",
+    "dataset_splits_raw",
+    default=None,
+    help="Comma-separated document splits to include (metadata['split']). Applies to --corpus or --dataset.",
 )
 @click.option(
     "--corpus-format",
@@ -415,7 +429,9 @@ def batch(
     help="Flag spans below this confidence.",
 )
 def eval_cmd(
-    corpus: str,
+    corpus: str | None,
+    dataset_name: str | None,
+    dataset_splits_raw: str | None,
     corpus_format: str,
     profile: str,
     pipeline_name: str | None,
@@ -431,19 +447,55 @@ def eval_cmd(
     Examples:
       clinical-deid eval --corpus data.jsonl --profile fast
       clinical-deid eval --corpus data.jsonl --pipeline my-pipeline
+      clinical-deid eval --dataset eval-gold --pipeline my-pipeline
     """
     from clinical_deid.eval.risk import HIPAA_IDENTIFIER_NAMES, hipaa_coverage_report
     from clinical_deid.eval.runner import evaluate_pipeline
     from clinical_deid.ingest.sources import load_annotated_corpus
+    from clinical_deid.transform.ops import filter_documents_by_splits
 
-    # Load gold corpus
-    corpus_path = Path(corpus)
-    fmt_map = {
-        "jsonl": {"jsonl": corpus_path},
-        "brat-dir": {"brat_dir": corpus_path},
-        "brat-corpus": {"brat_corpus": corpus_path},
-    }
-    golds = load_annotated_corpus(**fmt_map[corpus_format])
+    if (corpus is None) == (dataset_name is None):
+        raise click.UsageError("Provide exactly one of --corpus PATH or --dataset NAME.")
+
+    split_list: list[str] | None = None
+    if dataset_splits_raw:
+        split_list = [p.strip() for p in dataset_splits_raw.split(",") if p.strip()]
+
+    def _source_with_splits(base: str) -> str:
+        if not split_list:
+            return base
+        norm = sorted(set(split_list))
+        return f"{base}:splits={'+'.join(norm)}"
+
+    dataset_source: str
+    if dataset_name:
+        from clinical_deid.config import get_settings
+        from clinical_deid.dataset_store import load_dataset_documents
+
+        try:
+            golds = load_dataset_documents(get_settings().datasets_dir, dataset_name)
+        except FileNotFoundError as exc:
+            click.echo(f"Error: {exc}", err=True)
+            raise SystemExit(1)
+        dataset_source = _source_with_splits(f"dataset:{dataset_name}")
+    else:
+        corpus_path = Path(corpus)  # type: ignore[arg-type]
+        fmt_map = {
+            "jsonl": {"jsonl": corpus_path},
+            "brat-dir": {"brat_dir": corpus_path},
+            "brat-corpus": {"brat_corpus": corpus_path},
+        }
+        golds = load_annotated_corpus(**fmt_map[corpus_format])
+        dataset_source = _source_with_splits(str(corpus_path.resolve()))
+
+    if split_list:
+        golds = filter_documents_by_splits(golds, split_list)
+        if not golds:
+            click.echo(
+                "No documents match --dataset-splits; check metadata['split'] on documents.",
+                err=True,
+            )
+            raise SystemExit(1)
 
     if not golds:
         click.echo("No documents in corpus.", err=True)
@@ -544,7 +596,7 @@ def eval_cmd(
             command="eval",
             pipeline_name=resolved_name,
             pipeline_config=config,
-            dataset_source=corpus,
+            dataset_source=dataset_source,
             doc_count=result.document_count,
             error_count=0,
             span_count=o.strict.tp + o.strict.fp,
@@ -1236,22 +1288,24 @@ def train_show(name: str) -> None:
 @click.option(
     "--format",
     "fmt",
-    type=click.Choice(["conll", "spacy", "huggingface"]),
+    type=click.Choice(["conll", "spacy", "huggingface", "brat"]),
     default="conll",
     show_default=True,
-    help="Training data format.",
+    help="Downstream format (training or BRAT for external tools).",
 )
-@click.option("--filename", default=None, help="Override output filename.")
+@click.option("--filename", default=None, help="Override output filename (ignored for brat).")
 def dataset_export(name: str, output_dir: str, fmt: str, filename: str | None) -> None:
-    """Export a registered dataset to a training format.
+    """Export a registered dataset to a training or tooling format.
 
     \b
     Examples:
       clinical-deid dataset export i2b2-2014 -o training/ --format conll
       clinical-deid dataset export physionet -o training/ --format spacy
       clinical-deid dataset export i2b2-2014 -o training/ --format huggingface
+      clinical-deid dataset export i2b2-2014 -o brat_out/ --format brat
     """
     from clinical_deid.dataset_store import load_dataset_documents
+    from clinical_deid.ingest.sink import write_annotated_corpus
     from clinical_deid.training_export import export_training_data
 
     try:
@@ -1264,10 +1318,13 @@ def dataset_export(name: str, output_dir: str, fmt: str, filename: str | None) -
         click.echo("Dataset has no documents.", err=True)
         raise SystemExit(1)
 
+    out_path = Path(output_dir)
     try:
-        path = export_training_data(
-            docs, Path(output_dir), fmt, filename=filename
-        )
+        if fmt == "brat":
+            write_annotated_corpus(docs, brat_dir=out_path)
+            path = out_path
+        else:
+            path = export_training_data(docs, out_path, fmt, filename=filename)
     except ImportError as exc:
         click.echo(f"Error: {exc}", err=True)
         raise SystemExit(1)

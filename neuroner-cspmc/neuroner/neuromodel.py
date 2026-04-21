@@ -49,6 +49,7 @@ from neuroner import utils
 from neuroner import conll_to_brat
 from neuroner import evaluate
 from neuroner import brat_to_conll
+from neuroner import utils_confidence
 from neuroner import utils_nlp
 
 # http://stackoverflow.com/questions/42217532/tensorflow-version-1-0-0-rc2-on-windows-opkernel-op-bestsplits-device-typ
@@ -835,6 +836,16 @@ class NeuroNER(object):
         text2, entities = brat_to_conll.get_entities_from_brat(text_filepath, 
             annotation_filepath, verbose=True)
         assert(text == text2)
+        try:
+            token_conf_floats = train.deploy_token_confidences(
+                self.sess, self.model, self.modeldata, self.transition_params_trained,
+                self.parameters, 'deploy', 0)
+            tokens = self.modeldata.tokens['deploy'][0]
+            utils_confidence.attach_confidence_to_entities(
+                text, entities, tokens, token_conf_floats)
+        except Exception:
+            for ent in entities:
+                ent['confidence'] = None
         return entities
 
     def get_params(self):

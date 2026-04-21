@@ -1,0 +1,13 @@
+{
+  "pipes": [
+    {
+      "type": "huggingface_ner",
+      "config": {
+        "model": "mimic-clinicalbert-sentence",
+        "segmentation": "auto",
+        "source_name": "huggingface_ner",
+        "skip_overlapping": false
+      }
+    }
+  ]
+}

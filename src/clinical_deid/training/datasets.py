@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Iterable
 
 from clinical_deid.domain import AnnotatedDocument, PHISpan
+from clinical_deid.pipes.detector_label_mapping import remap_span_labels
 
 if TYPE_CHECKING:
     import datasets as hf_datasets
@@ -156,11 +157,10 @@ def tokenize_and_align(
 
 def _remap_doc(doc: AnnotatedDocument, remap: dict[str, str]) -> AnnotatedDocument:
     """Return a new AnnotatedDocument with span labels rewritten via remap."""
-    new_spans = [
-        PHISpan(start=s.start, end=s.end, label=remap.get(s.label, s.label))
-        for s in doc.spans
-    ]
-    return AnnotatedDocument(document=doc.document, spans=new_spans)
+    return AnnotatedDocument(
+        document=doc.document,
+        spans=remap_span_labels(list(doc.spans), remap),
+    )
 
 
 # ---------------------------------------------------------------------------

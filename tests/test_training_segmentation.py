@@ -223,17 +223,19 @@ def test_training_config_rejects_unknown_segmentation():
 # ---------------------------------------------------------------------------
 
 
-def test_resolve_segmentation_auto_uses_manifest():
+def test_resolve_segmentation_auto_keeps_sentence_when_trained():
     from clinical_deid.pipes.huggingface_ner.pipe import _resolve_segmentation_mode
 
     assert _resolve_segmentation_mode("auto", "sentence", "m") == "sentence"
-    assert _resolve_segmentation_mode("auto", "truncate", "m") == "truncate"
 
 
-def test_resolve_segmentation_auto_defaults_to_truncate_for_old_manifest():
+def test_resolve_segmentation_auto_upgrades_truncate_to_chunk():
+    """Auto mode never silently drops PHI past the context window — even
+    truncate-trained or older manifests get full-document chunked inference."""
     from clinical_deid.pipes.huggingface_ner.pipe import _resolve_segmentation_mode
 
-    assert _resolve_segmentation_mode("auto", None, "m") == "truncate"
+    assert _resolve_segmentation_mode("auto", "truncate", "m") == "chunk"
+    assert _resolve_segmentation_mode("auto", None, "m") == "chunk"
 
 
 def test_resolve_segmentation_mismatch_warns(caplog):
@@ -316,5 +318,111 @@ def test_predict_huggingface_by_sentence_remaps_to_doc_coords():
     assert len(fake.calls) == 2
     assert "Dr. John Smith" in fake.calls[0]
     assert fake.calls[1].startswith("Jane Doe")
+
+
+# ---------------------------------------------------------------------------
+# Sliding-window chunked inference
+# ---------------------------------------------------------------------------
+
+
+class _FakeWordTokenizer:
+    """Whitespace tokenizer that returns offset_mapping. Lets us drive
+    ``_predict_by_chunks`` without pulling in a real Transformers tokenizer."""
+
+    def __init__(self, model_max_length: int):
+        self.model_max_length = model_max_length
+
+    def num_special_tokens_to_add(self, pair: bool = False) -> int:
+        return 2
+
+    def __call__(self, text: str, **_kwargs):
+        offsets: list[tuple[int, int]] = []
+        i = 0
+        n = len(text)
+        while i < n:
+            while i < n and text[i].isspace():
+                i += 1
+            if i >= n:
+                break
+            j = i
+            while j < n and not text[j].isspace():
+                j += 1
+            offsets.append((i, j))
+            i = j
+        return {"offset_mapping": offsets}
+
+
+class _FakeChunkPipeline:
+    """Pipeline stub that records each substring it sees and returns
+    a per-call list of pre-canned predictions (sub-window-local offsets)."""
+
+    def __init__(self, tokenizer, per_call: list[list[dict]]):
+        self.tokenizer = tokenizer
+        self._per_call = list(per_call)
+        self.calls: list[str] = []
+
+    def __call__(self, text: str):
+        self.calls.append(text)
+        if not self._per_call:
+            return []
+        return self._per_call.pop(0)
+
+
+def test_predict_by_chunks_covers_full_doc_and_remaps_offsets():
+    """A doc longer than the model window must be sliced into overlapping
+    sub-windows; predictions in *every* sub-window are remapped back to
+    document coords."""
+    from clinical_deid.pipes.huggingface_ner.pipe import (
+        CHUNK_STRIDE_TOKENS,
+        _predict_by_chunks,
+    )
+
+    # Build a doc with many word-tokens so chunking actually triggers.
+    # window_tokens = max_tokens - 2 (special) - 2 (margin) = max_tokens - 4.
+    # Pick max_tokens so window_tokens > CHUNK_STRIDE_TOKENS (else step <= 0).
+    max_tokens = CHUNK_STRIDE_TOKENS + 10  # window_tokens = stride + 6
+    n_words = (CHUNK_STRIDE_TOKENS + 6) * 3
+    words = [f"w{i:03d}" for i in range(n_words)]
+    text = " ".join(words)
+
+    tokenizer = _FakeWordTokenizer(model_max_length=max_tokens)
+
+    # Each sub-window call: pretend we found a NAME at local offsets 0..4
+    # (i.e. the first word — words are 4 chars: "w000"). We pre-fill enough
+    # call responses to cover all chunks.
+    fake = _FakeChunkPipeline(
+        tokenizer,
+        per_call=[[{"start": 0, "end": 4, "entity_group": "NAME", "score": 0.9}]] * 20,
+    )
+
+    spans = _predict_by_chunks(fake, text, source="hf:fake", entity_map={}, max_tokens=max_tokens)
+
+    # We must have seen multiple chunks (full coverage, no truncation).
+    assert len(fake.calls) >= 2
+    # Last chunk must reach to the end of the document.
+    last_chunk = fake.calls[-1]
+    assert text.endswith(last_chunk)
+    # Every span maps to a real word boundary in the doc text.
+    for span in spans:
+        assert text[span.start : span.end] in words
+        assert span.label == "NAME"
+
+
+def test_predict_by_chunks_short_doc_runs_one_pass():
+    """If the doc fits in one window, only a single pipeline call is made."""
+    from clinical_deid.pipes.huggingface_ner.pipe import _predict_by_chunks
+
+    text = "Dr. John Smith was admitted today."
+    tokenizer = _FakeWordTokenizer(model_max_length=128)
+    fake = _FakeChunkPipeline(
+        tokenizer,
+        per_call=[[{"start": 4, "end": 14, "entity_group": "NAME", "score": 0.99}]],
+    )
+
+    spans = _predict_by_chunks(fake, text, source="hf:fake", entity_map={}, max_tokens=128)
+
+    assert len(fake.calls) == 1
+    assert len(spans) == 1
+    assert text[spans[0].start : spans[0].end] == "John Smith"
 
 

@@ -8,8 +8,9 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from clinical_deid.domain import AnnotatedDocument, PHISpan
+from clinical_deid.domain import AnnotatedDocument
 from clinical_deid.pipes.base import ConfigurablePipe, Pipe
+from clinical_deid.pipes.detector_label_mapping import remap_span_labels
 from clinical_deid.pipes.span_merge import DEFAULT_LABEL_PRIORITY, MergeStrategy, apply_resolve_spans
 from clinical_deid.pipes.trace import PipelineRunResult, PipelineTraceFrame, snapshot_document
 from clinical_deid.pipes.ui_schema import field_ui
@@ -188,17 +189,13 @@ class LabelMapper(ConfigurablePipe):
         self._config = config
 
     def forward(self, doc: AnnotatedDocument) -> AnnotatedDocument:
-        out: list[PHISpan] = []
-        m = self._config.mapping
-        for span in doc.spans:
-            if span.label in m:
-                new_label = m[span.label]
-                if new_label is None:
-                    continue
-                out.append(span.model_copy(update={"label": new_label}))
-            elif not self._config.drop_unmapped:
-                out.append(span)
-        return doc.with_spans(out)
+        return doc.with_spans(
+            remap_span_labels(
+                list(doc.spans),
+                self._config.mapping,
+                drop_unmapped=self._config.drop_unmapped,
+            )
+        )
 
 
 # ---------------------------------------------------------------------------

@@ -5,14 +5,17 @@ Reads the training output directory produced by neuroner, finds the best epoch
 from results.json, copies and renames the checkpoint files, and generates a
 model_manifest.json for pipeline integration.
 
+Run with the **NeuroNER venv** (``neuroner-cspmc/venv/bin/python``): ``dataset.pickle`` must unpickle
+NeuroNER classes, which are not importable from the main app Python.
+
 Usage:
-    python scripts/neuroner_export.py \
+    neuroner-cspmc/venv/bin/python scripts/neuroner_export.py \
         --training-output output/neuroner/<run_dir> \
         --model-name my_model \
         --models-dir models/neuroner
 
     # Or to export a specific epoch:
-    python scripts/neuroner_export.py \
+    neuroner-cspmc/venv/bin/python scripts/neuroner_export.py \
         --training-output output/neuroner/<run_dir> \
         --model-name my_model \
         --models-dir models/neuroner \

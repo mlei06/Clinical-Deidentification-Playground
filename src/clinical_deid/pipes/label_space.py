@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from clinical_deid.pipes.base import Pipe
 from clinical_deid.pipes.combinators import LabelFilter, LabelMapper, Pipeline
+from clinical_deid.pipes.detector_label_mapping import remap_label_set
 
 
 def _flatten_steps(pipe: Pipeline | Pipe) -> list[Pipe]:
@@ -18,26 +19,6 @@ def _flatten_steps(pipe: Pipeline | Pipe) -> list[Pipe]:
             out.extend(_flatten_steps(child))
         return out
     return [pipe]
-
-
-def _apply_label_mapper_to_set(
-    labels: set[str],
-    mapping: dict[str, str | None],
-    *,
-    drop_unmapped: bool,
-) -> set[str]:
-    """Mirror :class:`LabelMapper` / ``apply_detector_label_mapping`` on a label multiset."""
-    out: set[str] = set()
-    for lab in labels:
-        if lab in mapping:
-            v = mapping[lab]
-            if v is not None:
-                out.add(v)
-        elif drop_unmapped:
-            continue
-        else:
-            out.add(lab)
-    return out
 
 
 def effective_output_labels_from_pipeline(pipe: Pipeline) -> set[str]:
@@ -52,7 +33,7 @@ def effective_output_labels_from_pipeline(pipe: Pipeline) -> set[str]:
     acc: set[str] = set()
     for p in steps:
         if isinstance(p, LabelMapper):
-            acc = _apply_label_mapper_to_set(
+            acc = remap_label_set(
                 acc,
                 dict(p._config.mapping),
                 drop_unmapped=p._config.drop_unmapped,

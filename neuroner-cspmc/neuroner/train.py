@@ -198,3 +198,41 @@ def predict_labels(sess, model, transition_params_trained, parameters, dataset,
         y_pred[dataset_type], y_true[dataset_type], output_filepaths[dataset_type] = prediction_output
 
     return y_pred, y_true, output_filepaths
+
+
+def deploy_token_confidences(sess, model, dataset, transition_params_trained, parameters,
+                             dataset_type, sequence_index):
+    """Per-token softmax probability of the Viterbi / argmax label (proxy confidence).
+
+    Returns a list of floats, one per token in ``dataset.tokens[dataset_type][sequence_index]``.
+    """
+    feed_dict = {
+        model.input_token_indices: dataset.token_indices[dataset_type][sequence_index],
+        model.input_token_character_indices: dataset.character_indices_padded[dataset_type][sequence_index],
+        model.input_token_lengths: dataset.token_lengths[dataset_type][sequence_index],
+        model.input_label_indices_vector: dataset.label_vector_indices[dataset_type][sequence_index],
+        model.dropout_keep_prob: 1.,
+    }
+
+    unary_scores, predictions = sess.run([model.unary_scores, model.predictions], feed_dict)
+
+    if parameters['use_crf']:
+        predictions, _ = tf.contrib.crf.viterbi_decode(unary_scores, transition_params_trained)
+        predictions = predictions[1:-1]
+    else:
+        predictions = predictions.tolist()
+
+    unary_score_list = unary_scores.tolist()[1:-1]
+    assert len(predictions) == len(unary_score_list)
+
+    confs = []
+    for logits, pred_idx in zip(unary_score_list, predictions):
+        arr = np.asarray(logits, dtype=np.float64)
+        ex = np.exp(arr - np.max(arr))
+        sm = ex / np.sum(ex)
+        pi = int(pred_idx)
+        if 0 <= pi < len(sm):
+            confs.append(float(sm[pi]))
+        else:
+            confs.append(0.0)
+    return confs

@@ -112,6 +112,10 @@ def test_label_space_bundle(hf_models_dir):
     }
     assert bundle["default_entity_map"] == {}
     assert bundle["default_model"] == "phi-a"
+    # model_info entries exist for every model (values may be None when
+    # training_config / config.json aren't recorded in the test fixtures).
+    assert set(bundle["model_info"].keys()) == {"phi-a", "phi-b"}
+    assert bundle["model_info"]["phi-a"]["segmentation"] == "sentence"
 
 
 def test_label_space_bundle_empty_registry(tmp_path, monkeypatch):
@@ -120,7 +124,42 @@ def test_label_space_bundle_empty_registry(tmp_path, monkeypatch):
     reset_settings()
 
     bundle = build_huggingface_label_space_bundle()
-    assert bundle == {"labels_by_model": {}, "default_entity_map": {}, "default_model": ""}
+    assert bundle == {
+        "labels_by_model": {},
+        "default_entity_map": {},
+        "default_model": "",
+        "model_info": {},
+    }
+
+
+def test_label_space_bundle_model_info_reads_training_max_length(tmp_path, monkeypatch):
+    """When the manifest stores training_config.hyperparams.max_length and the
+    model dir has a config.json with max_position_embeddings, both surface
+    in the bundle so the UI can show training and architectural limits."""
+    models_dir = tmp_path / "models"
+    model_dir = models_dir / "huggingface" / "phi-trained"
+    model_dir.mkdir(parents=True)
+    (model_dir / "model_manifest.json").write_text(json.dumps({
+        "name": "phi-trained",
+        "framework": "huggingface",
+        "labels": ["NAME"],
+        "base_model": "emilyalsentzer/Bio_ClinicalBERT",
+        "training_config": {"hyperparams": {"max_length": 256}},
+        "training": {"segmentation": "chunk", "train_documents": 42},
+    }))
+    (model_dir / "config.json").write_text(json.dumps({"max_position_embeddings": 512}))
+
+    monkeypatch.setenv("CLINICAL_DEID_MODELS_DIR", str(models_dir))
+    from clinical_deid.config import reset_settings
+    reset_settings()
+
+    bundle = build_huggingface_label_space_bundle()
+    info = bundle["model_info"]["phi-trained"]
+    assert info["trained_max_length"] == 256
+    assert info["max_position_embeddings"] == 512
+    assert info["segmentation"] == "chunk"
+    assert info["base_model"] == "emilyalsentzer/Bio_ClinicalBERT"
+    assert info["train_documents"] == 42
 
 
 def test_resolve_dynamic_options_routes_to_huggingface_models(hf_models_dir):

@@ -197,6 +197,13 @@ class LabelSpaceBundle(BaseModel):
         description="Default raw/entity → canonical PHI map (merged with config.entity_map on the client).",
     )
     default_model: str = Field(description="Default ``model`` when the pipe config omits it.")
+    model_info: dict[str, dict[str, Any]] = Field(
+        default_factory=dict,
+        description=(
+            "Optional per-model metadata for UI display (e.g. trained max sequence length, "
+            "base model, segmentation, training context). Empty for pipes that don't expose it."
+        ),
+    )
 
 
 class PipeTypeInfo(BaseModel):

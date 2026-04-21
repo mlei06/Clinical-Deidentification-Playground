@@ -1,19 +1,22 @@
-"""NeuroNER LSTM-CRF detector pipe (subprocess bridge).
+"""NeuroNER LSTM-CRF detector pipe (Docker HTTP sidecar).
 
-Runs the NeuroNER TensorFlow 1.x model in a separate Python 3.7 process and
-communicates via line-delimited JSON on stdin/stdout.
+Inference talks to ``docker/neuroner`` (see ``CLINICAL_DEID_NEURONER_HTTP_URL``).
+Training still uses ``scripts/neuroner_train.sh`` and a local Python 3.7 venv.
 """
 
 from __future__ import annotations
 
-import concurrent.futures
 import json
 import logging
 import pickle
-import subprocess
 import threading
+import time
 from pathlib import Path
 from typing import Any
+
+import urllib.error
+import urllib.request
+from urllib.parse import quote
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -28,8 +31,6 @@ from clinical_deid.pipes.detector_label_mapping import (
 from clinical_deid.pipes.ui_schema import field_ui
 
 logger = logging.getLogger(__name__)
-
-_WORKER_SCRIPT = str(Path(__file__).with_name("_worker.py"))
 
 
 def _extract_unique_entity_labels_from_dataset_pickle(pickle_path: Path) -> set[str]:
@@ -51,7 +52,7 @@ def _extract_unique_entity_labels_from_dataset_pickle(pickle_path: Path) -> set[
 
 
 def read_raw_neuroner_entity_labels(model_folder: Path) -> list[str]:
-    """Load raw entity type names from an exported model directory (no subprocess).
+    """Load raw entity type names from an exported model directory (no TF load).
 
     Prefer ``model_manifest.json`` (written by ``scripts/neuroner_export``); fall back to
     ``dataset.pickle`` in the same directory.
@@ -77,33 +78,40 @@ def read_raw_neuroner_entity_labels(model_folder: Path) -> list[str]:
 # ── Runtime availability check (called by registry.pipe_availability) ─────
 
 def check_neuroner_ready() -> tuple[bool, dict[str, Any]]:
-    """Check whether the NeuroNER runtime prerequisites are satisfied.
+    """Check whether the NeuroNER Docker sidecar and host assets are available.
 
-    Returns ``(all_ok, details)`` where *details* has per-component status:
-
-    - **venv_python**: Python 3.7 interpreter exists at the expected path
-    - **models**: at least one model directory exists in ``models/neuroner/``
-    - **embeddings**: GloVe embedding file exists at the expected path
-
-    Uses the same default paths as :class:`NeuroNerConfig`.
+    Verifies the HTTP sidecar responds at :envvar:`CLINICAL_DEID_NEURONER_HTTP_URL` and that
+    host ``models/neuroner/`` and GloVe embeddings exist (for manifests and compose mounts).
     """
-    venv = Path("neuroner-cspmc/venv/bin/python").resolve()
-    models_dir = Path("models/neuroner").resolve()
-    embedding = Path("data/word_vectors/glove.6B.100d.txt").resolve()
+    from clinical_deid.config import get_settings
+    from clinical_deid.env_file import resolve_repo_root
 
-    venv_ok = venv.exists() and venv.is_file()
+    root = resolve_repo_root() or Path.cwd()
+    settings = get_settings()
+    base = settings.neuroner_http_url.rstrip("/")
+
+    http_ok = False
+    try:
+        req = urllib.request.Request(base + "/health", method="GET")
+        with urllib.request.urlopen(req, timeout=3.0) as resp:
+            http_ok = 200 <= resp.status < 300
+    except Exception:
+        http_ok = False
+
+    models_dir = (root / "models/neuroner").resolve()
     models_found = (
         sorted(p.name for p in models_dir.iterdir() if p.is_dir())
         if models_dir.exists()
         else []
     )
     models_ok = len(models_found) > 0
+    embedding = (root / "data/word_vectors/glove.6B.100d.txt").resolve()
     embedding_ok = embedding.exists() and embedding.is_file()
 
     details: dict[str, Any] = {
-        "venv_python": {
-            "ok": venv_ok,
-            "path": str(venv),
+        "neuroner_http": {
+            "ok": http_ok,
+            "url": base,
         },
         "models": {
             "ok": models_ok,
@@ -115,7 +123,8 @@ def check_neuroner_ready() -> tuple[bool, dict[str, Any]]:
             "path": str(embedding),
         },
     }
-    return (venv_ok and models_ok and embedding_ok), details
+    all_ok = http_ok and models_ok and embedding_ok
+    return all_ok, details
 
 
 # ── Default entity mapping: neuroner i2b2 labels → clinical-deid labels ──
@@ -191,16 +200,33 @@ def build_neuroner_label_space_bundle() -> dict[str, Any]:
 class NeuroNerConfig(BaseModel):
     """Configuration for the NeuroNER LSTM-CRF detector pipe.
 
-    The model runs in a persistent Python 3.7 subprocess (TF1 is incompatible
-    with Python 3.11+).  On first ``forward()`` call the subprocess is launched
-    and the model is loaded; subsequent calls reuse the warm session.
+    Inference uses the **Docker HTTP sidecar** (``docker compose -f docker/neuroner/compose.yaml``).
+    Set :envvar:`CLINICAL_DEID_NEURONER_HTTP_URL` or ``base_url`` if the sidecar is not on
+    ``http://127.0.0.1:8765``.
+
+    Training uses ``scripts/neuroner_train.sh`` and the local NeuroNER venv from
+    ``scripts/setup_neuroner.sh`` — not this pipe config.
     """
 
-    model_config = ConfigDict(protected_namespaces=())
+    model_config = ConfigDict(protected_namespaces=(), extra="ignore")
+
+    base_url: str = Field(
+        default="",
+        description=(
+            "NeuroNER sidecar base URL. "
+            "Empty uses CLINICAL_DEID_NEURONER_HTTP_URL (default http://127.0.0.1:8765)."
+        ),
+        json_schema_extra=field_ui(
+            ui_group="Sidecar",
+            ui_order=0,
+            ui_widget="text",
+            ui_help="HTTP endpoint of the NeuroNER Docker service",
+        ),
+    )
 
     model: str = Field(
         default="i2b2_2014_glove_spacy_bioes",
-        description="Name of the NeuroNER trained model directory.",
+        description="Name of the NeuroNER trained model directory (must match the sidecar mount).",
         json_schema_extra=field_ui(
             ui_group="Model",
             ui_order=1,
@@ -210,20 +236,28 @@ class NeuroNerConfig(BaseModel):
         ),
     )
 
-    models_dir: str = Field(
-        default="models/neuroner",
-        description="Directory containing NeuroNER model folders (relative to CWD or absolute).",
+    model_folder: str = Field(
+        default="",
+        description=(
+            "Optional absolute path inside the Docker sidecar to the pretrained model directory "
+            "(e.g. /models/neuroner/my_model). If set, the sidecar uses this instead of ``model`` "
+            "for inference; must lie under the mounted models root."
+        ),
         json_schema_extra=field_ui(
             ui_group="Model",
             ui_order=2,
             ui_widget="text",
             ui_advanced=True,
+            ui_help="Leave empty to use ``model`` (subdirectory name only).",
         ),
     )
 
-    neuroner_root: str = Field(
-        default="neuroner-cspmc",
-        description="Path to the neuroner-cspmc project root (relative to CWD or absolute).",
+    models_dir: str = Field(
+        default="models/neuroner",
+        description=(
+            "Directory containing NeuroNER model folders "
+            "(relative to the repo root if discoverable, else CWD, or absolute)."
+        ),
         json_schema_extra=field_ui(
             ui_group="Model",
             ui_order=3,
@@ -232,53 +266,9 @@ class NeuroNerConfig(BaseModel):
         ),
     )
 
-    venv_python: str = Field(
-        default="neuroner-cspmc/venv/bin/python",
-        description="Path to the Python 3.7 interpreter in the NeuroNER virtualenv.",
-        json_schema_extra=field_ui(
-            ui_group="Model",
-            ui_order=4,
-            ui_widget="text",
-            ui_advanced=True,
-        ),
-    )
-
-    token_embedding: str = Field(
-        default="data/word_vectors/glove.6B.100d.txt",
-        description="Path to pretrained token embeddings (relative to project root or absolute).",
-        json_schema_extra=field_ui(
-            ui_group="Model",
-            ui_order=5,
-            ui_widget="text",
-            ui_advanced=True,
-        ),
-    )
-
-    dataset_text_folder: str = Field(
-        default="data/neuroner_deploy",
-        description="Path to dataset text folder with deploy/ subfolder (relative to project root or absolute).",
-        json_schema_extra=field_ui(
-            ui_group="Model",
-            ui_order=6,
-            ui_widget="text",
-            ui_advanced=True,
-        ),
-    )
-
-    output_folder: str = Field(
-        default="output/neuroner",
-        description="Directory for NeuroNER output (relative to project root or absolute).",
-        json_schema_extra=field_ui(
-            ui_group="Model",
-            ui_order=7,
-            ui_widget="text",
-            ui_advanced=True,
-        ),
-    )
-
     startup_timeout: float = Field(
         default=120.0,
-        description="Maximum seconds to wait for the NeuroNER subprocess to become ready.",
+        description="Maximum seconds to wait for the NeuroNER HTTP sidecar to become ready.",
         json_schema_extra=field_ui(
             ui_group="Performance",
             ui_order=1,
@@ -336,15 +326,26 @@ class NeuroNerConfig(BaseModel):
 
 
 class NeuroNerPipe(ConfigurablePipe):
-    """Detector that delegates to a NeuroNER LSTM-CRF model in a Py3.7 subprocess."""
+    """Detector that delegates to NeuroNER via the HTTP Docker sidecar."""
 
     def __init__(self, config: NeuroNerConfig | None = None) -> None:
         self._config = config or NeuroNerConfig()
-        self._process: subprocess.Popen[str] | None = None
         self._lock = threading.Lock()
         self._model_labels: list[str] | None = None
-        self._stderr_thread: threading.Thread | None = None
-        self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+        self._labels_model_key: str | None = None
+
+    def _manifest_model_name(self) -> str:
+        """Registry / on-disk folder name (basename when ``model_folder`` is set)."""
+        mf = (self._config.model_folder or "").strip()
+        if mf:
+            return Path(mf.rstrip("/")).name
+        return self._config.model
+
+    def _labels_cache_key(self) -> str:
+        mf = (self._config.model_folder or "").strip()
+        if mf:
+            return "folder:" + mf
+        return "model:" + self._config.model
 
     def _raw_entity_labels(self) -> list[str]:
         """Raw NeuroNER entity names (before ``entity_map``).
@@ -352,212 +353,144 @@ class NeuroNerPipe(ConfigurablePipe):
         Prefer the same ``model_manifest.json`` registry as ``GET /models`` / :func:`~clinical_deid.models.get_model`
         (``models/<framework>/<name>/model_manifest.json``), then the pipe ``models_dir`` folder, then I2B2 defaults.
         """
-        if self._model_labels is not None:
+        if (
+            self._model_labels is not None
+            and self._labels_model_key == self._labels_cache_key()
+        ):
             return list(self._model_labels)
-        # 1) Central registry — identical labels[] to model_manifest.json (UI + /models API)
+        name = self._manifest_model_name()
         try:
             from clinical_deid.config import get_settings
             from clinical_deid.models import get_model
 
-            info = get_model(get_settings().models_dir, self._config.model)
+            info = get_model(get_settings().models_dir, name)
             if info.framework == "neuroner" and info.labels:
                 return sorted(info.labels)
         except (KeyError, ValueError, OSError):
             pass
-        # 2) Config-specific models_dir (custom layout or tests)
-        folder = Path(self._config.models_dir).resolve() / self._config.model
+        folder = Path(self._config.models_dir).resolve() / name
         on_disk = read_raw_neuroner_entity_labels(folder)
         if on_disk:
             return on_disk
         return list(DEFAULT_ENTITY_MAP.keys())
 
-    # ── Subprocess lifecycle ───────────────────────────────────────────
+    def _http_base_url(self) -> str:
+        raw = (self._config.base_url or "").strip()
+        if raw:
+            return raw.rstrip("/")
+        from clinical_deid.config import get_settings
 
-    def _resolve_paths(self) -> dict[str, str]:
-        """Resolve all config paths to absolute strings.
+        return get_settings().neuroner_http_url.rstrip("/")
 
-        neuroner_root, venv_python, models_dir resolve relative to CWD.
-        token_embedding and dataset_text_folder also resolve relative to CWD
-        (not neuroner_root) so that data lives in the project root.
-        """
-        root = Path(self._config.neuroner_root).resolve()
-        venv = Path(self._config.venv_python).resolve()
-        models_dir = Path(self._config.models_dir).resolve()
-        model_folder = models_dir / self._config.model
-        dataset_text = Path(self._config.dataset_text_folder).resolve()
-        embedding = Path(self._config.token_embedding).resolve()
+    def _http_request_json(
+        self,
+        method: str,
+        path: str,
+        *,
+        body: dict[str, Any] | None = None,
+        timeout: float,
+    ) -> dict[str, Any]:
+        url = self._http_base_url() + path
+        payload = None if body is None else json.dumps(body).encode("utf-8")
+        req = urllib.request.Request(url, data=payload, method=method)
+        if payload is not None:
+            req.add_header("Content-Type", "application/json; charset=utf-8")
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                raw = resp.read().decode()
+                return json.loads(raw) if raw.strip() else {}
+        except urllib.error.HTTPError as e:
+            err_body = e.read().decode() if e.fp else ""
+            raise RuntimeError(f"NeuroNER HTTP {e.code} {path}: {err_body}") from e
 
-        if not venv.exists():
-            raise FileNotFoundError(
-                f"NeuroNER Python interpreter not found: {venv}\n"
-                "Ensure neuroner-cspmc/venv is set up with Python 3.7."
-            )
-        if not model_folder.exists():
-            available = (
-                ", ".join(p.name for p in models_dir.iterdir() if p.is_dir())
-                if models_dir.exists()
-                else "(directory missing)"
-            )
-            raise FileNotFoundError(
-                f"NeuroNER model not found: {model_folder}\n"
-                f"Available models in {models_dir}: {available}"
-            )
-        output = Path(self._config.output_folder).resolve()
-        return {
-            "neuroner_root": str(root),
-            "venv_python": str(venv),
-            "model_folder": str(model_folder),
-            "dataset_text_folder": str(dataset_text),
-            "token_embedding": str(embedding),
-            "output_folder": str(output),
-        }
-
-    def _ensure_subprocess(self) -> subprocess.Popen[str]:
-        """Start the worker subprocess if not already running.  Thread-safe."""
-        with self._lock:
-            if self._process is not None and self._process.poll() is None:
-                return self._process
-
-            paths = self._resolve_paths()
-            cmd = [
-                paths["venv_python"],
-                _WORKER_SCRIPT,
-                f"--neuroner_root={paths['neuroner_root']}",
-                f"--model_folder={paths['model_folder']}",
-                f"--dataset_text_folder={paths['dataset_text_folder']}",
-                f"--token_pretrained_embedding_filepath={paths['token_embedding']}",
-                f"--output_folder={paths['output_folder']}",
-            ]
-            logger.info("Starting NeuroNER worker: %s", " ".join(cmd))
-            self._process = subprocess.Popen(
-                cmd,
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                bufsize=1,  # line-buffered
-            )
-
-            # Continuously drain stderr in a background thread so the OS pipe
-            # buffer never fills up.  (TensorFlow and NeuroNER emit verbose
-            # warnings to stderr; if the buffer fills, the child blocks on
-            # write() and deadlocks.)
-            self._stderr_thread = threading.Thread(
-                target=self._drain_stderr_loop,
-                daemon=True,
-                name="neuroner-stderr-drain",
-            )
-            self._stderr_thread.start()
-
-            # Wait for the "ready" message
-            ready_line = self._readline_with_timeout(self._config.startup_timeout)
-            if ready_line is None:
-                self._kill_process()
-                raise TimeoutError(
-                    f"NeuroNER worker did not become ready within "
-                    f"{self._config.startup_timeout}s.  "
-                    f"Check logs for 'neuroner worker:' stderr output."
-                )
-
-            msg = json.loads(ready_line)
-            if msg.get("status") == "error":
-                self._kill_process()
+    def _poll_http_sidecar_ready(self) -> None:
+        """Wait until GET /health returns 200 (model loaded in sidecar)."""
+        base = self._http_base_url()
+        deadline = time.monotonic() + self._config.startup_timeout
+        last_exc: Exception | None = None
+        while time.monotonic() < deadline:
+            try:
+                req = urllib.request.Request(base + "/health", method="GET")
+                with urllib.request.urlopen(req, timeout=10.0) as resp:
+                    if resp.status == 200:
+                        return
+            except urllib.error.HTTPError as e:
+                last_exc = e
+                if e.code == 503:
+                    try:
+                        detail = json.loads(e.read().decode())
+                    except Exception:
+                        detail = {}
+                    if detail.get("status") == "error":
+                        raise RuntimeError(
+                            "NeuroNER sidecar failed to load model: "
+                            f"{detail.get('detail', e.reason)}"
+                        ) from e
+                    time.sleep(0.5)
+                    continue
                 raise RuntimeError(
-                    f"NeuroNER worker failed to start: {msg.get('detail', '')}  "
-                    f"Check logs for 'neuroner worker:' stderr output."
-                )
+                    f"NeuroNER HTTP /health failed: {e.code} {e.reason}"
+                ) from e
+            except Exception as e:
+                last_exc = e
+                time.sleep(0.5)
+        raise TimeoutError(
+            f"NeuroNER HTTP sidecar at {base} did not become ready within "
+            f"{self._config.startup_timeout}s. Last error: {last_exc!r}"
+        )
 
-            self._model_labels = msg.get("labels")
+    def _ensure_http_ready(self) -> None:
+        with self._lock:
+            if (
+                self._model_labels is not None
+                and self._labels_model_key == self._labels_cache_key()
+            ):
+                return
+        self._poll_http_sidecar_ready()
+        mf = (self._config.model_folder or "").strip()
+        if mf:
+            labels_path = "/v1/labels?model_folder=" + quote(mf, safe="")
+        else:
+            labels_path = "/v1/labels?model=" + quote(self._config.model, safe="")
+        labels_payload = self._http_request_json(
+            "GET",
+            labels_path,
+            timeout=min(60.0, self._config.startup_timeout),
+        )
+        labs = labels_payload.get("labels")
+        parsed: list[str] = (
+            [str(x) for x in labs] if isinstance(labs, list) else []
+        )
+        with self._lock:
+            self._model_labels = parsed
+            self._labels_model_key = self._labels_cache_key()
             logger.info(
-                "NeuroNER worker ready (model=%s, labels=%s)",
-                self._config.model,
+                "NeuroNER HTTP sidecar ready (model=%s, labels=%s)",
+                self._manifest_model_name(),
                 self._model_labels,
             )
-            return self._process
 
-    def _readline_with_timeout(self, timeout: float) -> str | None:
-        """Read one line from the subprocess stdout with a timeout."""
-        assert self._process is not None and self._process.stdout is not None
-        future = self._executor.submit(self._process.stdout.readline)
-        try:
-            return future.result(timeout=timeout)
-        except concurrent.futures.TimeoutError:
-            return None
-
-    def _drain_stderr_loop(self) -> None:
-        """Background loop: read stderr until EOF, logging each line.
-
-        Runs in a daemon thread so the OS pipe buffer never fills up.
-        """
-        proc = self._process
-        if proc is None or proc.stderr is None:
-            return
-        try:
-            for line in proc.stderr:
-                line = line.rstrip("\n")
-                if line:
-                    logger.debug("neuroner worker: %s", line)
-        except Exception:
-            pass
-
-    def _kill_process(self) -> None:
-        if self._process is not None:
-            try:
-                self._process.kill()
-                self._process.wait(timeout=5)
-            except Exception:
-                pass
-            self._process = None
-
-    # ── JSON-RPC communication ─────────────────────────────────────────
-
-    def _send_request(self, request: dict[str, Any]) -> dict[str, Any]:
-        """Send a JSON request and read a JSON response.  Thread-safe.
-
-        The lock serializes all stdin writes and stdout reads so that
-        concurrent callers cannot interleave requests.  The child process
-        is single-threaded (one NeuroNER session), so it processes
-        requests sequentially — no additional child-side locking is needed.
-        """
-        with self._lock:
-            proc = self._process
-            if proc is None or proc.poll() is not None:
-                raise RuntimeError("NeuroNER worker process is not running")
-
-            assert proc.stdin is not None and proc.stdout is not None
-            proc.stdin.write(json.dumps(request) + "\n")
-            proc.stdin.flush()
-
-            line = self._readline_with_timeout(self._config.predict_timeout)
-            if line is None:
-                raise TimeoutError(
-                    f"NeuroNER worker timed out after {self._config.predict_timeout}s.  "
-                    f"Check logs for 'neuroner worker:' stderr output."
-                )
-
-            response = json.loads(line)
-            if "error" in response:
-                raise RuntimeError(
-                    f"NeuroNER worker error ({response['error']}): "
-                    f"{response.get('detail', '')}"
-                )
-            return response
-
-    # ── Public API ─────────────────────────────────────────────────────
+    def _http_predict(self, text: str) -> dict[str, Any]:
+        mf = (self._config.model_folder or "").strip()
+        body: dict[str, Any] = {"text": text}
+        if mf:
+            body["model_folder"] = mf
+        else:
+            body["model"] = self._config.model
+        return self._http_request_json(
+            "POST",
+            "/v1/predict",
+            body=body,
+            timeout=self._config.predict_timeout,
+        )
 
     def model_labels(self) -> list[str]:
         """Return the entity labels the loaded model can produce.
 
         These are the *raw* neuroner labels (before ``entity_map``).
-        Triggers subprocess startup if not already running.
         """
-        self._ensure_subprocess()
-        if self._model_labels is not None:
-            return list(self._model_labels)
-        # Fallback: ask the worker directly
-        response = self._send_request({"action": "labels"})
-        self._model_labels = response.get("labels", [])
-        return list(self._model_labels)
+        self._ensure_http_ready()
+        return list(self._model_labels or [])
 
     @property
     def base_labels(self) -> set[str]:
@@ -582,8 +515,8 @@ class NeuroNerPipe(ConfigurablePipe):
         if not text.strip():
             return doc
 
-        self._ensure_subprocess()
-        response = self._send_request({"action": "predict", "text": text})
+        self._ensure_http_ready()
+        response = self._http_predict(text)
 
         entities = response.get("entities", [])
         found: list[PHISpan] = []
@@ -591,14 +524,26 @@ class NeuroNerPipe(ConfigurablePipe):
         for ent in entities:
             raw_label = ent["type"]
             label = self._config.entity_map.get(raw_label, raw_label)
-            start, end = ent["start"], ent["end"]
+            try:
+                start = int(ent["start"])
+                end = int(ent["end"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            raw_conf = ent.get("confidence")
+            if raw_conf is None:
+                span_conf = None
+            else:
+                try:
+                    span_conf = float(raw_conf)
+                except (TypeError, ValueError):
+                    span_conf = None
             if 0 <= start < end <= text_len:
                 found.append(
                     PHISpan(
                         start=start,
                         end=end,
                         label=label,
-                        confidence=1.0,
+                        confidence=span_conf,
                         source=self._config.source_name,
                     )
                 )
@@ -609,23 +554,8 @@ class NeuroNerPipe(ConfigurablePipe):
             doc, found, skip_overlapping=self._config.skip_overlapping
         )
 
-    # ── Cleanup ────────────────────────────────────────────────────────
-
     def shutdown(self) -> None:
-        """Gracefully stop the worker subprocess and release resources."""
-        with self._lock:
-            if self._process is None or self._process.poll() is not None:
-                self._process = None
-            else:
-                try:
-                    assert self._process.stdin is not None
-                    self._process.stdin.write(json.dumps({"action": "shutdown"}) + "\n")
-                    self._process.stdin.flush()
-                    self._process.wait(timeout=10)
-                except Exception:
-                    self._kill_process()
-                self._process = None
-        self._executor.shutdown(wait=False)
+        """No persistent process — HTTP sidecar runs independently."""
 
     def __del__(self) -> None:
         try:

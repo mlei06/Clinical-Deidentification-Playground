@@ -34,8 +34,11 @@ export default function TransformForm({ sourceDataset, onCreated }: TransformFor
   const { data: datasets } = useDatasets();
   const mutation = useTransformDataset();
   const previewMutation = usePreviewTransform();
+  /** Mutation object identity changes with status; ``mutate`` is stable (TanStack Query). */
+  const previewMutate = previewMutation.mutate;
 
   const [source, setSource] = useState(sourceDataset || '');
+  const [sourceSplits, setSourceSplits] = useState('');
   const [outputName, setOutputName] = useState('');
   const [filterMode, setFilterMode] = useState<FilterMode>('none');
   const [keepLabels, setKeepLabels] = useState<string[]>([]);
@@ -121,6 +124,7 @@ export default function TransformForm({ sourceDataset, onCreated }: TransformFor
 
   const handleSourceChange = (v: string) => {
     setSource(v);
+    setSourceSplits('');
     setKeepLabels([]);
     setDropLabels([]);
     setMappingRows(initialMappingRows());
@@ -154,6 +158,14 @@ export default function TransformForm({ sourceDataset, onCreated }: TransformFor
 
   const stripSplitsForApi = resplitEnabled ? false : ignoreExistingSplits;
 
+  const sourceSplitsForApi = useMemo(() => {
+    const parts = sourceSplits
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    return parts.length ? parts : undefined;
+  }, [sourceSplits]);
+
   const buildPreviewRequestBase = useCallback(() => {
     const drop =
       filterMode === 'drop' && dropLabels.length ? [...dropLabels] : undefined;
@@ -161,6 +173,7 @@ export default function TransformForm({ sourceDataset, onCreated }: TransformFor
       filterMode === 'keep' && keepLabels.length ? [...keepLabels] : undefined;
     return {
       source_dataset: source,
+      ...(sourceSplitsForApi ? { source_splits: sourceSplitsForApi } : {}),
       drop_labels: drop,
       keep_labels: keep,
       label_mapping: labelMapping,
@@ -174,6 +187,7 @@ export default function TransformForm({ sourceDataset, onCreated }: TransformFor
     };
   }, [
     source,
+    sourceSplitsForApi,
     filterMode,
     dropLabels,
     keepLabels,
@@ -189,11 +203,11 @@ export default function TransformForm({ sourceDataset, onCreated }: TransformFor
 
   const handlePreview = useCallback(() => {
     if (!source) return;
-    previewMutation.mutate(buildPreviewRequestBase(), {
+    previewMutate(buildPreviewRequestBase(), {
       onSuccess: (data) => setPreviewResult(data),
       onError: () => setPreviewResult(null),
     });
-  }, [source, buildPreviewRequestBase, previewMutation]);
+  }, [source, buildPreviewRequestBase, previewMutate]);
 
   const previewKey = useMemo(
     () => JSON.stringify(buildPreviewRequestBase()),
@@ -206,13 +220,13 @@ export default function TransformForm({ sourceDataset, onCreated }: TransformFor
       return;
     }
     const t = window.setTimeout(() => {
-      previewMutation.mutate(buildPreviewRequestBase(), {
+      previewMutate(buildPreviewRequestBase(), {
         onSuccess: (data) => setPreviewResult(data),
         onError: () => setPreviewResult(null),
       });
     }, 480);
     return () => window.clearTimeout(t);
-  }, [source, previewKey, previewMutation]);
+  }, [source, previewKey, previewMutate]);
 
   const handleSubmit = () => {
     if (!source || !outputName.trim()) return;
@@ -296,6 +310,21 @@ export default function TransformForm({ sourceDataset, onCreated }: TransformFor
             </p>
           )}
         </div>
+
+        {source ? (
+          <div className="flex max-w-xl flex-col gap-1">
+            <label className="text-xs font-medium text-gray-500">
+              Source splits <span className="font-normal text-gray-400">(optional)</span>
+            </label>
+            <input
+              type="text"
+              value={sourceSplits}
+              onChange={(e) => setSourceSplits(e.target.value)}
+              placeholder="e.g. train, valid — comma-separated; matches metadata.split"
+              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-gray-500 focus:ring-1 focus:ring-gray-500 focus:outline-none"
+            />
+          </div>
+        ) : null}
 
         <div className="rounded-md border border-gray-100 bg-gray-50/50 p-3">
           <p className="mb-2 text-xs font-medium text-gray-600">Span filter</p>

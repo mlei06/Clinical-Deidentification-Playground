@@ -20,6 +20,11 @@
 # The corpus directory must contain train/ and valid/ subdirectories with
 # BRAT-format .txt and .ann files. A test/ subdirectory is optional.
 #
+# By default, NeuroNER's generated files (train_spacy.txt, *_bioes.txt, …) are
+# written under output/neuroner/dataset_staging/<corpus_basename>/ — symlinks to
+# your BRAT train/valid/test — so data/corpora/ stays free of those artifacts.
+# Use --no-staging to pass the corpus path directly to NeuroNER (legacy behavior).
+#
 # Output:
 #   models/neuroner/<model_name>/
 #     model.ckpt.*           TF checkpoint (best epoch)
@@ -50,6 +55,8 @@ usage() {
     echo "  --eval-mode <mode>    Evaluation mode: conll|token|binary (default: token)"
     echo "  --embedding <path>    Path to token embeddings (default: data/word_vectors/glove.6B.100d.txt)"
     echo "  --description <text>  Description for model manifest"
+    echo "  --staging-dir <path>  NeuroNER working dir (default: output/neuroner/dataset_staging/<corpus_basename>)"
+    echo "  --no-staging          Use corpus path as dataset_text_folder (writes *_spacy.txt into corpus)"
     exit 1
 }
 
@@ -63,6 +70,8 @@ PATIENCE=10
 MAX_EPOCHS=100
 EVAL_MODE="token"
 DESCRIPTION=""
+STAGING_DIR=""
+USE_STAGING=1
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -72,9 +81,19 @@ while [ $# -gt 0 ]; do
         --eval-mode)    EVAL_MODE="$2"; shift 2 ;;
         --embedding)    EMBED_FILE="$2"; shift 2 ;;
         --description)  DESCRIPTION="$2"; shift 2 ;;
+        --staging-dir)  STAGING_DIR="$2"; shift 2 ;;
+        --no-staging)   USE_STAGING=0; shift ;;
         *) echo "Unknown option: $1"; usage ;;
     esac
 done
+
+# Relative --staging-dir is anchored to project root
+if [ -n "$STAGING_DIR" ]; then
+    case "$STAGING_DIR" in
+        /*) ;;
+        *) STAGING_DIR="$PROJECT_ROOT/$STAGING_DIR" ;;
+    esac
+fi
 
 # ── Validate ────────────────────────────────────────────────────────────────
 
@@ -97,11 +116,32 @@ if [ -n "$PRETRAINED" ] && [ ! -d "$MODELS_DIR/$PRETRAINED" ]; then
     error "Pretrained model not found: $MODELS_DIR/$PRETRAINED"
 fi
 
+# ── NeuroNER dataset folder (staging keeps generated *_spacy.txt out of corpora/) ─
+
+if [ "$USE_STAGING" -eq 1 ]; then
+    if [ -z "$STAGING_DIR" ]; then
+        STAGING_DIR="$OUTPUT_DIR/dataset_staging/$(basename "$CORPUS_PATH")"
+    fi
+    info "NeuroNER working directory (generated CoNLL/spaCy files): $STAGING_DIR"
+    rm -rf "$STAGING_DIR"
+    mkdir -p "$STAGING_DIR"
+    for split in train valid; do
+        ln -sfn "$CORPUS_PATH/$split" "$STAGING_DIR/$split"
+    done
+    if [ -d "$CORPUS_PATH/test" ]; then
+        ln -sfn "$CORPUS_PATH/test" "$STAGING_DIR/test"
+    fi
+    DATASET_TEXT_FOLDER="$STAGING_DIR"
+else
+    info "Using corpus in-place as NeuroNER dataset_text_folder (may write *_spacy.txt under corpus)"
+    DATASET_TEXT_FOLDER="$CORPUS_PATH"
+fi
+
 # ── Build neuroner command ──────────────────────────────────────────────────
 
 NEURONER_ARGS=(
     --train_model=True
-    --dataset_text_folder="$CORPUS_PATH"
+    --dataset_text_folder="$DATASET_TEXT_FOLDER"
     --token_pretrained_embedding_filepath="$EMBED_FILE"
     --output_folder="$OUTPUT_DIR"
     --patience="$PATIENCE"
@@ -145,7 +185,8 @@ info "Training output: $LATEST_RUN"
 # ── Export best model ───────────────────────────────────────────────────────
 
 cd "$PROJECT_ROOT"
-python scripts/neuroner_export.py \
+# Same interpreter as training: dataset.pickle unpickles NeuroNER classes (not loadable from the main app venv).
+"$VENV_PYTHON" scripts/neuroner_export.py \
     --training-output "$LATEST_RUN" \
     --model-name "$MODEL_NAME" \
     --models-dir "$MODELS_DIR" \

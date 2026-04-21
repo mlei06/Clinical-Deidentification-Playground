@@ -1,13 +1,17 @@
 from __future__ import annotations
 
+import logging
+import os
 from pathlib import Path
-from typing import Any
+from typing import Any, Self
 
-from pydantic import AliasChoices, Field
+from pydantic import AliasChoices, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from clinical_deid.env_file import resolve_env_file_path
 from clinical_deid.synthesis.client import OpenAICompatibleChatClient
+
+logger = logging.getLogger(__name__)
 
 
 class Settings(BaseSettings):
@@ -17,6 +21,9 @@ class Settings(BaseSettings):
     inference_runs_dir: Path = Path("inference_runs")
     models_dir: Path = Path("models")
     datasets_dir: Path = Path("datasets")
+    #: Root for materialized corpus bytes (transform / compose / generate outputs, BRAT exports).
+    #: Flat layout: ``$PROCESSED_DIR/{dataset_name}.jsonl`` for JSONL, ``$PROCESSED_DIR/{name}_export/`` for exports.
+    processed_dir: Path = Path("data/processed")
     dictionaries_dir: Path = Path("data/dictionaries")
     cors_origins: list[str] = Field(
         default=["http://localhost:3000", "http://127.0.0.1:3000"],
@@ -36,6 +43,14 @@ class Settings(BaseSettings):
         default="gpt-4o-mini",
         validation_alias=AliasChoices("OPENAI_MODEL", "CLINICAL_DEID_OPENAI_MODEL"),
     )
+    #: Base URL for the NeuroNER Docker HTTP sidecar (overridable per pipe via ``base_url`` on :class:`~clinical_deid.pipes.neuroner_ner.pipe.NeuroNerConfig`).
+    neuroner_http_url: str = Field(
+        default="http://127.0.0.1:8765",
+        validation_alias=AliasChoices(
+            "CLINICAL_DEID_NEURONER_HTTP_URL",
+            "NEURONER_HTTP_URL",
+        ),
+    )
 
     model_config = SettingsConfigDict(
         env_prefix="CLINICAL_DEID_",
@@ -49,6 +64,21 @@ class Settings(BaseSettings):
             if env_path is not None:
                 data["_env_file"] = str(env_path)
         super().__init__(**data)
+
+    @model_validator(mode="after")
+    def _legacy_corpora_dir_env(self) -> Self:
+        """``CLINICAL_DEID_CORPORA_DIR`` still works (deprecated alias for ``processed_dir``)."""
+        if (
+            os.environ.get("CLINICAL_DEID_CORPORA_DIR")
+            and not os.environ.get("CLINICAL_DEID_PROCESSED_DIR")
+        ):
+            logger.warning(
+                "CLINICAL_DEID_CORPORA_DIR is deprecated; rename to CLINICAL_DEID_PROCESSED_DIR."
+            )
+            return self.model_copy(
+                update={"processed_dir": Path(os.environ["CLINICAL_DEID_CORPORA_DIR"])},
+            )
+        return self
 
     @property
     def sqlite_path(self) -> Path | None:

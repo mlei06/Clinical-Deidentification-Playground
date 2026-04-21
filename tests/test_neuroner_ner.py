@@ -1,7 +1,6 @@
 """Tests for the neuroner_ner detector pipe.
 
-All tests use mocked subprocess communication — no Python 3.7 venv or
-TensorFlow required.
+Uses mocked HTTP helpers — no Docker sidecar or TensorFlow required.
 """
 
 from __future__ import annotations
@@ -27,6 +26,7 @@ def _make_doc(text: str, doc_id: str = "test") -> AnnotatedDocument:
 
 def test_config_defaults() -> None:
     cfg = NeuroNerConfig()
+    assert cfg.base_url == ""
     assert cfg.model == "i2b2_2014_glove_spacy_bioes"
     assert cfg.source_name == "neuroner_ner"
     assert cfg.entity_map == DEFAULT_ENTITY_MAP
@@ -85,14 +85,15 @@ def test_default_entity_map_values_are_nonempty() -> None:
         assert isinstance(v, str) and len(v) > 0, f"Bad mapping for {k}: {v!r}"
 
 
-# ── Forward with mocked subprocess ─────────────────────────────────────────
+# ── Forward with mocked HTTP ───────────────────────────────────────────────
 
 
 @pytest.fixture()
 def pipe_with_mock():
-    """Create a NeuroNerPipe with mocked subprocess methods."""
+    """Create a NeuroNerPipe with mocked HTTP readiness and prediction."""
     pipe = NeuroNerPipe(NeuroNerConfig())
     pipe._model_labels = list(I2B2_LABELS)
+    pipe._labels_model_key = pipe._labels_cache_key()
     return pipe
 
 
@@ -100,12 +101,12 @@ def test_forward_maps_entities(pipe_with_mock: NeuroNerPipe) -> None:
     pipe = pipe_with_mock
     fake_response = {
         "entities": [
-            {"id": "T1", "type": "DOCTOR", "start": 8, "end": 18, "text": "John Smith"},
-            {"id": "T2", "type": "DATE", "start": 32, "end": 42, "text": "01/15/2023"},
+            {"id": "T1", "type": "DOCTOR", "start": 8, "end": 18, "text": "John Smith", "confidence": 0.91},
+            {"id": "T2", "type": "DATE", "start": 32, "end": 42, "text": "01/15/2023", "confidence": 0.88},
         ]
     }
-    with patch.object(pipe, "_ensure_subprocess", return_value=None), \
-         patch.object(pipe, "_send_request", return_value=fake_response):
+    with patch.object(pipe, "_ensure_http_ready", return_value=None), \
+         patch.object(pipe, "_http_predict", return_value=fake_response):
         doc = _make_doc("Patient John Smith admitted on 01/15/2023 for surgery.")
         result = pipe.forward(doc)
 
@@ -114,6 +115,8 @@ def test_forward_maps_entities(pipe_with_mock: NeuroNerPipe) -> None:
     assert "NAME" in labels  # DOCTOR mapped to NAME
     assert "DATE" in labels
     assert all(s.source == "neuroner_ner" for s in result.spans)
+    assert result.spans[0].confidence == pytest.approx(0.91)
+    assert result.spans[1].confidence == pytest.approx(0.88)
 
 
 def test_forward_empty_text(pipe_with_mock: NeuroNerPipe) -> None:
@@ -139,8 +142,8 @@ def test_forward_skips_invalid_offsets(pipe_with_mock: NeuroNerPipe) -> None:
             {"id": "T2", "type": "DATE", "start": 0, "end": 999, "text": "bad"},
         ]
     }
-    with patch.object(pipe, "_ensure_subprocess", return_value=None), \
-         patch.object(pipe, "_send_request", return_value=fake_response):
+    with patch.object(pipe, "_ensure_http_ready", return_value=None), \
+         patch.object(pipe, "_http_predict", return_value=fake_response):
         doc = _make_doc("Hello world")
         result = pipe.forward(doc)
 
@@ -156,8 +159,8 @@ def test_forward_unmapped_label_passes_through(pipe_with_mock: NeuroNerPipe) -> 
             {"id": "T1", "type": "UNKNOWN_LABEL", "start": 0, "end": 5, "text": "Hello"},
         ]
     }
-    with patch.object(pipe, "_ensure_subprocess", return_value=None), \
-         patch.object(pipe, "_send_request", return_value=fake_response):
+    with patch.object(pipe, "_ensure_http_ready", return_value=None), \
+         patch.object(pipe, "_http_predict", return_value=fake_response):
         doc = _make_doc("Hello world")
         result = pipe.forward(doc)
 
@@ -170,6 +173,7 @@ def test_forward_with_label_mapping() -> None:
     config = NeuroNerConfig(label_mapping={"NAME": None, "DATE": "TEMPORAL"})
     pipe = NeuroNerPipe(config)
     pipe._model_labels = list(I2B2_LABELS)
+    pipe._labels_model_key = pipe._labels_cache_key()
 
     fake_response = {
         "entities": [
@@ -177,8 +181,8 @@ def test_forward_with_label_mapping() -> None:
             {"id": "T2", "type": "DATE", "start": 32, "end": 42, "text": "01/15/2023"},
         ]
     }
-    with patch.object(pipe, "_ensure_subprocess", return_value=None), \
-         patch.object(pipe, "_send_request", return_value=fake_response):
+    with patch.object(pipe, "_ensure_http_ready", return_value=None), \
+         patch.object(pipe, "_http_predict", return_value=fake_response):
         doc = _make_doc("Patient John Smith admitted on 01/15/2023 for surgery.")
         result = pipe.forward(doc)
 
@@ -191,6 +195,7 @@ def test_forward_accumulates_with_existing_spans() -> None:
     """New spans are accumulated with pre-existing document spans."""
     pipe = NeuroNerPipe(NeuroNerConfig())
     pipe._model_labels = list(I2B2_LABELS)
+    pipe._labels_model_key = pipe._labels_cache_key()
 
     existing = PHISpan(start=0, end=7, label="NAME", source="other_detector")
     doc = AnnotatedDocument(
@@ -202,8 +207,8 @@ def test_forward_accumulates_with_existing_spans() -> None:
             {"id": "T1", "type": "DATE", "start": 31, "end": 41, "text": "01/15/2023"},
         ]
     }
-    with patch.object(pipe, "_ensure_subprocess", return_value=None), \
-         patch.object(pipe, "_send_request", return_value=fake_response):
+    with patch.object(pipe, "_ensure_http_ready", return_value=None), \
+         patch.object(pipe, "_http_predict", return_value=fake_response):
         result = pipe.forward(doc)
 
     assert len(result.spans) == 2
@@ -218,9 +223,8 @@ def test_forward_accumulates_with_existing_spans() -> None:
 def test_model_labels_returns_cached() -> None:
     pipe = NeuroNerPipe(NeuroNerConfig())
     pipe._model_labels = ["AGE", "DATE", "DOCTOR"]
-    with patch.object(pipe, "_ensure_subprocess", return_value=None):
-        labels = pipe.model_labels()
-    assert labels == ["AGE", "DATE", "DOCTOR"]
+    pipe._labels_model_key = pipe._labels_cache_key()
+    assert pipe.model_labels() == ["AGE", "DATE", "DOCTOR"]
 
 
 def test_base_labels_after_entity_map_default_model() -> None:

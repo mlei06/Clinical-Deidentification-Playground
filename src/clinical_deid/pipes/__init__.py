@@ -13,6 +13,8 @@ from clinical_deid.pipes.detector_label_mapping import (
     apply_detector_label_mapping,
     detector_label_mapping_field,
     effective_detector_labels,
+    remap_label_set,
+    remap_span_labels,
 )
 from clinical_deid.pipes.ui_schema import field_ui, pipe_config_json_schema
 from clinical_deid.pipes.blacklist import (
@@ -61,6 +63,8 @@ __all__ = [
     "apply_detector_label_mapping",
     "accumulate_spans",
     "effective_detector_labels",
+    "remap_label_set",
+    "remap_span_labels",
     "field_ui",
     "pipe_config_json_schema",
     "Pipe",

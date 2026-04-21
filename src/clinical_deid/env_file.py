@@ -6,6 +6,20 @@ import os
 from pathlib import Path
 
 
+def resolve_repo_root() -> Path | None:
+    """Directory containing this project's ``pyproject.toml``, if discoverable.
+
+    Walks up from :mod:`clinical_deid` so paths are stable regardless of
+    :func:`os.getcwd` (unlike resolving relative paths from the process CWD).
+    Returns ``None`` if no ``pyproject.toml`` ancestor is found (e.g. stripped wheel).
+    """
+    here = Path(__file__).resolve()
+    for parent in [here, *here.parents]:
+        if (parent / "pyproject.toml").is_file():
+            return parent
+    return None
+
+
 def resolve_env_file_path() -> Path | None:
     """
     1. ``CLINICAL_DEID_ENV_FILE`` if set and the path exists.

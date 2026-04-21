@@ -65,6 +65,9 @@ export interface PipeStep {
 export interface PipelineConfig {
   pipes: PipeStep[];
   description?: string;
+  /** Cached symbolic output labels (set on save by the API). */
+  output_label_space?: string[];
+  output_label_space_updated_at?: string;
 }
 
 export interface PipelineDetail {
@@ -99,6 +102,8 @@ export interface PipeTypeInfo {
 export interface ValidatePipelineResponse {
   valid: boolean;
   error: string | null;
+  output_label_space?: string[] | null;
+  output_label_space_updated_at?: string | null;
 }
 
 // Evaluation
@@ -116,6 +121,8 @@ export interface EvalRunRequest {
   dataset_path?: string;
   dataset_name?: string;
   dataset_format?: 'jsonl' | 'brat-dir' | 'brat-corpus';
+  /** Only documents with metadata.split in this list (optional). */
+  dataset_splits?: string[];
 }
 
 export interface EvalRunSummary {
@@ -321,7 +328,7 @@ export interface DocumentDetail {
   spans: { start: number; end: number; label: string; confidence?: number | null; source?: string | null }[];
 }
 
-export type TrainingExportFormat = 'conll' | 'spacy' | 'huggingface';
+export type TrainingExportFormat = 'conll' | 'spacy' | 'huggingface' | 'brat';
 
 export interface ExportTrainingRequest {
   format: TrainingExportFormat;
@@ -356,6 +363,8 @@ export interface ComposeRequest {
 export interface TransformRequest {
   source_dataset: string;
   output_name: string;
+  /** Only include documents whose metadata.split is in this list. */
+  source_splits?: string[];
   drop_labels?: string[];
   keep_labels?: string[];
   label_mapping?: Record<string, string>;
@@ -382,6 +391,7 @@ export interface DatasetSchemaResponse {
 
 export interface TransformPreviewRequest {
   source_dataset: string;
+  source_splits?: string[];
   drop_labels?: string[];
   keep_labels?: string[];
   label_mapping?: Record<string, string>;

@@ -2,6 +2,13 @@
 
 NeuroNER is an LSTM-CRF named entity recognizer used for clinical text de-identification. It requires **Python 3.7** because it depends on TensorFlow 1.x.
 
+## Inference vs training
+
+- **Inference and evaluation** (Playground API, pipelines): use the **Docker HTTP sidecar** (`docker/neuroner`). The image contains only **NeuroNER + TensorFlow + Python 3.7**. Your **checkpoints** (`models/neuroner/<name>/`), **GloVe file** (`data/word_vectors/glove.6B.100d.txt`), and **deploy folder** (`data/neuroner_deploy/`) remain on the **host** and are **mounted** into the container (see `docker/neuroner/compose.yaml`). Inference always reads the same local files you trained or downloaded with `setup_neuroner.sh`.
+- **Training** (`scripts/neuroner_train.sh`): uses the **local** virtualenv created by `scripts/setup_neuroner.sh` under `neuroner-cspmc/venv/`.
+
+**Confidence:** Each predicted span may include a **confidence** score (0–1): softmax probability of the predicted label at each token, averaged over overlapping tokens (a practical proxy; CRF decoding is not marginal probability). The pipe does not filter on confidence; spans are kept whenever NeuroNER returns them.
+
 ## Directory layout
 
 All data and output live at the project root. The `neuroner-cspmc/` directory contains only the library code and its virtualenv.
@@ -129,7 +136,7 @@ Place `.txt` files in a `deploy/` subfolder of the dataset directory. Results ar
 
 ### Via Clinical Deid pipeline
 
-The `neuroner_ner` pipe automatically launches a Python 3.7 subprocess to bridge between the main Python 3.11+ environment and the NeuroNER TF1 runtime.
+The `neuroner_ner` pipe calls the **NeuroNER HTTP sidecar** (see `docker/neuroner/`). Set `CLINICAL_DEID_NEURONER_HTTP_URL` (default `http://127.0.0.1:8765`) or the pipe `base_url` if the sidecar listens elsewhere.
 
 **Pipeline JSON:**
 ```json
@@ -149,17 +156,15 @@ The `neuroner_ner` pipe automatically launches a Python 3.7 subprocess to bridge
 }
 ```
 
-Default paths assumed by the pipe (all relative to project root, configurable):
+Common config fields:
 
 | Config field | Default | Description |
 |---|---|---|
-| `model` | `i2b2_2014_glove_spacy_bioes` | Model directory name |
-| `models_dir` | `models/neuroner` | Parent directory for models |
-| `neuroner_root` | `neuroner-cspmc` | Path to neuroner-cspmc engine |
-| `venv_python` | `neuroner-cspmc/venv/bin/python` | Python 3.7 interpreter |
-| `token_embedding` | `data/word_vectors/glove.6B.100d.txt` | GloVe embeddings |
-| `dataset_text_folder` | `data/neuroner_deploy` | Bootstrap deploy folder |
-| `output_folder` | `output/neuroner` | Output directory |
+| `model` | `i2b2_2014_glove_spacy_bioes` | Subdirectory name under `models/neuroner/`; sent to the sidecar so it loads or switches checkpoints (must exist on disk) |
+| `models_dir` | `models/neuroner` | Parent directory for models (used for manifests / label UI) |
+| `base_url` | *(empty)* | Sidecar base URL; empty uses `CLINICAL_DEID_NEURONER_HTTP_URL` |
+| `startup_timeout` | `120` | Seconds to wait for `/health` |
+| `predict_timeout` | `60` | Seconds per `/v1/predict` request |
 
 ### Available models
 
@@ -193,6 +198,8 @@ For clinical de-identification, **`i2b2_2014_glove_spacy_bioes`** is recommended
 
 This runs training, finds the best epoch by validation F1, and exports a pipeline-ready model to `models/neuroner/my_model/` with a `model_manifest.json`.
 
+**NeuroNER working files:** Training writes tokenizer outputs such as `train_spacy.txt` and `train_spacy_bioes.txt` next to your BRAT `train/` folder (NeuroNER’s `dataset_text_folder`). By default, `neuroner_train.sh` uses **`output/neuroner/dataset_staging/<corpus_basename>/`**: it contains only symlinks to your `train/`, `valid/`, and optional `test/` directories, so **`data/corpora/` stays clean**. Override the location with `--staging-dir`, or pass **`--no-staging`** to use the corpus path directly (previous behavior).
+
 ### Corpus format
 
 Corpora in `data/corpora/<name>/brat/` must have BRAT-format subdirectories:
@@ -215,8 +222,10 @@ T3	HOSPITAL 68 88	Mount Sinai Hospital
 
 If you want to export a particular epoch from a previous training run instead of the best:
 
+Use the **NeuroNER Python 3.7 venv** (same as training): `dataset.pickle` unpickles NeuroNER types that are not available in the main application interpreter.
+
 ```bash
-python scripts/neuroner_export.py \
+./neuroner-cspmc/venv/bin/python scripts/neuroner_export.py \
     --training-output output/neuroner/<run_dir> \
     --model-name my_model \
     --epoch 42

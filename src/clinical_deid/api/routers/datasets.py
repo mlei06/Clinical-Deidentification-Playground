@@ -81,10 +81,16 @@ class ComposeRequest(BaseModel):
 
 
 class TransformRequest(BaseModel):
-    """Apply transforms to a dataset and save as a new dataset."""
+    """Apply transforms to a dataset and save as a new dataset.
+
+    Output is always JSONL at ``$PROCESSED_DIR/{output_name}.jsonl``. Use
+    ``/datasets/{name}/export`` with ``format: "brat"`` to materialize BRAT for external tools.
+    """
 
     source_dataset: str
     output_name: str
+    #: If set, only documents with ``metadata["split"]`` in this list are transformed.
+    source_splits: list[str] | None = None
     drop_labels: list[str] | None = None
     keep_labels: list[str] | None = None
     label_mapping: dict[str, str] | None = None
@@ -101,6 +107,7 @@ class TransformPreviewRequest(BaseModel):
     """Dry-run the same transforms as ``TransformRequest`` (no write)."""
 
     source_dataset: str
+    source_splits: list[str] | None = None
     drop_labels: list[str] | None = None
     keep_labels: list[str] | None = None
     label_mapping: dict[str, str] | None = None
@@ -188,6 +195,20 @@ def _manifest_to_detail(m: dict[str, Any]) -> DatasetDetail:
 
 def _datasets_dir():
     return get_settings().datasets_dir
+
+
+def _apply_source_splits_or_422(
+    docs: list[Any],
+    source_splits: list[str] | None,
+    *,
+    empty_detail: str,
+) -> list[Any]:
+    from clinical_deid.transform.ops import filter_documents_by_splits
+
+    filtered = filter_documents_by_splits(docs, source_splits)
+    if source_splits and any(str(s).strip() for s in source_splits) and not filtered:
+        raise HTTPException(status_code=422, detail=empty_detail)
+    return filtered
 
 
 # ---------------------------------------------------------------------------
@@ -378,7 +399,7 @@ def get_document(name: str, doc_id: str) -> dict[str, Any]:
 
 
 class ExportTrainingRequest(BaseModel):
-    format: Literal["conll", "spacy", "huggingface"] = "conll"
+    format: Literal["conll", "spacy", "huggingface", "brat"] = "conll"
     filename: str | None = None
 
 
@@ -391,10 +412,14 @@ class ExportTrainingResponse(BaseModel):
 
 @router.post("/{name}/export", response_model=ExportTrainingResponse, status_code=200)
 def export_dataset(name: str, body: ExportTrainingRequest) -> ExportTrainingResponse:
-    """Export a registered dataset to a training format (CoNLL, spaCy DocBin, HuggingFace JSONL).
+    """Export a registered dataset to a downstream format.
 
-    Writes the output file to the dataset directory.
+    - ``conll`` / ``spacy`` / ``huggingface``: training formats
+    - ``brat``: flat BRAT folder of ``.txt`` / ``.ann`` pairs (for external tools)
+
+    Output goes under ``$PROCESSED_DIR/{name}_export/``.
     """
+    from clinical_deid.ingest.sink import write_annotated_corpus
     from clinical_deid.training_export import export_training_data
 
     ds_dir = _datasets_dir()
@@ -406,11 +431,13 @@ def export_dataset(name: str, body: ExportTrainingRequest) -> ExportTrainingResp
     if not docs:
         raise HTTPException(status_code=422, detail=f"Dataset {name!r} has no documents")
 
-    output_dir = ds_dir / f"{name}_export"
+    output_dir = get_settings().processed_dir / f"{name}_export"
     try:
-        path = export_training_data(
-            docs, output_dir, body.format, filename=body.filename
-        )
+        if body.format == "brat":
+            write_annotated_corpus(docs, brat_dir=output_dir)
+            path: Any = output_dir
+        else:
+            path = export_training_data(docs, output_dir, body.format, filename=body.filename)
     except ImportError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -479,8 +506,9 @@ def compose_datasets(body: ComposeRequest) -> DatasetDetail:
     if not composed:
         raise HTTPException(status_code=422, detail="Composition produced no documents")
 
-    # Write JSONL to datasets dir
-    output_path = ds_dir / f"{body.output_name}.data.jsonl"
+    # Write JSONL under processed root
+    settings = get_settings()
+    output_path = settings.processed_dir / f"{body.output_name}.jsonl"
     write_annotated_corpus(composed, jsonl=output_path)
 
     # Register
@@ -495,7 +523,7 @@ def compose_datasets(body: ComposeRequest) -> DatasetDetail:
     manifest = register_dataset(
         ds_dir,
         body.output_name,
-        str(output_path),
+        str(output_path.resolve()),
         "jsonl",
         description=body.description or f"Composed from: {', '.join(body.source_datasets)}",
         metadata={"provenance": provenance},
@@ -526,6 +554,15 @@ def preview_transform_dataset(body: TransformPreviewRequest) -> TransformPreview
             status_code=422,
             detail=f"Source dataset {body.source_dataset!r} is empty",
         )
+
+    docs = _apply_source_splits_or_422(
+        docs,
+        body.source_splits,
+        empty_detail=(
+            f"No documents match source_splits for dataset {body.source_dataset!r}; "
+            "set metadata['split'] on documents or adjust the filter."
+        ),
+    )
 
     try:
         raw = compute_transform_preview(
@@ -577,6 +614,15 @@ def transform_dataset(body: TransformRequest) -> DatasetDetail:
     if not docs:
         raise HTTPException(status_code=422, detail=f"Source dataset {body.source_dataset!r} is empty")
 
+    docs = _apply_source_splits_or_422(
+        docs,
+        body.source_splits,
+        empty_detail=(
+            f"No documents match source_splits for dataset {body.source_dataset!r}; "
+            "set metadata['split'] on documents or adjust the filter."
+        ),
+    )
+
     # Apply transforms
     transformed = run_transform_pipeline(
         docs,
@@ -594,13 +640,13 @@ def transform_dataset(body: TransformRequest) -> DatasetDetail:
     if not transformed:
         raise HTTPException(status_code=422, detail="Transform produced no documents")
 
-    # Write
-    output_path = ds_dir / f"{body.output_name}.data.jsonl"
+    settings = get_settings()
+    output_path = settings.processed_dir / f"{body.output_name}.jsonl"
     write_annotated_corpus(transformed, jsonl=output_path)
 
-    # Register
     provenance: dict[str, Any] = {"transformed_from": body.source_dataset}
     for field in (
+        "source_splits",
         "drop_labels", "keep_labels", "label_mapping", "target_documents",
         "boost_label", "boost_extra_copies", "resplit", "strip_splits", "seed",
     ):
@@ -611,7 +657,7 @@ def transform_dataset(body: TransformRequest) -> DatasetDetail:
     manifest = register_dataset(
         ds_dir,
         body.output_name,
-        str(output_path),
+        str(output_path.resolve()),
         "jsonl",
         description=body.description or f"Transformed from: {body.source_dataset}",
         metadata={"provenance": provenance},
@@ -682,7 +728,7 @@ def generate_dataset(body: GenerateRequest) -> DatasetDetail:
         )
 
     # Write
-    output_path = ds_dir / f"{body.output_name}.data.jsonl"
+    output_path = settings.processed_dir / f"{body.output_name}.jsonl"
     write_annotated_corpus(docs, jsonl=output_path)
 
     # Register
@@ -699,7 +745,7 @@ def generate_dataset(body: GenerateRequest) -> DatasetDetail:
     manifest = register_dataset(
         ds_dir,
         body.output_name,
-        str(output_path),
+        str(output_path.resolve()),
         "jsonl",
         description=body.description or f"LLM-generated synthetic data ({len(docs)} notes)",
         metadata={"provenance": provenance},

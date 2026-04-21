@@ -61,10 +61,22 @@ export function computePipeLabels(
 /** Per-model label keys + default ``entity_map`` for any detector with ``label_source: 'bundle'``.
  * Key shape (raw NER tag vs. Presidio entity) is signaled by ``PipeTypeInfo.bundle_key_semantics``.
  */
+export interface ModelInfo {
+  trained_max_length?: number | null;
+  max_position_embeddings?: number | null;
+  segmentation?: string | null;
+  base_model?: string | null;
+  train_documents?: number | null;
+  trained_at?: string | null;
+  [key: string]: unknown;
+}
+
 export interface LabelSpaceBundle {
   labels_by_model: Record<string, string[]>;
   default_entity_map: Record<string, string>;
   default_model: string;
+  /** Optional per-model display metadata (e.g. trained max length). Empty for pipes that don't expose it. */
+  model_info?: Record<string, ModelInfo>;
 }
 
 export function fetchLabelSpaceBundle(pipeType: string): Promise<LabelSpaceBundle> {

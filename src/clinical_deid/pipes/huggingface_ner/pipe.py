@@ -54,6 +54,24 @@ def default_base_labels() -> list[str]:
     return []
 
 
+def _read_max_position_embeddings(model_path: Path) -> int | None:
+    """Read the model's architectural context window from ``config.json``.
+
+    Cheap (one ~5KB JSON read) and only happens when the bundle endpoint is hit,
+    so we avoid loading the model just to display this in the UI.
+    """
+    config_path = model_path / "config.json"
+    if not config_path.is_file():
+        return None
+    try:
+        import json
+        raw = json.loads(config_path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    val = raw.get("max_position_embeddings")
+    return int(val) if isinstance(val, int) else None
+
+
 def build_huggingface_label_space_bundle() -> dict[str, Any]:
     """Bundle payload powering the label-mapping widget.
 
@@ -61,20 +79,38 @@ def build_huggingface_label_space_bundle() -> dict[str, Any]:
     declared in each model's ``model_manifest.json`` (raw NER tags, before
     ``entity_map`` projection).  ``default_model`` is the first registered HF
     model so the UI has a sensible fallback when a fresh pipe is added.
+
+    ``model_info`` carries display-only training metadata (trained max sequence
+    length, architectural context window, segmentation, base model, training
+    document count) so the config panel can show what each model can handle
+    without forcing the user to inspect the manifest.
     """
     from clinical_deid.config import get_settings
     from clinical_deid.models import list_models
 
     labels_by_model: dict[str, list[str]] = {}
+    model_info: dict[str, dict[str, Any]] = {}
     default_model = ""
     for info in list_models(get_settings().models_dir, framework="huggingface"):
         labels_by_model[info.name] = sorted(info.labels)
         if not default_model:
             default_model = info.name
+
+        hyperparams = (info.training_config or {}).get("hyperparams") or {}
+        meta = info.training_meta or {}
+        model_info[info.name] = {
+            "trained_max_length": hyperparams.get("max_length"),
+            "max_position_embeddings": _read_max_position_embeddings(info.path),
+            "segmentation": meta.get("segmentation"),
+            "base_model": info.base_model,
+            "train_documents": meta.get("train_documents"),
+            "trained_at": meta.get("trained_at"),
+        }
     return {
         "labels_by_model": labels_by_model,
         "default_entity_map": dict(DEFAULT_ENTITY_MAP),
         "default_model": default_model,
+        "model_info": model_info,
     }
 
 
@@ -131,8 +167,6 @@ class HuggingfaceNerConfig(BaseModel):
         ),
     )
 
-    # Hidden behind the advanced flag — auto-pick from the manifest is the
-    # right default; overrides exist for debugging context-window issues.
     segmentation: SegmentationMode = Field(
         default="auto",
         title="Segmentation",
@@ -147,7 +181,6 @@ class HuggingfaceNerConfig(BaseModel):
             ui_group="Detection",
             ui_order=2,
             ui_widget="select",
-            ui_advanced=True,
         ),
     )
 

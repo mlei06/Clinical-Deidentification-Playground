@@ -1,0 +1,10 @@
+{
+  "pipes": [
+    {
+      "type": "huggingface_ner",
+      "config": {
+        "model": "physionet-clinicalbert-v1"
+      }
+    }
+  ]
+}

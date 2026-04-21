@@ -34,8 +34,7 @@ export default function LabelMappingEditor({
   disabled,
 }: LabelMappingEditorProps) {
   const sourceOptions = useMemo(() => {
-    const seen = new Set(schemaLabels.map((x) => x.label));
-    return [...schemaLabels.map((x) => x.label)].sort((a, b) => a.localeCompare(b));
+    return [...new Set(schemaLabels.map((x) => x.label))].sort((a, b) => a.localeCompare(b));
   }, [schemaLabels]);
 
   const usedFrom = useMemo(() => new Set(rows.map((r) => r.fromLabel).filter(Boolean)), [rows]);

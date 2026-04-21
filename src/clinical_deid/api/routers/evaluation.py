@@ -20,6 +20,13 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/eval", tags=["evaluation"])
 
 
+def _eval_dataset_source_with_splits(base: str, splits: list[str] | None) -> str:
+    if not splits or not any(str(s).strip() for s in splits):
+        return base
+    norm = sorted({s.strip() for s in splits if s and str(s).strip()})
+    return f"{base}:splits={'+'.join(norm)}"
+
+
 # ---------------------------------------------------------------------------
 # Schemas
 # ---------------------------------------------------------------------------
@@ -50,6 +57,8 @@ class EvalRunRequest(BaseModel):
     dataset_path: str | None = None
     dataset_name: str | None = None
     dataset_format: DatasetFormat = "jsonl"
+    #: If set, only documents whose ``metadata["split"]`` is in this list are evaluated.
+    dataset_splits: list[str] | None = None
 
 
 class EvalRunSummary(BaseModel):
@@ -172,6 +181,7 @@ def run_evaluation(session: SessionDep, body: EvalRunRequest) -> EvalRunDetail:
 
     from clinical_deid.eval.runner import evaluate_pipeline
     from clinical_deid.ingest.sources import load_annotated_corpus
+    from clinical_deid.transform.ops import filter_documents_by_splits
 
     settings = get_settings()
 
@@ -199,7 +209,10 @@ def run_evaluation(session: SessionDep, body: EvalRunRequest) -> EvalRunDetail:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except Exception as exc:
             raise HTTPException(status_code=422, detail=f"failed to load dataset: {exc}") from exc
-        dataset_source = f"dataset:{body.dataset_name}"
+        dataset_source = _eval_dataset_source_with_splits(
+            f"dataset:{body.dataset_name}",
+            body.dataset_splits,
+        )
     elif body.dataset_path:
         corpus_path = Path(body.dataset_path).resolve()
         allowed_roots = [Path.cwd().resolve()]
@@ -225,7 +238,10 @@ def run_evaluation(session: SessionDep, body: EvalRunRequest) -> EvalRunDetail:
             raise HTTPException(
                 status_code=422, detail=f"failed to load dataset: {exc}"
             ) from exc
-        dataset_source = body.dataset_path
+        dataset_source = _eval_dataset_source_with_splits(
+            str(corpus_path),
+            body.dataset_splits,
+        )
     else:
         raise HTTPException(
             status_code=422, detail="Provide either dataset_name or dataset_path"
@@ -233,6 +249,14 @@ def run_evaluation(session: SessionDep, body: EvalRunRequest) -> EvalRunDetail:
 
     if not documents:
         raise HTTPException(status_code=422, detail="dataset is empty")
+
+    if body.dataset_splits and any(str(s).strip() for s in body.dataset_splits):
+        documents = filter_documents_by_splits(documents, body.dataset_splits)
+        if not documents:
+            raise HTTPException(
+                status_code=422,
+                detail="No documents match dataset_splits; ensure metadata['split'] matches or adjust the filter.",
+            )
 
     # Run evaluation
     result = evaluate_pipeline(pipe_chain, documents)

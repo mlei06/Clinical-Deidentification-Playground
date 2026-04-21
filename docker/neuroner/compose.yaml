@@ -1,0 +1,33 @@
+# NeuroNER HTTP sidecar — run from repository root:
+#   docker compose -f docker/neuroner/compose.yaml up -d --build
+#
+# Host app: CLINICAL_DEID_NEURONER_HTTP_URL=http://127.0.0.1:8765 (neuroner_ner pipe)
+#
+# Models, GloVe embeddings, and deploy tokenizer data are LOCAL paths on the host,
+# mounted read-only — not baked into the image. Only the Python/TF runtime is in the image.
+
+services:
+  neuroner:
+    build:
+      context: ../..
+      dockerfile: docker/neuroner/Dockerfile
+    ports:
+      - "8765:8765"
+    volumes:
+      - ../../models/neuroner:/models/neuroner:ro
+      - ../../data/word_vectors:/data/word_vectors:ro
+      - ../../data/neuroner_deploy:/data/neuroner_deploy:ro
+    environment:
+      # Host mount is ../../models/neuroner — each subfolder is a model; switch via API/pipeline ``model`` name.
+      NEURONER_MODELS_ROOT: /models/neuroner
+      NEURONER_DEFAULT_MODEL: i2b2_2014_glove_spacy_bioes
+      NEURONER_DATASET_TEXT_FOLDER: /data/neuroner_deploy
+      NEURONER_TOKEN_EMBEDDING: /data/word_vectors/glove.6B.100d.txt
+      NEURONER_OUTPUT_FOLDER: /tmp/neuroner_out
+      NEURONER_HTTP_PORT: "8765"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8765/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 8
+      start_period: 180s
