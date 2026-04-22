@@ -6,12 +6,15 @@ All configuration is managed through environment variables, with sensible defaul
 
 ### Storage paths
 
+All mutable state defaults to `./data/` (one host volume in production) and model weights default to `./models/` (read-only in production). See [deployment.md](deployment.md).
+
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `CLINICAL_DEID_DATABASE_URL` | `sqlite:///./var/dev.sqlite` | SQLAlchemy database URL (audit log) |
-| `CLINICAL_DEID_PIPELINES_DIR` | `pipelines` | Named pipeline JSON configs |
-| `CLINICAL_DEID_EVALUATIONS_DIR` | `evaluations` | Evaluation result JSON files |
-| `CLINICAL_DEID_INFERENCE_RUNS_DIR` | `inference_runs` | Batch inference output directory |
+| `CLINICAL_DEID_DATABASE_URL` | `sqlite:///./data/app.sqlite` | SQLAlchemy database URL (audit log) |
+| `CLINICAL_DEID_PIPELINES_DIR` | `data/pipelines` | Named pipeline JSON configs (mutable via UI or on disk) |
+| `CLINICAL_DEID_MODES_PATH` | `data/modes.json` | Deploy/mode mapping for Production UI and allowlist (`PUT /deploy` or edit file) |
+| `CLINICAL_DEID_EVALUATIONS_DIR` | `data/evaluations` | Evaluation result JSON files |
+| `CLINICAL_DEID_INFERENCE_RUNS_DIR` | `data/inference_runs` | Batch inference output directory |
 | `CLINICAL_DEID_DICTIONARIES_DIR` | `data/dictionaries` | Whitelist/blacklist term-list files |
 | `CLINICAL_DEID_MODELS_DIR` | `models` | Root directory for model registry |
 | `CLINICAL_DEID_CORPORA_DIR` | `data/corpora` | Dataset directories: ``<name>/dataset.json`` + ``corpus.jsonl`` or BRAT files; also `{name}_export/` for training exports |
@@ -52,7 +55,7 @@ The API has two scopes:
 
 - **`admin`** — full access: pipeline CRUD, dictionaries, deploy config (`GET`/`PUT` `/deploy`, `GET` `/deploy/pipelines`), datasets, evaluation, models, audit proxy, and all `/process/*` routes. Admin keys also satisfy `inference`-scoped checks.
 - **`inference`** — least privilege for integrators and the Production UI:
-  - `POST /process/*` (including `/process/redact`, `/process/scrub`), subject to the deploy allowlist in `modes.json` (admins bypass the allowlist).
+  - `POST /process/*` (including `/process/redact`, `/process/scrub`), subject to the deploy allowlist in `data/modes.json` (admins bypass the allowlist).
   - `POST /pipelines/pipe-types/{name}/labels` (label-space compute; no filesystem writes).
   - `GET /deploy/health` (mode list + availability for the mode selector).
   - `GET /audit/logs`, `GET /audit/logs/{id}`, `GET /audit/stats` (read-only audit queries).
@@ -110,10 +113,9 @@ print(settings.openai_api_key)
 
 ## Database
 
-The default database is SQLite at `./var/dev.sqlite`. The `var/` directory is created by the server on first run.
+The default database is SQLite at `./data/app.sqlite`. The `data/` directory is created by the server on first run.
 
 ```bash
-mkdir -p var
 clinical-deid-api
 ```
 
@@ -160,9 +162,9 @@ CORS middleware allows requests from origins in `CLINICAL_DEID_CORS_ORIGINS` (de
 
 ## Deploy configuration
 
-Production deploy settings are stored in `modes.json` (project root). This file is managed via the `/deploy` API endpoints and the Deploy tab in the UI. It maps inference mode names to pipelines, defines an optional pipeline allowlist, and stores the production API URL for audit log proxying.
+Production deploy settings are stored in `data/modes.json`. This file is managed via the `/deploy` API endpoints and the Deploy tab in the UI. It maps inference mode names to pipelines, defines an optional pipeline allowlist, and stores the production API URL for audit log proxying.
 
-In Docker Compose, mount `modes.json` **writable** if operators use `PUT /deploy` from the Playground; a read-only mount blocks saving deploy changes.
+In Docker Compose, mount `./data` **writable** if operators use `PUT /deploy` from the Playground; a read-only mount blocks saving deploy changes.
 
 ## Pipelines vs API output mode
 

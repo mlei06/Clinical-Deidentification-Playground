@@ -4,18 +4,19 @@ NeuroNER is an LSTM-CRF named entity recognizer used for clinical text de-identi
 
 ## Inference vs training
 
-- **Inference and evaluation** (Playground API, pipelines): use the **Docker HTTP sidecar** (`docker/neuroner`). The image contains only **NeuroNER + TensorFlow + Python 3.7**. Your **checkpoints** (`models/neuroner/<name>/`), **GloVe file** (`data/word_vectors/glove.6B.100d.txt`), and **deploy folder** (`data/neuroner_deploy/`) remain on the **host** and are **mounted** into the container (see `docker/neuroner/compose.yaml`). Inference always reads the same local files you trained or downloaded with `setup_neuroner.sh`.
+- **Inference and evaluation** (Playground API, pipelines): use the **Docker HTTP sidecar** (`neuroner-cspmc/sidecar`). The image contains only **NeuroNER + TensorFlow + Python 3.7**. Your **checkpoints** (`models/neuroner/<name>/`), **GloVe file** (`data/word_vectors/glove.6B.100d.txt`), and **deploy folder** (`data/neuroner_deploy/`) remain on the **host** and are **mounted** into the container (see `neuroner-cspmc/sidecar/compose.yaml`). Inference always reads the same local files you trained or downloaded with `setup_neuroner.sh`.
 - **Training** (`scripts/neuroner_train.sh`): uses the **local** virtualenv created by `scripts/setup_neuroner.sh` under `neuroner-cspmc/venv/`.
 
 **Confidence:** Each predicted span may include a **confidence** score (0–1): softmax probability of the predicted label at each token, averaged over overlapping tokens (a practical proxy; CRF decoding is not marginal probability). The pipe does not filter on confidence; spans are kept whenever NeuroNER returns them.
 
 ## Directory layout
 
-All data and output live at the project root. The `neuroner-cspmc/` directory contains only the library code and its virtualenv.
+All data and output live at the project root. The `neuroner-cspmc/` directory contains the library code, its virtualenv, and the **Docker inference sidecar** (FastAPI) under `sidecar/`.
 
 ```
-neuroner-cspmc/              # Engine only — no data, no output
+neuroner-cspmc/              # Engine + HTTP sidecar (no corpus data under here)
   neuroner/                  # Python package
+  sidecar/                   # Dockerfile, compose.yaml, serve.py (inference container)
   setup.py
   requirements.txt
   constraints.txt
@@ -136,7 +137,7 @@ Place `.txt` files in a `deploy/` subfolder of the dataset directory. Results ar
 
 ### Via Clinical Deid pipeline
 
-The `neuroner_ner` pipe calls the **NeuroNER HTTP sidecar** (see `docker/neuroner/`). Set `CLINICAL_DEID_NEURONER_HTTP_URL` (default `http://127.0.0.1:8765`) or the pipe `base_url` if the sidecar listens elsewhere.
+The `neuroner_ner` pipe calls the **NeuroNER HTTP sidecar** (see `neuroner-cspmc/sidecar/`). Set `CLINICAL_DEID_NEURONER_HTTP_URL` (default `http://127.0.0.1:8765`) or the pipe `base_url` if the sidecar listens elsewhere.
 
 **Pipeline JSON:**
 ```json

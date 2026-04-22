@@ -27,6 +27,7 @@ from clinical_deid.api.services.inference import (
     log_audit,
     process_single,
 )
+from clinical_deid.config import get_settings
 from clinical_deid.mode_config import load_mode_config
 from clinical_deid.tables import AuditLogRecord
 
@@ -43,7 +44,7 @@ def _require_pipeline_allowed(caller: InferenceCaller, pipeline_name: str) -> No
     """
     if caller.scope == "admin":
         return
-    deploy_cfg = load_mode_config()
+    deploy_cfg = load_mode_config(get_settings().modes_path)
     if not deploy_cfg.is_pipeline_allowed(pipeline_name):
         raise HTTPException(
             status_code=403,
@@ -126,7 +127,7 @@ def scrub_text(
         client = httpx.Client(base_url="http://deid-server:8000")
         clean = client.post("/process/scrub", json={"text": log_line}).json()["text"]
     """
-    deploy_cfg = load_mode_config()
+    deploy_cfg = load_mode_config(get_settings().modes_path)
 
     mode_or_pipeline = body.mode or deploy_cfg.default_mode or "fast"
     pipeline_name = deploy_cfg.resolve(mode_or_pipeline)
@@ -172,7 +173,7 @@ def process_text(
     x_client_id: str | None = Header(default=None),
 ) -> ProcessResponse:
     # Mode alias? Resolve through deploy config so callers can POST /process/fast.
-    deploy_cfg = load_mode_config()
+    deploy_cfg = load_mode_config(get_settings().modes_path)
     resolved = deploy_cfg.resolve(pipeline_name)
     _require_pipeline_allowed(caller, resolved)
 
@@ -200,7 +201,7 @@ def process_batch(
     output_mode: OutputMode = OutputMode.redacted,
     x_client_id: str | None = Header(default=None),
 ) -> BatchProcessResponse:
-    deploy_cfg = load_mode_config()
+    deploy_cfg = load_mode_config(get_settings().modes_path)
     resolved = deploy_cfg.resolve(pipeline_name)
     _require_pipeline_allowed(caller, resolved)
 

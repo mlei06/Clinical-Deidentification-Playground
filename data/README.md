@@ -1,24 +1,39 @@
 # Data Directory
 
-Workspace for **raw corpora, transformed datasets, and training exports** that feed **local model training** and offline evaluation. It complements the HTTP API: ingest and analytics are available via **Python APIs and CLI scripts** documented in the root [README](../README.md).
+All **mutable runtime state** for the API lives here — a deployment bind-mounts
+this single directory (`./data:/app/data`) plus a read-only `./models:/app/models`
+for weights. See [docs/deployment.md](../docs/deployment.md).
 
-All contents are git-ignored except `.gitkeep` placeholders.
+Most contents are git-ignored except `.gitkeep` placeholders and the seed
+`pipelines/*.json` + `modes.json` files that the repo ships.
 
 ```
 data/
-  raw/                  Unprocessed source files before ingestion
-  corpora/              **Single root for corpus bytes** (see CLINICAL_DEID_CORPORA_DIR)
-                        — BRAT trees, JSONL, outputs from API/CLI transform · compose · LLM generate,
-                        and `{dataset}_export/` folders from dataset export (CoNLL, spaCy, HF, BRAT)
+  pipelines/            Named pipeline JSON configs  (CLINICAL_DEID_PIPELINES_DIR)
+                        — seed files are tracked; operator edits via Playground
+                          admin UI or on disk
+  modes.json            Deploy config: mode aliases, allowlist, production URL
+                        (CLINICAL_DEID_MODES_PATH; mutable via PUT /deploy)
+  evaluations/          Eval result JSON            (CLINICAL_DEID_EVALUATIONS_DIR)
+  inference_runs/       Saved batch inference runs  (CLINICAL_DEID_INFERENCE_RUNS_DIR)
+  app.sqlite            Audit log (SQLite)          (CLINICAL_DEID_DATABASE_URL)
+  corpora/              Registered datasets          (CLINICAL_DEID_CORPORA_DIR)
+                        — each dataset is ``<name>/dataset.json`` + corpus
+                          (``corpus.jsonl`` or BRAT). Training exports land in
+                          ``<name>_export/`` next to dataset dirs.
     physionet/brat/     Example: train/valid/test .txt/.ann
     physionet/jsonl/    Example: optional parallel JSONL copy
-  evaluations/          Optional: offline copies of eval artifacts (eval JSON also under repo evaluations/)
+  dictionaries/         Whitelist / blacklist term lists (CLINICAL_DEID_DICTIONARIES_DIR)
+  raw/                  Unprocessed source files before ingestion
 ```
 
-`corpora/` matches **Settings.corpora_dir** (`data/corpora` by default). Each registered dataset is a subdirectory ``<corpora_dir>/<name>/`` containing ``dataset.json`` (analytics + metadata) and the corpus (typically ``corpus.jsonl`` or BRAT files). Registration **copies** from the path you supply into that layout. API export still writes ``<corpora_dir>/<dataset>_export/`` next to dataset dirs.
-
-| Directory | Purpose | Typical commands |
-|-----------|---------|-----------------|
+| Directory / file | Purpose | Typical commands |
+|------------------|---------|-----------------|
+| `pipelines/` | Pipeline configs | Playground builder; `POST`/`PUT`/`DELETE /pipelines` |
+| `modes.json` | Deploy mapping | Playground Deploy view; `GET`/`PUT /deploy` |
+| `evaluations/` | Eval results | `clinical-deid eval`, `POST /eval/run` |
+| `inference_runs/` | Batch inference snapshots | `clinical-deid batch`, `POST /process/*` |
+| `app.sqlite` | Audit log | Written by `log_run()` on every run |
+| `corpora/` | All corpus files + materialized exports | `clinical-deid dataset register`, `POST /datasets/*` |
+| `dictionaries/` | Whitelist / blacklist term lists | `clinical-deid dict import`, `POST /dictionaries` |
 | `raw/` | Drop source files before ingestion | `scripts/process_*.py` |
-| `corpora/` | All corpus files + materialized exports (incl. `POST /datasets/generate` LLM output) | `scripts/transform_dataset.py`, `clinical-deid dataset register`, `POST /datasets/transform`, `POST /datasets/generate`, `dataset export` |
-| `evaluations/` | Optional local mirror of eval runs | `clinical-deid eval`, `POST /eval/run` (default eval JSON is under top-level `evaluations/`) |

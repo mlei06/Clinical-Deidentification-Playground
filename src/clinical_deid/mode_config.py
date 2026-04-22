@@ -1,7 +1,9 @@
 """Production mode configuration — maps mode names (fast/balanced/accurate) to saved pipelines.
 
-The mapping lives in a JSON file (default: ``modes.json`` in the working directory).
-Operators edit this file to control which pipelines back each mode, then restart.
+The mapping lives in a JSON file (default ``modes.json``; override with
+``CLINICAL_DEID_MODES_PATH`` / ``Settings.modes_path``).
+Operators may edit it on the instance or use the Playground **Deploy** view / ``PUT /deploy``;
+each request reloads the file (no in-memory cache).
 """
 
 from __future__ import annotations
@@ -13,7 +15,7 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_MODES_PATH = Path("modes.json")
+DEFAULT_MODES_PATH = Path("data/modes.json")
 
 
 @dataclass(frozen=True)

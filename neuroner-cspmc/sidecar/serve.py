@@ -8,7 +8,7 @@ Each request can identify the checkpoint by:
 * ``model_folder`` — absolute path inside the container to the pretrained model directory
   (must resolve under ``NEURONER_MODELS_ROOT``).
 
-Environment — see ``docker/neuroner/README.md``.
+Environment — see ``neuroner-cspmc/sidecar/README.md``.
 """
 from __future__ import annotations
 

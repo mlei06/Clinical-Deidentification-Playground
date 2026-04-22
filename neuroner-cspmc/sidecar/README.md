@@ -11,7 +11,7 @@ Training still uses the local NeuroNER venv: `./scripts/neuroner_train.sh` and `
 From the **repository root**:
 
 ```bash
-docker compose -f docker/neuroner/compose.yaml up -d --build
+docker compose -f neuroner-cspmc/sidecar/compose.yaml up -d --build
 ```
 
 - **`NEURONER_MODELS_ROOT`** — path inside the container to the mounted `models/neuroner/` parent (default `/models/neuroner`).

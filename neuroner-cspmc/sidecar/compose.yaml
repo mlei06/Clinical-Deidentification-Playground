@@ -1,5 +1,5 @@
 # NeuroNER HTTP sidecar — run from repository root:
-#   docker compose -f docker/neuroner/compose.yaml up -d --build
+#   docker compose -f neuroner-cspmc/sidecar/compose.yaml up -d --build
 #
 # Host app: CLINICAL_DEID_NEURONER_HTTP_URL=http://127.0.0.1:8765 (neuroner_ner pipe)
 #
@@ -10,7 +10,7 @@ services:
   neuroner:
     build:
       context: ../..
-      dockerfile: docker/neuroner/Dockerfile
+      dockerfile: neuroner-cspmc/sidecar/Dockerfile
     ports:
       - "8765:8765"
     volumes:

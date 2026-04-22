@@ -205,7 +205,7 @@ _CATALOG: list[PipeCatalogEntry] = [
         role="detector",
         extra=None,
         install_hint=(
-            "Inference: docker compose -f docker/neuroner/compose.yaml up -d. "
+            "Inference: docker compose -f neuroner-cspmc/sidecar/compose.yaml up -d. "
             "Training: ./scripts/setup_neuroner.sh"
         ),
         config_path="clinical_deid.pipes.neuroner_ner.pipe:NeuroNerConfig",

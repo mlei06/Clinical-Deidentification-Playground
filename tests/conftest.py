@@ -6,20 +6,22 @@ from fastapi.testclient import TestClient
 
 @pytest.fixture
 def client(tmp_path, monkeypatch):
-    db_file = tmp_path / "test.sqlite"
-    pipelines_dir = tmp_path / "pipelines"
-    evaluations_dir = tmp_path / "evaluations"
-    inference_runs_dir = tmp_path / "inference_runs"
-    corpora_dir = tmp_path / "data" / "corpora"
-    dictionaries_dir = tmp_path / "dictionaries"
-    pipelines_dir.mkdir()
+    data_dir = tmp_path / "data"
+    db_file = data_dir / "app.sqlite"
+    pipelines_dir = data_dir / "pipelines"
+    evaluations_dir = data_dir / "evaluations"
+    inference_runs_dir = data_dir / "inference_runs"
+    corpora_dir = data_dir / "corpora"
+    dictionaries_dir = data_dir / "dictionaries"
+    pipelines_dir.mkdir(parents=True)
     evaluations_dir.mkdir()
     inference_runs_dir.mkdir()
-    corpora_dir.mkdir(parents=True)
+    corpora_dir.mkdir()
     dictionaries_dir.mkdir()
 
     monkeypatch.setenv("CLINICAL_DEID_DATABASE_URL", f"sqlite:///{db_file.as_posix()}")
     monkeypatch.setenv("CLINICAL_DEID_PIPELINES_DIR", str(pipelines_dir))
+    monkeypatch.setenv("CLINICAL_DEID_MODES_PATH", str(data_dir / "modes.json"))
     monkeypatch.setenv("CLINICAL_DEID_EVALUATIONS_DIR", str(evaluations_dir))
     monkeypatch.setenv("CLINICAL_DEID_INFERENCE_RUNS_DIR", str(inference_runs_dir))
     monkeypatch.setenv("CLINICAL_DEID_CORPORA_DIR", str(corpora_dir))

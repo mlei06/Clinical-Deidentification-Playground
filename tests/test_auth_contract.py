@@ -44,12 +44,13 @@ INFERENCE_OK = {
 @pytest.fixture
 def secured_client(tmp_path, monkeypatch):
     """Client for an app with admin + inference keys configured."""
-    db_file = tmp_path / "test.sqlite"
-    pipelines_dir = tmp_path / "pipelines"
-    evaluations_dir = tmp_path / "evaluations"
-    inference_runs_dir = tmp_path / "inference_runs"
-    corpora_dir = tmp_path / "data" / "corpora"
-    dictionaries_dir = tmp_path / "dictionaries"
+    data_dir = tmp_path / "data"
+    db_file = data_dir / "app.sqlite"
+    pipelines_dir = data_dir / "pipelines"
+    evaluations_dir = data_dir / "evaluations"
+    inference_runs_dir = data_dir / "inference_runs"
+    corpora_dir = data_dir / "corpora"
+    dictionaries_dir = data_dir / "dictionaries"
     for d in (
         pipelines_dir, evaluations_dir, inference_runs_dir,
         corpora_dir, dictionaries_dir,
@@ -58,6 +59,7 @@ def secured_client(tmp_path, monkeypatch):
 
     monkeypatch.setenv("CLINICAL_DEID_DATABASE_URL", f"sqlite:///{db_file.as_posix()}")
     monkeypatch.setenv("CLINICAL_DEID_PIPELINES_DIR", str(pipelines_dir))
+    monkeypatch.setenv("CLINICAL_DEID_MODES_PATH", str(data_dir / "modes.json"))
     monkeypatch.setenv("CLINICAL_DEID_EVALUATIONS_DIR", str(evaluations_dir))
     monkeypatch.setenv("CLINICAL_DEID_INFERENCE_RUNS_DIR", str(inference_runs_dir))
     monkeypatch.setenv("CLINICAL_DEID_CORPORA_DIR", str(corpora_dir))
@@ -150,7 +152,8 @@ def test_process_allowlist_blocks_inference_scope(secured_client, tmp_path):
     """Inference scope can only call pipelines on the deploy allowlist."""
     client, _ = secured_client
 
-    pipelines_dir = tmp_path / "pipelines"
+    data_dir = tmp_path / "data"
+    pipelines_dir = data_dir / "pipelines"
     (pipelines_dir / "secret.json").write_text(json.dumps({
         "pipes": [{"type": "regex_ner"}],
     }))
@@ -163,31 +166,23 @@ def test_process_allowlist_blocks_inference_scope(secured_client, tmp_path):
         "default_mode": "fast",
         "allowed_pipelines": ["only-this-one"],
     }
-    (tmp_path / "modes.json").write_text(json.dumps(modes))
+    (data_dir / "modes.json").write_text(json.dumps(modes))
 
-    # Run the request with CWD pointed at tmp_path so load_mode_config() picks
-    # up our modes.json (the module reads from "modes.json" relative to cwd).
-    import os
-    old_cwd = os.getcwd()
-    os.chdir(tmp_path)
-    try:
-        inf = client.post(
-            "/process/secret",
-            json={"text": "hello"},
-            headers={"X-API-Key": INFERENCE_KEY},
-        )
-        assert inf.status_code == 403, inf.text
+    inf = client.post(
+        "/process/secret",
+        json={"text": "hello"},
+        headers={"X-API-Key": INFERENCE_KEY},
+    )
+    assert inf.status_code == 403, inf.text
 
-        adm = client.post(
-            "/process/secret",
-            json={"text": "hello"},
-            headers={"X-API-Key": ADMIN_KEY},
-        )
-        # Admin bypasses the allowlist; the call should succeed (200) since
-        # the pipeline file exists and regex_ner is always registered.
-        assert adm.status_code == 200, adm.text
-    finally:
-        os.chdir(old_cwd)
+    adm = client.post(
+        "/process/secret",
+        json={"text": "hello"},
+        headers={"X-API-Key": ADMIN_KEY},
+    )
+    # Admin bypasses the allowlist; the call should succeed (200) since
+    # the pipeline file exists and regex_ner is always registered.
+    assert adm.status_code == 200, adm.text
 
 
 def test_inference_blocked_from_admin_read_routes(secured_client):

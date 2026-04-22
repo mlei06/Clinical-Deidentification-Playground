@@ -5,8 +5,8 @@
 # Stop:   docker compose down
 #
 # The ``neuroner`` service is optional — only enable it if any pipeline uses
-# the NeuroNER sidecar pipe. See docker/neuroner/ for the existing sidecar
-# image; this file reuses that build context.
+# the NeuroNER sidecar pipe. See neuroner-cspmc/sidecar/ for the sidecar
+# image; uncomment ``neuroner`` below with matching build context if needed.
 
 services:
   api:
@@ -23,7 +23,7 @@ services:
       CLINICAL_DEID_CORS_ORIGINS: '["http://localhost:3000"]'
 
       # API keys — JSON arrays. Empty → auth disabled (not recommended in prod).
-      # Use docker/compose secrets or a secrets manager; do not hardcode real keys.
+      # Use Compose secrets or a secrets manager; do not hardcode real keys.
       CLINICAL_DEID_ADMIN_API_KEYS: '[]'
       CLINICAL_DEID_INFERENCE_API_KEYS: '[]'
 
@@ -33,15 +33,24 @@ services:
       # NeuroNER sidecar URL — only used when a pipeline uses the neuroner_ner pipe.
       CLINICAL_DEID_NEURONER_HTTP_URL: http://neuroner:8765
 
+      # All mutable state under /app/data; model weights under /app/models. These
+      # match the in-code defaults — set explicitly so operators can grep for paths.
+      CLINICAL_DEID_DATABASE_URL: sqlite:///./data/app.sqlite
+      CLINICAL_DEID_PIPELINES_DIR: /app/data/pipelines
+      CLINICAL_DEID_MODES_PATH: /app/data/modes.json
+      CLINICAL_DEID_EVALUATIONS_DIR: /app/data/evaluations
+      CLINICAL_DEID_INFERENCE_RUNS_DIR: /app/data/inference_runs
+      CLINICAL_DEID_CORPORA_DIR: /app/data/corpora
+      CLINICAL_DEID_DICTIONARIES_DIR: /app/data/dictionaries
+      CLINICAL_DEID_MODELS_DIR: /app/models
+
       WEB_CONCURRENCY: "2"
     volumes:
-      - ./pipelines:/app/pipelines
-      # Writable so PUT /deploy can update modes from the Playground (create the file on first deploy if missing).
-      - ./modes.json:/app/modes.json
-      - ./data/dictionaries:/app/data/dictionaries
-      - ./data/corpora:/app/data/corpora
+      # All runtime state — edit pipelines/modes via the Playground admin UI
+      # or by replacing files on the host.
+      - ./data:/app/data
+      # Model weights are immutable at runtime.
       - ./models:/app/models:ro
-      - api-var:/app/var
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/health"]
       interval: 30s
@@ -52,10 +61,20 @@ services:
 
   # Optional NeuroNER sidecar. Uncomment if a deployed pipeline uses it.
   # neuroner:
-  #   build: ./docker/neuroner
+  #   build:
+  #     context: .
+  #     dockerfile: neuroner-cspmc/sidecar/Dockerfile
+  #   volumes:
+  #     - ./models/neuroner:/models/neuroner:ro
+  #     - ./data/word_vectors:/data/word_vectors:ro
+  #     - ./data/neuroner_deploy:/data/neuroner_deploy:ro
+  #   environment:
+  #     NEURONER_MODELS_ROOT: /models/neuroner
+  #     NEURONER_DEFAULT_MODEL: i2b2_2014_glove_spacy_bioes
+  #     NEURONER_DATASET_TEXT_FOLDER: /data/neuroner_deploy
+  #     NEURONER_TOKEN_EMBEDDING: /data/word_vectors/glove.6B.100d.txt
+  #     NEURONER_OUTPUT_FOLDER: /tmp/neuroner_out
   #   expose:
   #     - "8765"
   #   restart: unless-stopped
 
-volumes:
-  api-var:

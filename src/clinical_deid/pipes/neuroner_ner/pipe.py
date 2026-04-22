@@ -1,6 +1,6 @@
 """NeuroNER LSTM-CRF detector pipe (Docker HTTP sidecar).
 
-Inference talks to ``docker/neuroner`` (see ``CLINICAL_DEID_NEURONER_HTTP_URL``).
+Inference talks to ``neuroner-cspmc/sidecar`` (see ``CLINICAL_DEID_NEURONER_HTTP_URL``).
 Training still uses ``scripts/neuroner_train.sh`` and a local Python 3.7 venv.
 """
 
@@ -200,7 +200,9 @@ def build_neuroner_label_space_bundle() -> dict[str, Any]:
 class NeuroNerConfig(BaseModel):
     """Configuration for the NeuroNER LSTM-CRF detector pipe.
 
-    Inference uses the **Docker HTTP sidecar** (``docker compose -f docker/neuroner/compose.yaml``).
+    Inference uses the **Docker HTTP sidecar** (
+        ``docker compose -f neuroner-cspmc/sidecar/compose.yaml``
+    ).
     Set :envvar:`CLINICAL_DEID_NEURONER_HTTP_URL` or ``base_url`` if the sidecar is not on
     ``http://127.0.0.1:8765``.
 

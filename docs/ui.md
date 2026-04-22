@@ -89,7 +89,7 @@ Configure which pipelines are available in production.
 - **Pipeline allowlist** — when enabled, only checked pipelines can be used in production. Unchecked pipelines return 403.
 - **Production API URL** — set the remote production server's base URL to enable production audit log viewing from the Audit tab.
 
-Configuration is stored in `modes.json` at the project root.
+Configuration is stored in `data/modes.json` (override via `CLINICAL_DEID_MODES_PATH`).
 
 **API endpoints used:** `GET /deploy`, `PUT /deploy`, `GET /deploy/pipelines`.
 

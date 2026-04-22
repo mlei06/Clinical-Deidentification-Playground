@@ -36,15 +36,18 @@ Node.js 20.19+ or 22.12+ required for the frontend (Vite 8).
 
 ### Storage pattern: filesystem-first, audit in SQLite
 
+All mutable state lives under `data/` and all model weights live under `models/` — a deployment mounts `./data` read-write and `./models` read-only (see `compose.yaml`).
+
 | What | Storage | Location |
 |------|---------|----------|
-| Pipelines | JSON files | `pipelines/{name}.json` |
-| Eval results | JSON files | `evaluations/{pipeline}_{timestamp}.json` |
+| Pipelines | JSON files | `data/pipelines/{name}.json` (mutable via UI or on disk) |
+| Eval results | JSON files | `data/evaluations/{pipeline}_{timestamp}.json` |
+| Inference runs | JSON files | `data/inference_runs/{pipeline}_{timestamp}.json` |
 | Models | Directories | `models/{framework}/{name}/` |
 | Datasets | Colocated under corpora | `data/corpora/{name}/dataset.json` + `corpus.jsonl` or BRAT files |
 | Dictionaries | Term-list files | `data/dictionaries/{whitelist,blacklist}/` |
-| Deploy config | JSON file | `modes.json` |
-| Audit log | SQLite (SQLModel) | `var/dev.sqlite` — `audit_log` table |
+| Deploy config | JSON file | `data/modes.json` (`CLINICAL_DEID_MODES_PATH`; mutable via UI or on disk) |
+| Audit log | SQLite (SQLModel) | `data/app.sqlite` — `audit_log` table |
 
 No migrations. Pipelines use git for history. The database stores only the append-only audit trail (`AuditLogRecord` in `tables.py`).
 
@@ -162,7 +165,7 @@ src/clinical_deid/
   ingest/                # JSONL, BRAT, ASQ-PHI, MIMIC loaders
   cli.py                 # Click CLI: run, batch, eval, audit, dict, dataset, setup, serve
   dataset_store.py       # Filesystem dataset registry (register, list, analytics)
-  mode_config.py         # Deploy config (modes.json) load/save
+  mode_config.py         # Deploy config (data/modes.json) load/save
   config.py              # Pydantic settings (env vars, .env file)
   tables.py              # AuditLogRecord (only DB table)
   db.py                  # SQLite engine

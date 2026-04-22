@@ -420,7 +420,7 @@ Setting a label to `null` in the mapping drops those spans entirely.
 
 When the API receives `POST /process/{pipeline_name}`:
 
-1. **Load config** — Read the pipeline JSON from the filesystem (`pipelines/{name}.json`).
+1. **Load config** — Read the pipeline JSON from the filesystem (`data/pipelines/{name}.json`).
 2. **Build** — `load_pipeline(config)` deserialises each step in order and instantiates the registered pipe types.
 3. **Execute** — Run the chain (`forward`) on the request text wrapped as an `AnnotatedDocument`. With `?trace=true`, capture snapshots after each step.
 4. **Output** — The response includes spans. Redacted or surrogate **text** is produced from those spans when `output_mode` is `redacted` or `surrogate` (see [api.md](api.md)), not from a separate redactor pipe in the catalog.

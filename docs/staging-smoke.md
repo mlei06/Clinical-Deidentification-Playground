@@ -27,7 +27,7 @@ curl -sS http://localhost:8000/deploy/health -H "X-API-Key: $INFERENCE_KEY"
 
 ## 3. Inference
 
-Ensure `modes.json` maps a mode (e.g. `fast`) to a pipeline that exists under `pipelines/`. If an allowlist is set, the pipeline must be listed.
+Ensure `data/modes.json` maps a mode (e.g. `fast`) to a pipeline that exists under `data/pipelines/`. If an allowlist is set, the pipeline must be listed.
 
 ```bash
 curl -sS -X POST "http://localhost:8000/process/fast?output_mode=redacted" \
@@ -55,4 +55,4 @@ docker compose up --build -d
 curl -sS http://localhost:8000/health
 ```
 
-Ensure `modes.json` exists on the host or create it via the Playground with an **admin** key before relying on mode aliases.
+Ensure `data/modes.json` exists on the host or create it via the Playground with an **admin** key before relying on mode aliases.

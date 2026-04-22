@@ -10,7 +10,7 @@ from pydantic import BaseModel
 from clinical_deid.api.auth import require_admin, require_admin_or_inference
 from clinical_deid.config import get_settings
 from clinical_deid.deploy_health import pipeline_missing_deps
-from clinical_deid.mode_config import DEFAULT_MODES_PATH, DeployConfig, ModeEntry, load_mode_config, save_mode_config
+from clinical_deid.mode_config import DeployConfig, ModeEntry, load_mode_config, save_mode_config
 from clinical_deid.pipeline_store import list_pipelines, load_pipeline_config
 
 router = APIRouter(prefix="/deploy", tags=["deploy"])
@@ -59,7 +59,7 @@ class DeployHealthResponse(BaseModel):
 
 
 def _modes_path() -> Path:
-    return DEFAULT_MODES_PATH
+    return get_settings().modes_path
 
 
 @router.get("", response_model=DeployConfigResponse, dependencies=[require_admin])

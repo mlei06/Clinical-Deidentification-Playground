@@ -5,7 +5,7 @@ A **local-first platform** for clinical PHI de-identification: compose modular d
 High-level flow:
 
 1. **Train locally** — Prepare annotated data (JSONL, BRAT, and other ingest paths in the Python package), export to your trainer of choice, save checkpoints under [`models/`](./models/README.md).
-2. **Configure & compose** — Define pipes (detectors, span transforms, redactors) and merge strategies; persist named pipelines as JSON files in `pipelines/`.
+2. **Configure & compose** — Define pipes (detectors, span transforms, redactors) and merge strategies; persist named pipelines as JSON files in `data/pipelines/`.
 3. **Infer & audit** — Call `POST /process/{pipeline_name}` (or batch); responses include `request_id`, detected spans, redacted text, `processing_time_ms`, and `intermediary_trace` when the pipeline config enables step capture. All calls are logged to a unified SQLite audit trail.
 4. **Evaluate** — Run `clinical-deid eval --corpus data.jsonl` or `POST /eval/run` to compute strict, partial, token-level, and risk-weighted metrics against gold data.
 5. **Playground UI** — A React (Vite + TypeScript) frontend for building pipelines visually, running inference with live span highlighting, evaluating against gold corpora, and managing whitelist/blacklist dictionaries.
@@ -16,18 +16,20 @@ High-level flow:
 
 ### Repository layout
 
+All mutable runtime state lives under `data/`; model weights live under `models/`. A deployment mounts those two directories — see [docs/deployment.md](docs/deployment.md) and [data/README.md](./data/README.md).
+
 | Path | Purpose |
 |------|---------|
 | `frontend/` | React (Vite + TypeScript) playground UI |
-| `pipelines/` | Named pipeline configs (JSON files, git-versioned) |
-| `evaluations/` | Eval result JSON files |
+| `data/pipelines/` | Named pipeline configs (JSON files, git-versioned) |
+| `data/modes.json` | Deploy configuration (inference modes, pipeline allowlist) |
+| `data/evaluations/` | Eval result JSON files |
+| `data/inference_runs/` | Saved batch inference snapshots |
 | `data/corpora/<name>/` | Registered datasets (`dataset.json` + imported corpus files) |
-| `models/` | Trained model artifacts (see [`models/README.md`](./models/README.md)) |
 | `data/dictionaries/` | Whitelist & blacklist term-list files |
 | [`data/raw/`](./data/raw) | Optional local inbox for source files |
-| [`data/corpora/`](./data/corpora) | Annotated datasets (gold, transformed, synthesized) |
-| `modes.json` | Deploy configuration (inference modes, pipeline allowlist) |
-| `var/` | SQLite database (audit log only) |
+| `data/app.sqlite` | SQLite database (audit log only) |
+| `models/` | Trained model artifacts (see [`models/README.md`](./models/README.md)) |
 
 ## Security notice
 
@@ -114,7 +116,7 @@ clinical-deid serve
 # or: uvicorn clinical_deid.api.app:app --reload
 ```
 
-Default SQLite database: `./var/dev.sqlite` (audit log only). Override with `CLINICAL_DEID_DATABASE_URL`.
+Default SQLite database: `./data/app.sqlite` (audit log only). Override with `CLINICAL_DEID_DATABASE_URL`.
 
 ### HTTP API
 
@@ -187,7 +189,7 @@ Pipelines are JSON documents — sequential steps with detectors feeding into sp
 }
 ```
 
-Save as `pipelines/my-pipeline.json` or create via `POST /pipelines`.
+Save as `data/pipelines/my-pipeline.json` or create via `POST /pipelines`.
 
 ## Example JSONL line (training / evaluation)
 

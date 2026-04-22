@@ -1,7 +1,10 @@
 # Clinical De-Identification API — production image.
 #
 # Build:  docker build -t clinical-deid-api .
-# Run:    docker run -p 8000:8000 -v $(pwd)/pipelines:/app/pipelines ... clinical-deid-api
+# Run:    docker run -p 8000:8000 \
+#             -v $(pwd)/data:/app/data \
+#             -v $(pwd)/models:/app/models:ro \
+#             clinical-deid-api
 #
 # Default extras: Presidio, spaCy/NER, LLM client, Parquet, and ``scripts`` (Faker/pandas)
 # for API ``output_mode=surrogate`` / redact. The heavy [train] extra (transformers+torch)
@@ -42,20 +45,23 @@ COPY --chown=appuser:appuser pyproject.toml /app/pyproject.toml
 USER appuser
 WORKDIR /app
 
-# Runtime data paths — bind-mount or use named volumes at runtime.
-#   pipelines/          → pipeline JSON definitions
-#   data/dictionaries/  → whitelist/blacklist term lists
-#   data/corpora/       → datasets as ``<name>/dataset.json`` + corpus files
-#   models/             → model weights (read-mostly)
-#   var/                → SQLite audit DB
-# Plus modes.json at /app/modes.json (single file).
-ENV CLINICAL_DEID_PIPELINES_DIR=/app/pipelines \
-    CLINICAL_DEID_EVALUATIONS_DIR=/app/evaluations \
+# Runtime data paths — bind-mount ./data for mutable state and ./models read-only.
+#   /app/data/pipelines/       → pipeline JSON definitions
+#   /app/data/modes.json       → deploy config (mode aliases, allowlist)
+#   /app/data/evaluations/     → eval results
+#   /app/data/inference_runs/  → saved batch inference snapshots
+#   /app/data/corpora/         → datasets as ``<name>/dataset.json`` + corpus files
+#   /app/data/dictionaries/    → whitelist/blacklist term lists
+#   /app/data/app.sqlite       → SQLite audit DB
+#   /app/models/               → model weights (read-only)
+ENV CLINICAL_DEID_PIPELINES_DIR=/app/data/pipelines \
+    CLINICAL_DEID_MODES_PATH=/app/data/modes.json \
+    CLINICAL_DEID_EVALUATIONS_DIR=/app/data/evaluations \
+    CLINICAL_DEID_INFERENCE_RUNS_DIR=/app/data/inference_runs \
     CLINICAL_DEID_CORPORA_DIR=/app/data/corpora \
     CLINICAL_DEID_DICTIONARIES_DIR=/app/data/dictionaries \
     CLINICAL_DEID_MODELS_DIR=/app/models \
-    CLINICAL_DEID_INFERENCE_RUNS_DIR=/app/inference_runs \
-    CLINICAL_DEID_DATABASE_URL=sqlite:////app/var/dev.sqlite
+    CLINICAL_DEID_DATABASE_URL=sqlite:////app/data/app.sqlite
 
 EXPOSE 8000
 

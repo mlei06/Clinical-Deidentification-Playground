@@ -1,5 +1,5 @@
 # NeuroNER LSTM-CRF inference sidecar (Python 3.7 + TensorFlow 1.x).
-# Build from repository root: docker build -f docker/neuroner/Dockerfile .
+# Build from repository root: docker build -f neuroner-cspmc/sidecar/Dockerfile .
 FROM python:3.7-slim-bullseye
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -17,10 +17,10 @@ COPY neuroner-cspmc/ /app/neuroner-cspmc/
 
 RUN python -m spacy download en
 
-COPY docker/neuroner/requirements-api.txt /app/requirements-api.txt
+COPY neuroner-cspmc/sidecar/requirements-api.txt /app/requirements-api.txt
 RUN pip install --no-cache-dir -r /app/requirements-api.txt
 
-COPY docker/neuroner/serve.py /app/serve.py
+COPY neuroner-cspmc/sidecar/serve.py /app/serve.py
 
 ENV NEURONER_ROOT=/app/neuroner-cspmc \
     PYTHONUNBUFFERED=1

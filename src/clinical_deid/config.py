@@ -15,10 +15,14 @@ logger = logging.getLogger(__name__)
 
 
 class Settings(BaseSettings):
-    database_url: str = "sqlite:///./var/dev.sqlite"
-    pipelines_dir: Path = Path("pipelines")
-    evaluations_dir: Path = Path("evaluations")
-    inference_runs_dir: Path = Path("inference_runs")
+    #: All mutable state lives under ``data/`` so a deployment can mount one volume.
+    #: Model weights live under ``models/`` (read-only in production).
+    database_url: str = "sqlite:///./data/app.sqlite"
+    pipelines_dir: Path = Path("data/pipelines")
+    #: Deploy/mode mapping (Playground **Deploy** view and ``PUT /deploy``). Mutable on disk or via API.
+    modes_path: Path = Path("data/modes.json")
+    evaluations_dir: Path = Path("data/evaluations")
+    inference_runs_dir: Path = Path("data/inference_runs")
     models_dir: Path = Path("models")
     #: All corpus bytes and per-dataset dirs: ``{corpora_dir}/{name}/dataset.json`` plus
     #: ``corpus.jsonl`` or BRAT files. API export dirs use ``{corpora_dir}/{name}_export/``.

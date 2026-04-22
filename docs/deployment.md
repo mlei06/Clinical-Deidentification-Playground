@@ -6,8 +6,11 @@ One FastAPI application serves the Playground, automation, and the Production UI
 
 - **API:** `clinical-deid-api` → `uvicorn clinical_deid.api.app:app` (see root `Dockerfile` and `compose.yaml`).
 - **Playground UI** (`frontend/`) and **Production UI** (`frontend-production/`) are static SPAs. They call the API using `VITE_API_BASE_URL` and optional `VITE_API_KEY` (see each app’s `.env.example`).
-- **Volumes:** Mount persistent directories for `pipelines/`, `modes.json` (writable if you use `PUT /deploy` from the Playground), `data/dictionaries/`, `data/corpora/` (each dataset is a subdirectory with `dataset.json` + corpus files; export outputs use `{name}_export/`), `models/`, and the SQLite path behind `CLINICAL_DEID_DATABASE_URL` (default under `var/` in the container).
-- **NeuroNER:** Optional HTTP sidecar (`docker/neuroner/`); set `CLINICAL_DEID_NEURONER_HTTP_URL`.
+- **Mutable config after deploy:** Pipeline definitions (`CLINICAL_DEID_PIPELINES_DIR`, default `data/pipelines`) and deploy/mode mapping (`CLINICAL_DEID_MODES_PATH`, default `data/modes.json`) are **meant to change in production** without rebuilding the image. Operators can use the full **admin** Playground UI (pipeline builder, **Deploy** view) or **edit the JSON files on the instance** (bind-mount or volume). The API re-reads `modes.json` on each request that needs it; pipeline JSON is read from disk per request when loading a pipeline.
+- **Two volumes** — everything mutable lives under `./data` (pipelines, modes, evaluations, inference runs, corpora, dictionaries, SQLite audit log); model weights live under `./models` and are read-only at runtime. This is the full mount story — see `compose.yaml`:
+    - `./data:/app/data` (read-write)
+    - `./models:/app/models:ro`
+- **NeuroNER:** Optional HTTP sidecar (`neuroner-cspmc/sidecar/`); set `CLINICAL_DEID_NEURONER_HTTP_URL`.
 
 ## Authentication
 

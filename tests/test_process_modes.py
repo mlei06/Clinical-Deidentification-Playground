@@ -119,16 +119,15 @@ def test_scrub_with_explicit_pipeline(client) -> None:
     assert body["processing_time_ms"] > 0
 
 
-def test_scrub_with_deploy_default(client, tmp_path, monkeypatch) -> None:
+def test_scrub_with_deploy_default(client, tmp_path) -> None:
     """When no mode is given, scrub uses deploy config's default_mode."""
     name = _create_pipeline(client, name="scrub-default")
     # Write a modes.json that maps the default mode to our pipeline
-    modes_file = tmp_path / "modes.json"
+    modes_file = tmp_path / "data" / "modes.json"
     modes_file.write_text(json.dumps({
         "modes": {"auto": {"pipeline": name, "description": "test"}},
         "default_mode": "auto",
     }))
-    monkeypatch.chdir(tmp_path)
 
     r = client.post("/process/scrub", json={"text": PHONE_TEXT})
     assert r.status_code == 200, r.text

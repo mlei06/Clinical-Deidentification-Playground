@@ -15,7 +15,8 @@ import httpx
 from fastapi import APIRouter, HTTPException, Query
 
 from clinical_deid.api.auth import require_admin
-from clinical_deid.mode_config import DEFAULT_MODES_PATH, load_mode_config
+from clinical_deid.config import get_settings
+from clinical_deid.mode_config import load_mode_config
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +27,7 @@ _CLIENT_TIMEOUT = 15.0  # seconds
 
 def _production_url() -> str:
     """Read the production API URL from the deploy config."""
-    cfg = load_mode_config(DEFAULT_MODES_PATH)
+    cfg = load_mode_config(get_settings().modes_path)
     if not cfg.production_api_url:
         raise HTTPException(
             status_code=422,

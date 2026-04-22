@@ -32,7 +32,7 @@ Liveness. Always unauthenticated.
 
 ## Pipelines
 
-Base path: `/pipelines`. Pipelines are **named JSON files** on disk (`pipelines/{name}.json`), not versioned rows in a database.
+Base path: `/pipelines`. Pipelines are **named JSON files** on disk (`data/pipelines/{name}.json`), not versioned rows in a database.
 
 When auth is on, **admin** keys are required for all routes below except **`POST /pipelines/pipe-types/{name}/labels`**, which accepts **admin or inference** keys (label-space compute only).
 
@@ -58,7 +58,7 @@ Multipart helpers for the pipeline builder (admin).
 
 ### `POST /pipelines`
 
-Create pipeline (writes `pipelines/{name}.json`).
+Create pipeline (writes `data/pipelines/{name}.json`).
 
 ### `GET /pipelines`
 
@@ -80,9 +80,9 @@ Validate config (optional body overrides file).
 
 ## Process (inference)
 
-Base path: `/process`. **`inference`-scoped** keys may call these routes; **`admin`** keys always can. For **`inference`** callers, the resolved pipeline name must appear on the deploy **allowlist** in `modes.json` when `allowed_pipelines` is set; **admin** bypasses the allowlist.
+Base path: `/process`. **`inference`-scoped** keys may call these routes; **`admin`** keys always can. For **`inference`** callers, the resolved pipeline name must appear on the deploy **allowlist** in `data/modes.json` when `allowed_pipelines` is set; **admin** bypasses the allowlist.
 
-`{pipeline_name}` may be a **saved pipeline name** or a **mode alias** from `modes.json` (e.g. `fast`).
+`{pipeline_name}` may be a **saved pipeline name** or a **mode alias** from `data/modes.json` (e.g. `fast`).
 
 Query parameters on run endpoints include:
 
@@ -109,7 +109,7 @@ Batch variant; body lists `items` with `text` and optional `request_id`.
 
 ## Inference snapshots (admin)
 
-Base path: `/inference`. Saved runs under `inference_runs/` — list, get, save, delete (admin only when auth is on).
+Base path: `/inference`. Saved runs under `data/inference_runs/` — list, get, save, delete (admin only when auth is on).
 
 ---
 
@@ -142,7 +142,7 @@ Base path: `/models` — list, detail, `POST /models/refresh` to rescan `models/
 Base path: `/deploy`.
 
 - `GET /deploy` — Full deploy config (modes, allowlist, `production_api_url`). **Admin.**
-- `PUT /deploy` — Write `modes.json`. **Admin.**
+- `PUT /deploy` — Write `data/modes.json`. **Admin.**
 - `GET /deploy/health` — Per-mode availability (missing deps, missing pipeline file). **Admin or inference.**
 - `GET /deploy/pipelines` — Saved pipeline names for dropdowns. **Admin.**
 
@@ -156,7 +156,7 @@ Base path: `/audit`. **Admin or inference** for local log reads.
 
 ### Production proxy (admin)
 
-When `production_api_url` is set in `modes.json`:
+When `production_api_url` is set in `data/modes.json`:
 
 - `GET /audit/production/logs`, `GET /audit/production/logs/{id}`, `GET /audit/production/stats`
 
@@ -177,4 +177,4 @@ These forward to the remote API’s audit endpoints (Playground ops).
 
 ## Database
 
-SQLite (default `./var/dev.sqlite`) holds **only** the append-only **`audit_log`** table. Pipelines, eval results, and models live on the filesystem. Override with `CLINICAL_DEID_DATABASE_URL`.
+SQLite (default `./data/app.sqlite`) holds **only** the append-only **`audit_log`** table. Pipelines, eval results, and models live on the filesystem. Override with `CLINICAL_DEID_DATABASE_URL`.

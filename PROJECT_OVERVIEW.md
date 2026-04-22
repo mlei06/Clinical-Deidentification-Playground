@@ -10,7 +10,7 @@ A **local-first platform** for clinical text de-identification. Three complement
 
 1. **Local training** — Prepare annotated data, export to your trainer (spaCy, HuggingFace, etc.), and train or fine-tune models **on your machines**. Artifacts live under `models/` (see `models/README.md`) and are referenced from pipe configs so detectors stay reproducible.
 
-2. **Pipeline composition** — Configure **pipes** (regex, whitelist, Presidio, pyDeid, LLM, combinators, redactors) and compose them into named **pipelines** (JSON files in `pipelines/`, registry-backed). The API supports creating/updating pipelines, validation, and machine-readable config schemas with `ui_*` hints for building forms.
+2. **Pipeline composition** — Configure **pipes** (regex, whitelist, Presidio, pyDeid, LLM, combinators, redactors) and compose them into named **pipelines** (JSON files in `data/pipelines/`, registry-backed). The API supports creating/updating pipelines, validation, and machine-readable config schemas with `ui_*` hints for building forms.
 
 3. **Inference for services** — Expose **HTTP endpoints** so upstream systems send text (or batch items) and receive de-identified output plus **auditable** metadata: `request_id`, spans, timings, pipeline name, and optional **intermediary traces** when the pipeline enables step capture. All operations are logged to a unified SQLite audit trail.
 
@@ -52,7 +52,7 @@ FastAPI backend with SQLite for audit only, React + TypeScript frontend. Python 
 | **LLM synthesis** | Few-shot clinical note generation via OpenAI-compatible API. Prompt templates, PHI extraction, span alignment. |
 | **Playground UI** | React + TypeScript (Vite, Tailwind). 7 views: pipeline builder, inference, eval dashboard, datasets, dictionaries, deploy config, audit log viewer. |
 | **Dataset API + CLI** | REST API: register, browse, compose, transform, LLM generate. CLI: `dataset list/register/show/delete`. |
-| **Deploy config** | Inference modes mapped to pipelines, pipeline allowlist, production API URL — managed via UI and `modes.json`. |
+| **Deploy config** | Inference modes mapped to pipelines, pipeline allowlist, production API URL — managed via UI and `data/modes.json`. |
 | **Audit production proxy** | Playground UI can view remote production audit logs via `/audit/production/*` proxy endpoints. |
 | **Tests** | 27+ test files covering API, ingestion, analytics, transforms, synthesis, config, compose, pipeline execution, span resolution, datasets, eval. |
 
@@ -99,10 +99,10 @@ Data prep  Training   Model
 
 | Store | Implementation | Files |
 |-------|---------------|-------|
-| **Pipelines** | `pipeline_store.py` — `list_pipelines()`, `load_pipeline_config()`, `save_pipeline_config()`, `delete_pipeline()` | `pipelines/{name}.json` |
-| **Eval results** | `eval_store.py` — `save_eval_result()`, `list_eval_results()`, `load_eval_result()` | `evaluations/{pipeline}_{timestamp}.json` |
+| **Pipelines** | `pipeline_store.py` — `list_pipelines()`, `load_pipeline_config()`, `save_pipeline_config()`, `delete_pipeline()` | `data/pipelines/{name}.json` |
+| **Eval results** | `eval_store.py` — `save_eval_result()`, `list_eval_results()`, `load_eval_result()` | `data/evaluations/{pipeline}_{timestamp}.json` |
 | **Models** | `models.py` — `scan_models()` reads `model_manifest.json` from `models/{framework}/{name}/` | Filesystem directories |
-| **Audit log** | `audit.py` — `log_run()`, `list_runs()`, `get_run()` via SQLModel | `var/dev.sqlite`, table `audit_log` |
+| **Audit log** | `audit.py` — `log_run()`, `list_runs()`, `get_run()` via SQLModel | `data/app.sqlite`, table `audit_log` |
 
 The `AuditLogRecord` table schema:
 
@@ -256,7 +256,7 @@ src/clinical_deid/
   cli.py                     # Click CLI (run, batch, eval, dict, dataset, audit, setup, serve)
   dataset_store.py           # Filesystem dataset registry (register, list, analytics)
   dictionary_store.py        # Whitelist/blacklist term-list CRUD
-  mode_config.py             # Deploy config (modes.json) load/save
+  mode_config.py             # Deploy config (data/modes.json) load/save
   export.py                  # Output formatters (text, JSON, JSONL, CSV, Parquet)
   ids.py                     # UUID helpers
   env_file.py                # .env resolution

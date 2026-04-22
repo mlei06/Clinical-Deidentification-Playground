@@ -13,19 +13,27 @@ build/
 *.egg-info/
 .env
 .env.local
+# Legacy DB location — the default moved to data/app.sqlite. These rules catch
+# any stray files left behind by old checkouts or custom CLINICAL_DEID_DATABASE_URL.
 var/*.sqlite
 var/*.sqlite-journal
-var/data/
-# Data workspace — keep layout, ignore user files
+# Data workspace — keep layout, ignore user files.
+# All mutable runtime state lives under data/ (see data/README.md).
+data/app.sqlite
+data/app.sqlite-journal
 data/raw/*
 !data/raw/.gitkeep
 data/corpora/*
 !data/corpora/.gitkeep
 data/evaluations/*
 !data/evaluations/.gitkeep
-# Saved inference snapshots (JSON); keep directory
-inference_runs/*
-!inference_runs/.gitkeep
+data/inference_runs/*
+!data/inference_runs/.gitkeep
+# Pipelines and modes.json ship as tracked seed files; ignore anything else
+# operators create at runtime so the working tree stays clean.
+data/pipelines/*
+!data/pipelines/*.json
+!data/pipelines/.gitkeep
 # Model directory — keep layout, ignore model files
 models/spacy/*
 !models/spacy/.gitkeep
@@ -33,13 +41,14 @@ models/huggingface/*
 !models/huggingface/.gitkeep
 models/external/*
 !models/external/.gitkeep
-data/wordlists/*
-!data/wordlists/.gitkeep
 .DS_Store
 .idea/
 .vscode/
-# NeuroNER — venv and large data files
+.claude/
+frontend/.claude/
+# NeuroNER — venv, runtime scratch, and large data files
 neuroner-cspmc/venv/
+neuroner-cspmc/data/temp/
 data/word_vectors/
 data/neuroner_deploy/
 models/neuroner/
