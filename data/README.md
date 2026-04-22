@@ -28,6 +28,6 @@ data/
 |-----------|---------|-----------------|
 | `raw/` | Drop source files before ingestion | `scripts/process_*.py` |
 | `corpora/` | All annotated datasets (gold + derived) | `scripts/transform_dataset.py`, `scripts/compose_datasets.py`, `scripts/dataset_analytics.py` |
-| `exports/` | Framework-specific training formats | `clinical-deid export` (planned) |
+| `exports/` | Framework-specific training formats | `clinical-deid dataset export …` or REST dataset export |
 | `synthetic/` | Prompt templates and synthesis configs | LLM synthesis scripts |
-| `evaluations/` | Pipeline evaluation outputs | `clinical-deid eval` (planned) |
+| `evaluations/` | Pipeline evaluation outputs | `clinical-deid eval`, `POST /eval/run`, or Playground evaluate view |

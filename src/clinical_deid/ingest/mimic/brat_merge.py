@@ -7,6 +7,9 @@ from typing import NamedTuple
 
 BratT = tuple[int, int, str, str]
 
+# Entity types for which adjacent same-type spans (single space between) are merged into one.
+_MERGEABLE_NAME_TYPES: frozenset[str] = frozenset({"NAME", "PATIENT"})
+
 
 class BratAnnotation(NamedTuple):
     start: int
@@ -54,7 +57,7 @@ def merge_adjacent_names(annotations: list[BratT], text_content: str) -> list[Br
     cur = list(sorted_anns[0])
 
     for next_ann in sorted_anns[1:]:
-        if cur[2] == "NAME" and next_ann[2] == "NAME":
+        if cur[2] in _MERGEABLE_NAME_TYPES and next_ann[2] == cur[2]:
             between_text = text_content[cur[1] : next_ann[0]]
             if between_text == " ":
                 cur[1] = next_ann[1]

@@ -190,3 +190,24 @@ def test_process_allowlist_blocks_inference_scope(secured_client, tmp_path):
         assert adm.status_code == 200, adm.text
     finally:
         os.chdir(old_cwd)
+
+
+def test_inference_blocked_from_admin_read_routes(secured_client):
+    """Inference keys cannot list pipelines, deploy config, dicts, or models."""
+    client, _ = secured_client
+    hdr = {"X-API-Key": INFERENCE_KEY}
+    assert client.get("/pipelines", headers=hdr).status_code == 403
+    assert client.get("/pipelines/foo", headers=hdr).status_code == 403
+    assert client.get("/deploy", headers=hdr).status_code == 403
+    assert client.get("/deploy/pipelines", headers=hdr).status_code == 403
+    assert client.get("/dictionaries", headers=hdr).status_code == 403
+    assert client.get("/models", headers=hdr).status_code == 403
+
+
+def test_inference_can_reach_deploy_health_and_audit_reads(secured_client):
+    """Production-style callers may read mode health and audit query endpoints."""
+    client, _ = secured_client
+    hdr = {"X-API-Key": INFERENCE_KEY}
+    assert client.get("/deploy/health", headers=hdr).status_code == 200
+    assert client.get("/audit/logs", headers=hdr).status_code == 200
+    assert client.get("/audit/stats", headers=hdr).status_code == 200

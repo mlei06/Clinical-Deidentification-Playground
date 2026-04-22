@@ -1,0 +1,61 @@
+# Single-API deployment — see docs/deployment.md.
+#
+# Start:  docker compose up --build
+# Logs:   docker compose logs -f api
+# Stop:   docker compose down
+#
+# The ``neuroner`` service is optional — only enable it if any pipeline uses
+# the NeuroNER sidecar pipe. See docker/neuroner/ for the existing sidecar
+# image; this file reuses that build context.
+
+services:
+  api:
+    build:
+      context: .
+      args:
+        # Default extras. ``scripts`` = Faker/pandas for surrogate output_mode. Append ``train`` for HF runtime.
+        EXTRAS: presidio,ner,llm,parquet,scripts
+    image: clinical-deid-api:latest
+    ports:
+      - "8000:8000"
+    environment:
+      # CORS — JSON array of allowed SPA origins.
+      CLINICAL_DEID_CORS_ORIGINS: '["http://localhost:3000"]'
+
+      # API keys — JSON arrays. Empty → auth disabled (not recommended in prod).
+      # Use docker/compose secrets or a secrets manager; do not hardcode real keys.
+      CLINICAL_DEID_ADMIN_API_KEYS: '[]'
+      CLINICAL_DEID_INFERENCE_API_KEYS: '[]'
+
+      # 10 MiB default — tune for batch workloads if needed.
+      CLINICAL_DEID_MAX_BODY_BYTES: "10485760"
+
+      # NeuroNER sidecar URL — only used when a pipeline uses the neuroner_ner pipe.
+      CLINICAL_DEID_NEURONER_HTTP_URL: http://neuroner:8765
+
+      WEB_CONCURRENCY: "2"
+    volumes:
+      - ./pipelines:/app/pipelines
+      # Writable so PUT /deploy can update modes from the Playground (create the file on first deploy if missing).
+      - ./modes.json:/app/modes.json
+      - ./data/dictionaries:/app/data/dictionaries
+      - ./datasets:/app/datasets
+      - ./models:/app/models:ro
+      - api-var:/app/var
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+  # Optional NeuroNER sidecar. Uncomment if a deployed pipeline uses it.
+  # neuroner:
+  #   build: ./docker/neuroner
+  #   expose:
+  #     - "8765"
+  #   restart: unless-stopped
+
+volumes:
+  api-var:

@@ -1,5 +1,7 @@
 import { apiFetch } from './client';
 import type {
+  BatchProcessRequest,
+  BatchProcessResponse,
   ModesResponse,
   ProcessResponse,
   RedactRequest,
@@ -11,16 +13,16 @@ function clientIdHeaders(clientId?: string): Record<string, string> {
 }
 
 /**
- * Fetch configured inference modes from the production server.
- * Maps to: GET /modes
+ * Fetch configured inference modes with per-mode availability.
+ * Maps to: GET /deploy/health (was /modes on the retired standalone API).
  */
 export function getModes(): Promise<ModesResponse> {
-  return apiFetch('/modes');
+  return apiFetch('/deploy/health');
 }
 
 /**
- * Run inference on a single text through a mode or pipeline.
- * Maps to: POST /infer/{target}
+ * Run inference on a single text through a mode alias or pipeline name.
+ * Maps to: POST /process/{target} (was /infer/{target}).
  */
 export function inferText(
   target: string,
@@ -32,7 +34,7 @@ export function inferText(
   const params = new URLSearchParams();
   if (trace) params.set('trace', 'true');
   const qs = params.toString() ? `?${params}` : '';
-  return apiFetch(`/infer/${encodeURIComponent(target)}${qs}`, {
+  return apiFetch(`/process/${encodeURIComponent(target)}${qs}`, {
     method: 'POST',
     body: JSON.stringify({ text, request_id: requestId }),
     headers: clientIdHeaders(clientId),
@@ -40,14 +42,30 @@ export function inferText(
 }
 
 /**
+ * Batch inference for the BatchExport view.
+ * Maps to: POST /process/{target}/batch.
+ */
+export function inferBatch(
+  target: string,
+  body: BatchProcessRequest,
+  clientId?: string,
+): Promise<BatchProcessResponse> {
+  return apiFetch(`/process/${encodeURIComponent(target)}/batch`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+    headers: clientIdHeaders(clientId),
+  });
+}
+
+/**
  * Apply redaction/surrogate to text with known spans (post-review export).
- * Maps to: POST /redact
+ * Maps to: POST /process/redact (was /redact).
  */
 export function redactDocument(
   req: RedactRequest,
   clientId?: string,
 ): Promise<RedactResponse> {
-  return apiFetch('/redact', {
+  return apiFetch('/process/redact', {
     method: 'POST',
     body: JSON.stringify(req),
     headers: clientIdHeaders(clientId),

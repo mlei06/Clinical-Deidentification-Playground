@@ -263,12 +263,11 @@ Also computes: risk-weighted recall (HIPAA severity weights), per-label breakdow
 
 ## Current status
 
-The full pipe system (11 cataloged types), CLI, FastAPI, and Playground UI (7 views) are built and functional. Key capabilities: pipeline composition, multi-mode evaluation with HIPAA coverage, training data export (CoNLL/spaCy/HuggingFace), NeuroNER HTTP sidecar integration, LLM synthesis, and unified audit trail.
+The full pipe system (11 cataloged types), CLI, FastAPI, Playground UI (7 views), and Production UI (`frontend-production/`) are built and functional. Key capabilities: pipeline composition, multi-mode evaluation with HIPAA coverage, training data export, `clinical-deid train run` for HF fine-tuning (`[train]` extra), NeuroNER HTTP sidecar integration, LLM synthesis, optional API key auth, Docker image, and unified audit trail.
 
 ## What's not built yet
 
-- **Training runner CLI** — wrapper for spaCy/HF training (export + model registry are ready)
-- **Production inference UI** — assisted deidentification + batch inference/export frontend view (span editing, file upload, human-assist toggle)
+- **Rich production file ingest** — drag-and-drop corpus upload to Production UI (batch today is API-driven / copy-paste workflows; extend as needed)
 
 ## Conventions
 
@@ -276,7 +275,7 @@ The full pipe system (11 cataloged types), CLI, FastAPI, and Playground UI (7 vi
 - Config via env vars with `CLINICAL_DEID_` prefix or `.env` file
 - Optional deps use `try/except ImportError` in `_register_builtins()`
 - Tests use `tmp_path` fixtures for isolated filesystem state
-- Entry points: `clinical-deid` (CLI), `clinical-deid-api` (server)
+- Entry points: `clinical-deid` (CLI), `clinical-deid-api` (HTTP server). Production: see [docs/deployment.md](docs/deployment.md) (single image, scoped keys).
 
 ## Testing
 

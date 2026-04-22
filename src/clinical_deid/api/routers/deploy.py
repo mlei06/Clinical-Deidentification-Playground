@@ -7,13 +7,13 @@ from pathlib import Path
 from fastapi import APIRouter
 from pydantic import BaseModel
 
-from clinical_deid.api.auth import require_admin, require_authenticated
+from clinical_deid.api.auth import require_admin, require_admin_or_inference
 from clinical_deid.config import get_settings
 from clinical_deid.deploy_health import pipeline_missing_deps
 from clinical_deid.mode_config import DEFAULT_MODES_PATH, DeployConfig, ModeEntry, load_mode_config, save_mode_config
 from clinical_deid.pipeline_store import list_pipelines, load_pipeline_config
 
-router = APIRouter(prefix="/deploy", tags=["deploy"], dependencies=[require_authenticated])
+router = APIRouter(prefix="/deploy", tags=["deploy"])
 
 
 # ---------------------------------------------------------------------------
@@ -62,7 +62,7 @@ def _modes_path() -> Path:
     return DEFAULT_MODES_PATH
 
 
-@router.get("", response_model=DeployConfigResponse)
+@router.get("", response_model=DeployConfigResponse, dependencies=[require_admin])
 def get_deploy_config() -> DeployConfigResponse:
     """Read the current deploy configuration (modes + allowlist)."""
     cfg = load_mode_config(_modes_path())
@@ -77,7 +77,7 @@ def get_deploy_config() -> DeployConfigResponse:
     )
 
 
-@router.get("/health", response_model=DeployHealthResponse)
+@router.get("/health", response_model=DeployHealthResponse, dependencies=[require_admin_or_inference])
 def get_deploy_health() -> DeployHealthResponse:
     """Report per-mode availability so the UI can gray out broken modes.
 
@@ -106,7 +106,7 @@ def get_deploy_health() -> DeployHealthResponse:
     return DeployHealthResponse(modes=out, default_mode=cfg.default_mode)
 
 
-@router.get("/pipelines", response_model=list[str])
+@router.get("/pipelines", response_model=list[str], dependencies=[require_admin])
 def list_available_pipeline_names() -> list[str]:
     """List all saved pipeline names (for the UI to populate dropdowns)."""
     return [p.name for p in list_pipelines(get_settings().pipelines_dir)]

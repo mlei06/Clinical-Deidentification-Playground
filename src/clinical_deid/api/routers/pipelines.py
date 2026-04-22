@@ -11,7 +11,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
-from clinical_deid.api.auth import require_admin, require_authenticated
+from clinical_deid.api.auth import require_admin, require_admin_or_inference
 from clinical_deid.api.schemas import (
     BlacklistMergeResponse,
     ComputeLabelsRequest,
@@ -51,7 +51,8 @@ from clinical_deid.pipes.registry import (
 from clinical_deid.pipes.ui_schema import pipe_config_json_schema
 from clinical_deid.pipes.whitelist.lists import parse_list_file
 
-router = APIRouter(prefix="/pipelines", tags=["pipelines"], dependencies=[require_authenticated])
+# Admin-only by default; inference keys may call ``POST .../pipe-types/{name}/labels`` only.
+router = APIRouter(prefix="/pipelines", tags=["pipelines"])
 
 MAX_UPLOAD_BYTES = 2 * 1024 * 1024  # 2 MB per file
 
@@ -87,7 +88,7 @@ def _validate_config(config: dict) -> None:
 # ---------------------------------------------------------------------------
 
 
-@router.get("/pipe-types", response_model=list[PipeTypeInfo])
+@router.get("/pipe-types", response_model=list[PipeTypeInfo], dependencies=[require_admin])
 def list_pipe_types() -> list[PipeTypeInfo]:
     """List all known pipe types and install status."""
     reg = registered_pipes()
@@ -186,6 +187,7 @@ def _inject_dynamic_options(config_schema: dict) -> None:
 @router.post(
     "/pipe-types/{name}/labels",
     response_model=ComputeLabelsResponse,
+    dependencies=[require_admin_or_inference],
 )
 def compute_pipe_labels(name: str, body: ComputeLabelsRequest | None = None) -> ComputeLabelsResponse:
     """Compute the effective base labels for a pipe type given optional config.
@@ -202,6 +204,7 @@ def compute_pipe_labels(name: str, body: ComputeLabelsRequest | None = None) -> 
 @router.get(
     "/pipe-types/{name}/label-space-bundle",
     response_model=LabelSpaceBundle,
+    dependencies=[require_admin],
 )
 def pipe_label_space_bundle(name: str) -> LabelSpaceBundle:
     """Return the per-model label space for a detector that declares ``label_source = bundle``.
@@ -220,7 +223,7 @@ def pipe_label_space_bundle(name: str) -> LabelSpaceBundle:
     return LabelSpaceBundle(**bundle)
 
 
-@router.get("/ner/builtins", response_model=NerBuiltinInfo)
+@router.get("/ner/builtins", response_model=NerBuiltinInfo, dependencies=[require_admin])
 def ner_builtins() -> NerBuiltinInfo:
     store = DictionaryStore(get_settings().dictionaries_dir)
     wl_dicts = store.list_dictionaries(kind="whitelist")
@@ -295,7 +298,7 @@ def create_pipeline(body: CreatePipelineRequest) -> PipelineDetail:
     return PipelineDetail(name=body.name, config=config_to_save)
 
 
-@router.get("", response_model=list[PipelineDetail])
+@router.get("", response_model=list[PipelineDetail], dependencies=[require_admin])
 def list_all_pipelines() -> list[PipelineDetail]:
     """List all saved pipelines."""
     return [
@@ -304,7 +307,7 @@ def list_all_pipelines() -> list[PipelineDetail]:
     ]
 
 
-@router.get("/{pipeline_name}", response_model=PipelineDetail)
+@router.get("/{pipeline_name}", response_model=PipelineDetail, dependencies=[require_admin])
 def get_pipeline(pipeline_name: str) -> PipelineDetail:
     try:
         config = load_pipeline_config(_pipelines_dir(), pipeline_name)

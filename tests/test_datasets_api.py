@@ -578,7 +578,9 @@ def test_deprecated_corpora_dir_env_still_resolves(tmp_path, monkeypatch, caplog
 
     legacy = tmp_path / "legacy-corpora"
     legacy.mkdir()
+    monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("CLINICAL_DEID_PROCESSED_DIR", raising=False)
+    monkeypatch.delenv("CLINICAL_DEID_ENV_FILE", raising=False)
     monkeypatch.setenv("CLINICAL_DEID_CORPORA_DIR", str(legacy))
     reset_settings()
     with caplog.at_level(logging.WARNING, logger="clinical_deid.config"):

@@ -95,12 +95,6 @@ for label in ["PATIENT", "DATE", "PHONE", "HOSPITAL"]:
     print(f"{label:20s}  P={result.precision:.3f}  R={result.recall:.3f}  F1={result.f1:.3f}")
 ```
 
-## Planned features
+## API and CLI
 
-The following evaluation capabilities are described in `DESIGN_PLAN.md` and are not yet implemented:
-
-- **Evaluation API** — `POST /eval/run` endpoint for server-side evaluation
-- **Multiple match modes** — `exact_boundary`, `partial_overlap`, `token_level` in addition to strict
-- **Risk-weighted scoring** — per-label weights reflecting HIPAA severity
-- **Evaluation comparison** — side-by-side pipeline comparison with statistical tests
-- **Per-document results** — worst-first document sorting for error analysis
+Server-side evaluation is available via `POST /eval/run` and the `clinical-deid eval` CLI. The runner supports multiple matching modes (strict, exact boundary, partial overlap, token-level), risk-weighted metrics, run comparison, and per-document breakdowns — see the implementation in `src/clinical_deid/eval/` and the OpenAPI schema when `/docs` is enabled.

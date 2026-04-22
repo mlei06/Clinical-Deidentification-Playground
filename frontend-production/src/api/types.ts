@@ -32,6 +32,15 @@ export interface ProcessResponse {
   intermediary_trace: TraceFrame[] | null;
 }
 
+export interface BatchProcessItem {
+  text: string;
+  request_id?: string;
+}
+
+export interface BatchProcessRequest {
+  items: BatchProcessItem[];
+}
+
 export interface BatchProcessResponse {
   results: ProcessResponse[];
   total_processing_time_ms: number;

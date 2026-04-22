@@ -1,6 +1,6 @@
 # Pipes and Pipelines
 
-The pipe system is the core abstraction for PHI detection and text transformation. Every operation on clinical text — detecting entities, filtering false positives, remapping labels, redacting text — is a **pipe** that transforms an `AnnotatedDocument`.
+The pipe system is the core abstraction for PHI detection and span-level post-processing. Pipelines registered in JSON are expected to **produce spans** on an `AnnotatedDocument`. Replacing text with tags, masks, or surrogates is usually done at the API layer via `output_mode` on `/process/...` (see [api.md](api.md)); the `Redactor` protocol still exists for legacy integrations but is not represented in the default pipe catalog.
 
 ## Core concepts
 
@@ -151,27 +151,23 @@ Wraps the Presidio Analyzer for NER-based detection.
 | `score_threshold` | Minimum confidence score (0.0–1.0) |
 | `entities` | Map Presidio entity types to your label set |
 
-#### `pydeid_ner` — pyDeid library
+#### `huggingface_ner` — Hugging Face token classification
 
-Wraps the pyDeid rule-based PHI detector.
+Loads checkpoints from `models/huggingface/{name}/` (see [models/README.md](../models/README.md)).
 
-**Requires:** `pip install -e ".[pydeid]"`
+**Requires:** `transformers` and `torch` (for example `pip install '.[train]'` or install inference-suitable wheels).
 
 ```json
-{
-  "type": "pydeid_ner",
-  "config": {
-    "phi_types": ["dates", "names", "locations", "ids", "contact"],
-    "label_mapping": {"PERSON": "PATIENT"}
-  }
-}
+{"type": "huggingface_ner", "config": {"model": "my-deid-model"}}
 ```
 
-| Config field | Purpose |
-|-------------|---------|
-| `phi_types` | Which pyDeid detection categories to enable |
-| `date_validation` | Enable/disable date validation |
-| `label_mapping` | Rename pyDeid output labels |
+#### `llm_ner` — LLM-prompted detection
+
+**Requires:** `pip install '.[llm]'` and OpenAI-compatible API configuration in settings.
+
+#### `neuroner_ner` — NeuroNER (HTTP sidecar)
+
+**Requires:** NeuroNER service reachable at the configured URL (see [neuroner-setup.md](neuroner-setup.md)).
 
 ### Span transformers
 
@@ -229,44 +225,40 @@ Merges or filters overlapping spans produced by detectors.
 | `max_confidence` | Greedy selection by highest confidence score |
 | `longest_non_overlapping` | Greedy selection by span length |
 
-### Redactors
+#### `label_mapper` — Remap labels (deprecated)
 
-#### `presidio_anonymizer` — Text anonymization
-
-Replaces detected PHI spans in the document text using Presidio Anonymizer operators.
-
-**Requires:** `pip install -e ".[presidio]"`
+Prefer per-detector `label_mapping` / `remap` where available. Still accepted for backward compatibility:
 
 ```json
-{
-  "type": "presidio_anonymizer",
-  "config": {
-    "operator": "replace"
-  }
-}
+{"type": "label_mapper", "config": {"mapping": {"NAME": "PATIENT"}}}
 ```
 
-**Operators:**
+#### `label_filter` — Keep or drop labels
 
-| Operator | Result | Example |
-|----------|--------|---------|
-| `replace` | `[LABEL]` placeholder | `[PATIENT]` |
-| `redact` | Remove text entirely | _(empty)_ |
-| `mask` | Character masking | `****` |
-| `hash` | SHA-256 hash | `a1b2c3...` |
-| `encrypt` | AES encryption | _(encrypted bytes)_ |
-| `keep` | No change | Original text |
+Exactly one of `keep` or `drop` must be set:
+
+```json
+{"type": "label_filter", "config": {"keep": ["PATIENT", "DATE"]}}
+```
+
+#### `consistency_propagator` — Propagate high-confidence spans
+
+Copies span text to all other occurrences in the document (useful after strong detectors). See `ConsistencyPropagatorConfig` in code for `min_confidence`, `labels`, etc.
+
+### Redacted / surrogate text
+
+There is no `presidio_anonymizer` (or similar) entry in the **pipe catalog**. Use `POST /process/{pipeline}` with `output_mode=redacted` or `output_mode=surrogate`, or `POST /process/redact` with client-supplied spans.
 
 ### Built-in combinators
 
-These are not registered as pipe types but are used internally by the pipeline builder:
+The JSON `Pipeline` wrapper and merge helpers live in `combinators.py`. Registered catalog types include `label_mapper`, `label_filter`, and `resolve_spans`; the `Pipeline` class is used when loading nested pipeline specs in code.
 
-| Combinator | Purpose |
-|-----------|---------|
-| `LabelMapper` | Remaps span labels via a dict |
-| `LabelFilter` | Keeps or drops specific labels |
-| `ParallelDetectors` | Runs multiple detectors and merges results |
-| `Pipeline` | Sequential execution of pipe list |
+| Symbol | Purpose |
+|--------|---------|
+| `Pipeline` | Sequential execution of a list of pipes |
+| `LabelMapper` | Same behaviour as the `label_mapper` pipe |
+| `LabelFilter` | Same behaviour as the `label_filter` pipe |
+| `ResolveSpans` | Same behaviour as the `resolve_spans` pipe |
 
 ## Pipeline configuration
 
@@ -286,27 +278,21 @@ A pipeline is a JSON document that defines a sequence of pipes:
 
 Pipes execute in order. Each pipe receives the output of the previous one.
 
-### Parallel detection with merge
+### Chaining multiple detectors
 
-Run multiple detectors in parallel and merge their results:
+There is no `parallel` pipe type in pipeline JSON. Run detectors **in sequence** (each adds spans), then merge with `resolve_spans`:
 
 ```json
 {
   "pipes": [
-    {
-      "type": "parallel",
-      "detectors": [
-        {"type": "regex_ner", "config": {}},
-        {"type": "presidio_ner", "config": {"model": "spacy/en_core_web_lg"}}
-      ],
-      "merge_strategy": "max_confidence"
-    },
-    {"type": "resolve_spans", "config": {"strategy": "longest_non_overlapping"}}
+    {"type": "regex_ner", "config": {}},
+    {"type": "presidio_ner", "config": {"model": "spacy/en_core_web_lg"}},
+    {"type": "resolve_spans", "config": {"strategy": "max_confidence"}}
   ]
 }
 ```
 
-**Merge strategies** for parallel blocks are the same as `resolve_spans` strategies: `union`, `exact_dedupe`, `consensus`, `max_confidence`, `longest_non_overlapping`.
+**Merge strategies** for `resolve_spans`: `union`, `exact_dedupe`, `consensus`, `max_confidence`, `longest_non_overlapping`.
 
 ### Intermediary tracing
 
@@ -432,18 +418,16 @@ Setting a label to `null` in the mapping drops those spans entirely.
 
 ## Pipeline execution flow
 
-When the API receives a `POST /process/{pipeline_id}`:
+When the API receives `POST /process/{pipeline_name}`:
 
-1. **Lookup** — Fetch the pipeline record and its current version from SQLite.
-2. **Cache** — Check the in-memory LRU cache (max 32 entries, keyed by config hash). If miss, build the pipe chain from the JSON config.
-3. **Build** — `load_pipeline(config)` deserialises each pipe step, instantiates configs and pipe objects, and composes them into a `Pipeline` (sequential) or `ParallelDetectors` (parallel blocks).
-4. **Execute** — Call `pipe_chain.forward(doc)` (or `pipe_chain.run(doc, trace=True)` for intermediary capture).
-5. **Redact** — If the pipeline includes a redactor (text changed), use the output text. Otherwise, generate `[LABEL]` replacements from detected spans.
-6. **Respond** — Return spans, redacted text, timing, and optional trace.
+1. **Load config** — Read the pipeline JSON from the filesystem (`pipelines/{name}.json`).
+2. **Build** — `load_pipeline(config)` deserialises each step in order and instantiates the registered pipe types.
+3. **Execute** — Run the chain (`forward`) on the request text wrapped as an `AnnotatedDocument`. With `?trace=true`, capture snapshots after each step.
+4. **Output** — The response includes spans. Redacted or surrogate **text** is produced from those spans when `output_mode` is `redacted` or `surrogate` (see [api.md](api.md)), not from a separate redactor pipe in the catalog.
 
 ## UI schema generation
 
-The platform auto-generates JSON Schema for each pipe config, enriched with UI hints (`ui_widget`, `ui_placeholder`, etc.). This powers dynamic form rendering in the planned playground UI.
+The platform auto-generates JSON Schema for each pipe config, enriched with UI hints (`ui_widget`, `ui_placeholder`, etc.). The Playground pipeline builder consumes these schemas for dynamic forms.
 
 ```python
 from clinical_deid.pipes.ui_schema import pipe_config_json_schema

@@ -45,6 +45,15 @@ class Settings(BaseSettings):
             "Inference scope covers /process/* (subject to the deploy allowlist)."
         ),
     )
+    #: Reject requests with Content-Length above this (bytes). Defaults to 10 MiB.
+    max_body_bytes: int = Field(
+        default=10 * 1024 * 1024,
+        description=(
+            "Upper bound on request body size (bytes). Requests with a larger Content-Length "
+            "are rejected with 413 before the route handler runs. "
+            "File uploads (dictionaries, list parsers) enforce their own stricter per-file limit."
+        ),
+    )
 
     #: For :class:`~clinical_deid.synthesis.client.OpenAICompatibleChatClient`. Loaded from ``.env`` or the environment. Either ``OPENAI_API_KEY`` or ``CLINICAL_DEID_OPENAI_API_KEY`` may be set.
     openai_api_key: str | None = Field(
@@ -91,9 +100,8 @@ class Settings(BaseSettings):
             logger.warning(
                 "CLINICAL_DEID_CORPORA_DIR is deprecated; rename to CLINICAL_DEID_PROCESSED_DIR."
             )
-            return self.model_copy(
-                update={"processed_dir": Path(os.environ["CLINICAL_DEID_CORPORA_DIR"])},
-            )
+            # Mutate in place: Pydantic v2 ignores a returned ``model_copy`` from ``__init__`` validation.
+            self.processed_dir = Path(os.environ["CLINICAL_DEID_CORPORA_DIR"])
         return self
 
     @property

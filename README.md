@@ -12,7 +12,7 @@ High-level flow:
 
 **Design priority:** keep **registering new pipes** as low-friction as possible — Pydantic config, `forward` implementation, and **`register()`**; optional catalog line and `ui_*` hints only when needed.
 
-Architecture detail and roadmap: [DESIGN_PLAN.md](./DESIGN_PLAN.md) and [PROJECT_OVERVIEW.md](./PROJECT_OVERVIEW.md).
+**Documentation:** [docs/README.md](docs/README.md) (index), [PROJECT_OVERVIEW.md](./PROJECT_OVERVIEW.md) (architecture), [docs/deployment.md](docs/deployment.md) (Docker / production), [docs/configuration.md](docs/configuration.md) (env & auth).
 
 ### Repository layout
 
@@ -31,7 +31,7 @@ Architecture detail and roadmap: [DESIGN_PLAN.md](./DESIGN_PLAN.md) and [PROJECT
 
 ## Security notice
 
-This API has **no authentication or rate limiting** and is intended for **local or trusted-network use only**. Do not expose it to the public internet without adding an auth layer and TLS termination.
+**Optional API keys** (`CLINICAL_DEID_ADMIN_API_KEYS` / `CLINICAL_DEID_INFERENCE_API_KEYS`): when both lists are empty, the API is open (typical local dev). For any shared or production host, set keys, TLS at the reverse proxy, and rate limits. See [docs/configuration.md](docs/configuration.md#authentication) and [docs/deployment.md](docs/deployment.md).
 
 ## Setup
 
@@ -101,10 +101,10 @@ The frontend is a React + TypeScript app (Vite, Tailwind CSS) with seven views:
 ```bash
 cd frontend
 npm install
-npm run dev          # dev server on localhost:5173
+npm run dev          # default http://localhost:3000 (see frontend/vite.config.ts)
 ```
 
-The frontend expects the API at `localhost:8000` (run `clinical-deid serve` first).
+Configure `VITE_API_BASE_URL` / `VITE_API_KEY` via `frontend/.env.local` when the API is not proxied under `/api`. The dev server proxies `/api` to `localhost:8000` by default.
 
 ## Run the API
 
@@ -149,7 +149,9 @@ Default SQLite database: `./var/dev.sqlite` (audit log only). Override with `CLI
 | Datasets | `POST` | `/datasets/compose` | Compose multiple datasets |
 | Datasets | `POST` | `/datasets/transform` | Apply transforms to dataset |
 | Datasets | `POST` | `/datasets/generate` | Generate synthetic data via LLM |
-| Process | `POST` | `/process/{pipeline_name}` | Run pipeline on text |
+| Process | `POST` | `/process/redact` | Redact/surrogate from edited spans |
+| Process | `POST` | `/process/scrub` | Zero-config clean using default mode |
+| Process | `POST` | `/process/{pipeline_name}` | Run pipeline (name or mode alias) |
 | Process | `POST` | `/process/{pipeline_name}/batch` | Batch variant |
 | Eval | `POST` | `/eval/run` | Run evaluation against dataset |
 | Eval | `GET` | `/eval/runs` | List eval results |
@@ -163,6 +165,7 @@ Default SQLite database: `./var/dev.sqlite` (audit log only). Override with `CLI
 | Audit | `GET` | `/audit/production/stats` | Proxy production stats |
 | Deploy | `GET` | `/deploy` | Get deploy config (modes + allowlist) |
 | Deploy | `PUT` | `/deploy` | Update deploy config |
+| Deploy | `GET` | `/deploy/health` | Per-mode availability (Production UI) |
 | Deploy | `GET` | `/deploy/pipelines` | List deployable pipeline names |
 | Models | `GET` | `/models` | List models from filesystem |
 | Models | `GET` | `/models/{framework}/{name}` | Model manifest details |

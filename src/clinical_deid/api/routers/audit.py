@@ -9,11 +9,11 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 from sqlmodel import col, select
 
-from clinical_deid.api.auth import require_authenticated
+from clinical_deid.api.auth import require_admin_or_inference
 from clinical_deid.api.deps import SessionDep
 from clinical_deid.tables import AuditLogRecord
 
-router = APIRouter(prefix="/audit", tags=["audit"], dependencies=[require_authenticated])
+router = APIRouter(prefix="/audit", tags=["audit"], dependencies=[require_admin_or_inference])
 
 
 # ---------------------------------------------------------------------------

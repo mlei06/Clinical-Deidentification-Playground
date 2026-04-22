@@ -6,7 +6,7 @@ React + TypeScript single-page application for the Clinical De-Identification Pl
 
 ```bash
 npm install
-npm run dev          # dev server on localhost:5173
+npm run dev          # default http://localhost:3000 (proxies /api → API)
 npm run build        # production build to dist/
 npm run lint         # ESLint
 ```

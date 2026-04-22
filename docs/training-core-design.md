@@ -1,10 +1,8 @@
 # Design: training core (Phase 1)
 
-This document specifies the first phase of fine-tuning support for encoder
-models (ClinicalBERT, Clinical ModernBERT, and any other HF encoder) for PHI
-NER. The deliverable is a CLI-driven training pipeline that produces a model
-directory immediately consumable by the existing `custom_ner` pipe. API
-endpoints, frontend UI, and CRF heads are explicitly out of scope here.
+**Status:** Design reference for the training subsystem. Implementation lives under `src/clinical_deid/training/` and is invoked via `clinical-deid train run` (requires the `[train]` extra). Runtime inference uses the **`huggingface_ner`** pipe and the filesystem model registry — not a `custom_ner` pipe name.
+
+This document specifies fine-tuning support for encoder models (ClinicalBERT, Clinical ModernBERT, and other HF encoders) for PHI NER. The deliverable is a CLI-driven training pipeline that writes a model directory under `models/huggingface/{name}/` consumable by **`huggingface_ner`**. API endpoints, frontend UI, and CRF heads were out of scope for Phase 1.
 
 ## Goals
 
@@ -12,7 +10,7 @@ endpoints, frontend UI, and CRF heads are explicitly out of scope here.
   continue fine-tuning a local model we previously trained.
 - Produce model directories that drop into `models/huggingface/{name}/`, are
   discovered by the existing `models.scan_models` scanner without code changes,
-  and load cleanly through `custom_ner` as-is.
+  and load cleanly through `huggingface_ner` as-is.
 - Deterministic, reproducible runs: every training artifact includes the full
   `TrainingConfig` snapshot, seed, dataset identity, and metrics.
 - Filesystem-first, no database changes. No migrations.
@@ -45,7 +43,7 @@ Two existing modules get small extensions:
 - `src/clinical_deid/models.py` — `ModelInfo` gains optional fields (see §4).
 - `src/clinical_deid/cli.py` — adds a `train` command group.
 
-No changes to `custom_ner/pipe.py` are required for Phase 1: the pipe already
+No changes to `huggingface_ner/pipe.py` are required for Phase 1: the pipe already
 loads via `transformers.pipeline("token-classification", ...)`, which accepts
 any directory saved by `Trainer.save_model()` + `AutoTokenizer.save_pretrained()`.
 
@@ -358,10 +356,10 @@ Add `seqeval` to the new `[train]` extra.
 
 ## Pipe integration
 
-The existing `custom_ner` pipe (loaded via `transformers.pipeline(
+The existing `huggingface_ner` pipe (loaded via `transformers.pipeline(
 "token-classification", aggregation_strategy="simple")`) works with any model
 that has `config.id2label` populated. `Trainer.save_model()` writes that into
-`config.json`. No change needed in `custom_ner/pipe.py` for Phase 1.
+`config.json`. No change needed in `huggingface_ner/pipe.py` for Phase 1.
 
 Two label representations coexist deliberately:
 
@@ -373,14 +371,14 @@ Two label representations coexist deliberately:
 
 These are intentionally separate. `transformers.pipeline` with
 `aggregation_strategy="simple"` strips BIO prefixes and returns entity-level
-spans, so `custom_ner` receives `"NAME"` not `"B-NAME"` — exactly what the
+spans, so `huggingface_ner` receives `"NAME"` not `"B-NAME"` — exactly what the
 manifest's `labels` list advertises. No reconciliation is needed at inference time.
 
 Manifest schema-version awareness:
 
 - `models.py::_load_manifest` accepts both v1 and v2. When
   `schema_version` is missing, treat as v1.
-- `custom_ner`'s `base_labels` already reads `manifest.labels`, which stays the
+- `huggingface_ner`'s `base_labels` already reads `manifest.labels`, which stays the
   user-facing canonical list in both versions.
 
 ## CLI surface (cli.py)
@@ -472,7 +470,7 @@ import cost on every run.
   fields default correctly.
 - `test_runner.py` — integration: train 1 epoch on 4 synthetic documents,
   assert directory structure, manifest contents, and that
-  `custom_ner.CustomNerPipe({"model_name": "<output>"})` loads and predicts.
+  `HuggingfaceNerPipe(HuggingfaceNerConfig(model="<output>"))` loads and predicts.
 - `test_runner.py::test_continue_from_local` — same, starting from a local
   model produced by the previous test (chain).
 - `test_runner.py::test_freeze_encoder` — assert encoder params have
@@ -495,7 +493,7 @@ A user can:
    get a completed directory under `models/huggingface/<name>/` with a valid
    v2 manifest.
 4. Reference that model in a pipeline JSON:
-   `{"pipes": [{"type": "custom_ner", "config": {"model_name": "<name>"}}]}`
+   `{"pipes": [{"type": "huggingface_ner", "config": {"model": "<name>"}}]}`
    and run `clinical-deid run --pipeline <pipeline_name>` against text,
    getting spans back.
 5. Run a second training with `--base local:<name>` on a different dataset

@@ -2,8 +2,9 @@
 
 Design:
 
-- Two scopes: ``admin`` (all mutations + read-all) and ``inference`` (``/process/*``,
-  subject to the deploy allowlist).
+- Two scopes: ``admin`` (full API) and ``inference`` (``/process/*`` + deploy health +
+  audit reads + ``POST /pipelines/pipe-types/{name}/labels``, subject to the deploy
+  allowlist on process routes).
 - Keys are configured via ``CLINICAL_DEID_ADMIN_API_KEYS`` and
   ``CLINICAL_DEID_INFERENCE_API_KEYS`` (JSON arrays or pydantic-settings list envs).
 - When **both** lists are empty, auth is **disabled** — every request is served as
@@ -109,10 +110,32 @@ def require_authenticated_dep(
     raise HTTPException(status_code=401, detail="invalid API key")
 
 
+def require_admin_or_inference_dep(
+    authorization: str | None = Header(default=None),
+    x_api_key: str | None = Header(default=None, alias="X-API-Key"),
+) -> AuthenticatedCaller:
+    """Accept admin or inference keys (for shared read/compute routes like ``GET /deploy/health``)."""
+    if not auth_enabled():
+        return AuthenticatedCaller(id="", scope="admin")
+
+    key = _extract_key(authorization, x_api_key)
+    if not key:
+        raise HTTPException(status_code=401, detail="missing API key")
+
+    s = get_settings()
+    if key in s.admin_api_keys:
+        return AuthenticatedCaller(id=_client_id(key), scope="admin")
+    if key in s.inference_api_keys:
+        return AuthenticatedCaller(id=_client_id(key), scope="inference")
+
+    raise HTTPException(status_code=401, detail="invalid API key")
+
+
 # Convenient ``Depends(...)`` sentinels for route signatures.
 require_admin = Depends(require_admin_dep)
 require_inference = Depends(require_inference_dep)
 require_authenticated = Depends(require_authenticated_dep)
+require_admin_or_inference = Depends(require_admin_or_inference_dep)
 
 # Type alias for readability in route signatures (caller param annotation stays
 # ``AuthenticatedCaller`` — the ``Depends`` sentinel is the default value).

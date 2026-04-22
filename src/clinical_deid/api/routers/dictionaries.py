@@ -10,7 +10,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
 
-from clinical_deid.api.auth import require_admin, require_authenticated
+from clinical_deid.api.auth import require_admin
 from clinical_deid.api.schemas import (
     DictionaryInfoResponse,
     DictionaryPreviewResponse,
@@ -21,7 +21,7 @@ from clinical_deid.api.schemas import (
 from clinical_deid.config import get_settings
 from clinical_deid.dictionary_store import DictionaryStore, DictKind
 
-router = APIRouter(prefix="/dictionaries", tags=["dictionaries"], dependencies=[require_authenticated])
+router = APIRouter(prefix="/dictionaries", tags=["dictionaries"], dependencies=[require_admin])
 
 MAX_UPLOAD_BYTES = 2 * 1024 * 1024  # 2 MB
 

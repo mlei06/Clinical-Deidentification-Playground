@@ -26,7 +26,8 @@ models/
 | Framework | Use case |
 |-----------|---------|
 | `spacy` | spaCy NER models (`.forward()` via `spacy.load()`) |
-| `huggingface` | HuggingFace Transformers (token classification) |
+| `huggingface` | HuggingFace Transformers (token classification); use with the `huggingface_ner` pipe |
+| `neuroner` | NeuroNER checkpoints when registered for sidecar workflows |
 | `external` | Third-party models managed outside this repo (Presidio, cloud APIs) |
 
 ## Model manifest
@@ -53,7 +54,7 @@ Each model directory must contain a `model_manifest.json`:
 | Field | Required | Description |
 |-------|----------|-------------|
 | `name` | yes | Must match the directory name |
-| `framework` | yes | One of `spacy`, `huggingface`, `external` |
+| `framework` | yes | One of `spacy`, `huggingface`, `neuroner`, `external` |
 | `labels` | no | Entity types the model can detect |
 | `base_model` | no | Parent model used for fine-tuning |
 | `dataset` | no | Training dataset name |
@@ -66,36 +67,40 @@ Each model directory must contain a `model_manifest.json`:
 The registry scans `models/{framework}/{name}/model_manifest.json` on each call:
 
 ```python
-from clinical_deid.models import list_models, get_model, scan_models
+from pathlib import Path
 
-# List all models
-for model in list_models():
+from clinical_deid.config import get_settings
+from clinical_deid.models import list_models, get_model
+
+models_dir = get_settings().models_dir  # or Path("models")
+
+for model in list_models(models_dir):
     print(f"{model.framework}/{model.name} — labels: {model.labels}")
 
-# Filter by framework
-spacy_models = list_models(framework="spacy")
+hf_only = list_models(models_dir, framework="huggingface")
 
-# Get a specific model
-model = get_model("deid-ner-v1")
-print(model.path)  # Path to model directory
+info = get_model(models_dir, "deid-roberta-i2b2")
+print(info.path)
 ```
 
-The `models_dir` defaults to `models/` in the project root. Override it with `CLINICAL_DEID_MODELS_DIR` or in code via `Settings.models_dir`.
+Override the directory with `CLINICAL_DEID_MODELS_DIR` or `Settings.models_dir`.
 
 ## Using models in pipes
 
-### spaCy NER pipe (planned)
+### `huggingface_ner`
+
+Registered Hugging Face token-classification checkpoints use the **`model`** field (directory name under `models/huggingface/`):
 
 ```json
 {
-  "type": "spacy_ner",
+  "type": "huggingface_ner",
   "config": {
-    "model_name": "deid-ner-v1"
+    "model": "deid-roberta-i2b2"
   }
 }
 ```
 
-The pipe looks up the model via `get_model()`, loads it with `spacy.load(model.path / "model-best")`, and uses it for NER inference.
+See [pipes-and-pipelines.md](pipes-and-pipelines.md) and [training-core-design.md](training-core-design.md) for training outputs and manifest expectations.
 
 ### Presidio with custom models
 
@@ -117,18 +122,19 @@ For local models, point Presidio at the model path directly via the Presidio con
 The registry is the output target for the training loop:
 
 1. **Prepare data** — Use [data ingestion](data-ingestion.md) and [transforms](transforms-and-composition.md) to build a training corpus.
-2. **Export** — Convert to framework-specific format (spaCy DocBin, HuggingFace JSONL, CoNLL). _Export utilities are planned._
-3. **Train** — Run your trainer of choice (spaCy CLI, HuggingFace Trainer, etc.) outside this platform.
-4. **Register** — Copy the checkpoint into `models/{framework}/{name}/` and add a `model_manifest.json`.
-5. **Use** — Reference the model name in a pipe config.
+2. **Export** — `clinical-deid dataset export NAME -o DIR --format huggingface|conll|spacy` (or use the dataset export API from the Playground).
+3. **Train** — `clinical-deid train run` (requires `pip install '.[train]'`) writes a full directory under `models/huggingface/{output_name}/` including `model_manifest.json`. You can also train with Hugging Face Trainer externally and copy artifacts in manually.
+4. **Refresh** — `GET /models/refresh` or restart the server so `scan_models` picks up new directories.
+5. **Use** — Reference the model directory name in `huggingface_ner` as `"model": "<name>"`.
 
-## Read-only API (planned)
+## HTTP API
 
-A read-only API for listing available models is planned:
+Models are listed and inspected via read-only routes (no upload or remote training):
 
 ```
-GET /models              — List all models
-GET /models/{name}       — Model detail
+GET /models                    — List models
+GET /models/{framework}/{name} — Manifest-style detail
+POST /models/refresh           — Rescan the models directory (admin scope when API keys are enabled; see configuration.md)
 ```
 
-Training is always local — there is no API for uploading or training models.
+Training remains local — there is no API for uploading checkpoints or running training jobs.

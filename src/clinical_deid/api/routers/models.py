@@ -9,10 +9,10 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
-from clinical_deid.api.auth import require_admin, require_authenticated
+from clinical_deid.api.auth import require_admin
 from clinical_deid.config import get_settings
 
-router = APIRouter(prefix="/models", tags=["models"], dependencies=[require_authenticated])
+router = APIRouter(prefix="/models", tags=["models"], dependencies=[require_admin])
 logger = logging.getLogger(__name__)
 
 # Module-level cache (refreshed on POST /models/refresh)

@@ -43,10 +43,17 @@ def create_app() -> FastAPI:
         **docs_kwargs,
     )
 
+    settings = get_settings()
+
+    # Body-size cap — runs before any route dep to bounce oversize payloads at the edge.
+    from clinical_deid.api.middleware import MaxBodySizeMiddleware
+
+    application.add_middleware(MaxBodySizeMiddleware, max_bytes=settings.max_body_bytes)
+
     # CORS — configured via settings (env var CLINICAL_DEID_CORS_ORIGINS or .env).
     application.add_middleware(
         CORSMiddleware,
-        allow_origins=get_settings().cors_origins,
+        allow_origins=settings.cors_origins,
         allow_methods=["GET", "POST", "PUT", "DELETE"],
         allow_headers=["*"],
     )
