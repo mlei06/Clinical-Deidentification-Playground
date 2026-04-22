@@ -6,6 +6,7 @@
 | [configuration.md](configuration.md) | Environment variables, auth scopes, CORS, body limits, `.env` resolution |
 | [api.md](api.md) | HTTP API reference (paths, auth notes) |
 | [deployment.md](deployment.md) | Single-API production layout, Docker, volumes, security |
+| [docker-quickstart.md](docker-quickstart.md) | Build, env vars, volume mounts, and pointing a frontend at the API |
 | [staging-smoke.md](staging-smoke.md) | Post-deploy manual checks |
 | [pipes-and-pipelines.md](pipes-and-pipelines.md) | Pipe types, composition, registry |
 | [models.md](models.md) | Filesystem model registry (`models/{framework}/{name}/`) |

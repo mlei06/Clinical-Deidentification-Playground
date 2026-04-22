@@ -47,7 +47,7 @@ List-valued variables must be JSON arrays, e.g. `CLINICAL_DEID_CORS_ORIGINS='["h
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `WEB_CONCURRENCY` | `1` | Uvicorn worker count (honored by the container `CMD`, not read by the app) |
+| `WEB_CONCURRENCY` | `1` | Uvicorn worker count (honored by the container `CMD`, not read by the app). With the default SQLite audit DB, values above `1` can cause lock contention — see [Deployment — Production checklist](deployment.md#production-checklist). |
 
 ## Authentication
 

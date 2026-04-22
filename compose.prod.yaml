@@ -1,0 +1,74 @@
+# Production-oriented Compose — pull a pre-built image (no ``build:`` on this file).
+#
+# Typical flow: build and push the root ``Dockerfile`` in CI, then on the host:
+#
+#   export CLINICAL_DEID_DOCKER_IMAGE=registry.example.com/clinical-deid-api:1.2.3
+#   docker compose -f compose.prod.yaml pull
+#   docker compose -f compose.prod.yaml up -d
+#
+# Configuration:
+# - Copy ``.env.example`` → ``.env`` next to this file (API keys, CORS for real origins, etc.).
+# - Override paths below if you mount data/models elsewhere.
+# - For SQLite audit DB, keep ``WEB_CONCURRENCY`` at ``1`` unless you use a client–server DB URL.
+#
+# See docs/deployment.md and docs/docker-quickstart.md.
+
+services:
+  api:
+    image: ${CLINICAL_DEID_DOCKER_IMAGE:-clinical-deid-api:latest}
+    ports:
+      - "${CLINICAL_DEID_API_PORT:-8000}:8000"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      # Do not set CLINICAL_DEID_CORS_ORIGINS here — add it to ``.env`` so real HTTPS SPA origins win.
+      # If omitted, the API falls back to localhost defaults (wrong for most prod browsers).
+
+      CLINICAL_DEID_MAX_BODY_BYTES: "${CLINICAL_DEID_MAX_BODY_BYTES:-10485760}"
+      CLINICAL_DEID_NEURONER_HTTP_URL: ${CLINICAL_DEID_NEURONER_HTTP_URL:-http://neuroner:8765}
+
+      CLINICAL_DEID_DATABASE_URL: ${CLINICAL_DEID_DATABASE_URL:-sqlite:///./data/app.sqlite}
+      CLINICAL_DEID_PIPELINES_DIR: /app/data/pipelines
+      CLINICAL_DEID_MODES_PATH: /app/data/modes.json
+      CLINICAL_DEID_EVALUATIONS_DIR: /app/data/evaluations
+      CLINICAL_DEID_INFERENCE_RUNS_DIR: /app/data/inference_runs
+      CLINICAL_DEID_CORPORA_DIR: /app/data/corpora
+      CLINICAL_DEID_DICTIONARIES_DIR: /app/data/dictionaries
+      CLINICAL_DEID_MODELS_DIR: /app/models
+
+      WEB_CONCURRENCY: ${WEB_CONCURRENCY:-1}
+    volumes:
+      - ${CLINICAL_DEID_DATA_DIR:-./data}:/app/data
+      - ${CLINICAL_DEID_MODELS_DIR:-./models}:/app/models:ro
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+    # Optional: attach to an external reverse-proxy network.
+    # networks:
+    #   - edge
+
+  # Optional NeuroNER sidecar — use a pre-built image in prod (no ``build:`` here).
+  # neuroner:
+  #   image: ${CLINICAL_DEID_NEURONER_IMAGE:-registry.example.com/neuroner-sidecar:1.0}
+  #   volumes:
+  #     - ${CLINICAL_DEID_MODELS_DIR:-./models}/neuroner:/models/neuroner:ro
+  #     - ${CLINICAL_DEID_DATA_DIR:-./data}/word_vectors:/data/word_vectors:ro
+  #     - ${CLINICAL_DEID_DATA_DIR:-./data}/neuroner_deploy:/data/neuroner_deploy:ro
+  #   environment:
+  #     NEURONER_MODELS_ROOT: /models/neuroner
+  #     NEURONER_DEFAULT_MODEL: i2b2_2014_glove_spacy_bioes
+  #     NEURONER_DATASET_TEXT_FOLDER: /data/neuroner_deploy
+  #     NEURONER_TOKEN_EMBEDDING: /data/word_vectors/glove.6B.100d.txt
+  #     NEURONER_OUTPUT_FOLDER: /tmp/neuroner_out
+  #   expose:
+  #     - "8765"
+  #   restart: unless-stopped
+
+# networks:
+#   edge:
+#     external: true
