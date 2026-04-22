@@ -473,7 +473,7 @@ def eval_cmd(
         from clinical_deid.dataset_store import load_dataset_documents
 
         try:
-            golds = load_dataset_documents(get_settings().datasets_dir, dataset_name)
+            golds = load_dataset_documents(get_settings().corpora_dir, dataset_name)
         except FileNotFoundError as exc:
             click.echo(f"Error: {exc}", err=True)
             raise SystemExit(1)
@@ -968,10 +968,10 @@ def dataset() -> None:
     """Dataset management (register, browse, delete)."""
 
 
-def _datasets_dir():
+def _corpora_dir():
     from clinical_deid.config import get_settings
 
-    return get_settings().datasets_dir
+    return get_settings().corpora_dir
 
 
 @dataset.command(name="list")
@@ -980,7 +980,7 @@ def dataset_list(limit: int) -> None:
     """List registered datasets."""
     from clinical_deid.dataset_store import list_datasets
 
-    datasets = list_datasets(_datasets_dir())[:limit]
+    datasets = list_datasets(_corpora_dir())[:limit]
     if not datasets:
         click.echo("No datasets registered.")
         return
@@ -1021,7 +1021,7 @@ def dataset_register(data_path: str, name: str, fmt: str, description: str) -> N
 
     try:
         manifest = register_dataset(
-            _datasets_dir(),
+            _corpora_dir(),
             name,
             str(Path(data_path).resolve()),
             fmt,
@@ -1042,17 +1042,18 @@ def dataset_register(data_path: str, name: str, fmt: str, description: str) -> N
 @click.argument("name")
 def dataset_show(name: str) -> None:
     """Show details of a registered dataset."""
-    from clinical_deid.dataset_store import load_dataset_manifest
+    from clinical_deid.config import get_settings
+    from clinical_deid.dataset_store import load_dataset_manifest, public_data_path
 
     try:
-        m = load_dataset_manifest(_datasets_dir(), name)
+        m = load_dataset_manifest(_corpora_dir(), name)
     except FileNotFoundError as exc:
         click.echo(f"Error: {exc}", err=True)
         raise SystemExit(1)
 
     click.echo(f"Name:          {m['name']}")
     click.echo(f"Description:   {m.get('description', '')}")
-    click.echo(f"Data path:     {m['data_path']}")
+    click.echo(f"Data path:     {public_data_path(get_settings().corpora_dir, name, m)}")
     click.echo(f"Format:        {m['format']}")
     click.echo(f"Documents:     {m.get('document_count', 0)}")
     click.echo(f"Total spans:   {m.get('total_spans', 0)}")
@@ -1072,11 +1073,11 @@ def dataset_show(name: str) -> None:
 @dataset.command(name="delete")
 @click.argument("name")
 def dataset_delete(name: str) -> None:
-    """Unregister a dataset (does not delete underlying data files)."""
+    """Delete the dataset directory (manifest and corpus files)."""
     from clinical_deid.dataset_store import delete_dataset
 
     try:
-        delete_dataset(_datasets_dir(), name)
+        delete_dataset(_corpora_dir(), name)
     except FileNotFoundError as exc:
         click.echo(f"Error: {exc}", err=True)
         raise SystemExit(1)
@@ -1216,7 +1217,7 @@ def train_run(
         final_path = run_training(
             cfg,
             models_dir=_models_dir(),
-            datasets_dir=_datasets_dir(),
+            corpora_dir=_corpora_dir(),
         )
         click.echo(f"Training complete: {final_path}")
     except TrainingError as exc:
@@ -1309,7 +1310,7 @@ def dataset_export(name: str, output_dir: str, fmt: str, filename: str | None) -
     from clinical_deid.training_export import export_training_data
 
     try:
-        docs = load_dataset_documents(_datasets_dir(), name)
+        docs = load_dataset_documents(_corpora_dir(), name)
     except FileNotFoundError as exc:
         click.echo(f"Error: {exc}", err=True)
         raise SystemExit(1)

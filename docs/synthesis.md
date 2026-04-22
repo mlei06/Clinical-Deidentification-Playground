@@ -183,12 +183,27 @@ The synthesizer generates one note at a time. For bulk generation, loop and coll
 docs = []
 for i in range(100):
     result = synthesizer.generate_one()
-    doc = synthesis_result_to_annotated_document(result, doc_id=f"synth-{i:04d}")
+    doc = synthesis_result_to_annotated_document(
+        result, document_id=f"synth-{i:04d}"
+    )
     docs.append(doc)
 
-# Write to JSONL
-from clinical_deid.ingest import write_annotated_corpus
-write_annotated_corpus(docs, jsonl="data/synthetic/batch.jsonl")
+# Write into the colocated corpora layout (same as ``POST /datasets/generate``)
+from clinical_deid.config import get_settings
+from clinical_deid.dataset_store import CORPUS_JSONL_NAME, commit_colocated_dataset
+from clinical_deid.ingest.sink import write_annotated_corpus
+
+settings = get_settings()
+output_name = "llm-batch"  # must not already exist under corpora_dir
+home = settings.corpora_dir / output_name
+home.mkdir(parents=True)
+write_annotated_corpus(docs, jsonl=home / CORPUS_JSONL_NAME)
+commit_colocated_dataset(
+    settings.corpora_dir,
+    output_name,
+    "jsonl",
+    description="Local LLM batch",
+)
 ```
 
 ## Testing

@@ -45,14 +45,13 @@ WORKDIR /app
 # Runtime data paths — bind-mount or use named volumes at runtime.
 #   pipelines/          → pipeline JSON definitions
 #   data/dictionaries/  → whitelist/blacklist term lists
-#   datasets/           → dataset manifests
+#   data/corpora/       → datasets as ``<name>/dataset.json`` + corpus files
 #   models/             → model weights (read-mostly)
 #   var/                → SQLite audit DB
 # Plus modes.json at /app/modes.json (single file).
 ENV CLINICAL_DEID_PIPELINES_DIR=/app/pipelines \
     CLINICAL_DEID_EVALUATIONS_DIR=/app/evaluations \
-    CLINICAL_DEID_DATASETS_DIR=/app/datasets \
-    CLINICAL_DEID_PROCESSED_DIR=/app/data/processed \
+    CLINICAL_DEID_CORPORA_DIR=/app/data/corpora \
     CLINICAL_DEID_DICTIONARIES_DIR=/app/data/dictionaries \
     CLINICAL_DEID_MODELS_DIR=/app/models \
     CLINICAL_DEID_INFERENCE_RUNS_DIR=/app/inference_runs \

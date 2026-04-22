@@ -16,6 +16,13 @@ export function useDatasets() {
   });
 }
 
+export function useImportSources() {
+  return useQuery({
+    queryKey: ['datasets', 'import-sources'],
+    queryFn: () => api.listImportSources(),
+  });
+}
+
 export function useDataset(name: string | null) {
   return useQuery({
     queryKey: ['datasets', name],

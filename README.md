@@ -21,7 +21,7 @@ High-level flow:
 | `frontend/` | React (Vite + TypeScript) playground UI |
 | `pipelines/` | Named pipeline configs (JSON files, git-versioned) |
 | `evaluations/` | Eval result JSON files |
-| `datasets/` | Registered dataset manifests (JSON) |
+| `data/corpora/<name>/` | Registered datasets (`dataset.json` + imported corpus files) |
 | `models/` | Trained model artifacts (see [`models/README.md`](./models/README.md)) |
 | `data/dictionaries/` | Whitelist & blacklist term-list files |
 | [`data/raw/`](./data/raw) | Optional local inbox for source files |
@@ -142,7 +142,7 @@ Default SQLite database: `./var/dev.sqlite` (audit log only). Override with `CLI
 | Datasets | `POST` | `/datasets` | Register dataset from local path |
 | Datasets | `GET` | `/datasets/{name}` | Dataset detail + analytics |
 | Datasets | `PUT` | `/datasets/{name}` | Update description/metadata |
-| Datasets | `DELETE` | `/datasets/{name}` | Unregister dataset |
+| Datasets | `DELETE` | `/datasets/{name}` | Delete dataset directory under corpora |
 | Datasets | `POST` | `/datasets/{name}/refresh` | Recompute analytics |
 | Datasets | `GET` | `/datasets/{name}/preview` | Preview documents (paginated) |
 | Datasets | `GET` | `/datasets/{name}/documents/{doc_id}` | Full document with spans |

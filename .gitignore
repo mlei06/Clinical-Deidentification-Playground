@@ -21,10 +21,6 @@ data/raw/*
 !data/raw/.gitkeep
 data/corpora/*
 !data/corpora/.gitkeep
-data/exports/*
-!data/exports/.gitkeep
-data/synthetic/*
-!data/synthetic/.gitkeep
 data/evaluations/*
 !data/evaluations/.gitkeep
 # Saved inference snapshots (JSON); keep directory

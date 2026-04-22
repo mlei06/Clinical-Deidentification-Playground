@@ -20,10 +20,9 @@ class Settings(BaseSettings):
     evaluations_dir: Path = Path("evaluations")
     inference_runs_dir: Path = Path("inference_runs")
     models_dir: Path = Path("models")
-    datasets_dir: Path = Path("datasets")
-    #: Root for materialized corpus bytes (transform / compose / generate outputs, BRAT exports).
-    #: Flat layout: ``$PROCESSED_DIR/{dataset_name}.jsonl`` for JSONL, ``$PROCESSED_DIR/{name}_export/`` for exports.
-    processed_dir: Path = Path("data/processed")
+    #: All corpus bytes and per-dataset dirs: ``{corpora_dir}/{name}/dataset.json`` plus
+    #: ``corpus.jsonl`` or BRAT files. API export dirs use ``{corpora_dir}/{name}_export/``.
+    corpora_dir: Path = Path("data/corpora")
     dictionaries_dir: Path = Path("data/dictionaries")
     cors_origins: list[str] = Field(
         default=["http://localhost:3000", "http://127.0.0.1:3000"],
@@ -91,17 +90,16 @@ class Settings(BaseSettings):
         super().__init__(**data)
 
     @model_validator(mode="after")
-    def _legacy_corpora_dir_env(self) -> Self:
-        """``CLINICAL_DEID_CORPORA_DIR`` still works (deprecated alias for ``processed_dir``)."""
-        if (
-            os.environ.get("CLINICAL_DEID_CORPORA_DIR")
-            and not os.environ.get("CLINICAL_DEID_PROCESSED_DIR")
+    def _legacy_processed_dir_env(self) -> Self:
+        """``CLINICAL_DEID_PROCESSED_DIR`` was the old name for the corpus data root; still honored."""
+        if os.environ.get("CLINICAL_DEID_PROCESSED_DIR") and not os.environ.get(
+            "CLINICAL_DEID_CORPORA_DIR"
         ):
             logger.warning(
-                "CLINICAL_DEID_CORPORA_DIR is deprecated; rename to CLINICAL_DEID_PROCESSED_DIR."
+                "CLINICAL_DEID_PROCESSED_DIR is deprecated; use CLINICAL_DEID_CORPORA_DIR "
+                "(single directory for all corpus files and API materialized outputs)."
             )
-            # Mutate in place: Pydantic v2 ignores a returned ``model_copy`` from ``__init__`` validation.
-            self.processed_dir = Path(os.environ["CLINICAL_DEID_CORPORA_DIR"])
+            self.corpora_dir = Path(os.environ["CLINICAL_DEID_PROCESSED_DIR"])
         return self
 
     @property

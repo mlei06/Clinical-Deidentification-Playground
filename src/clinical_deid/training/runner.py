@@ -33,7 +33,7 @@ def run_training(
     cfg: TrainingConfig,
     *,
     models_dir: Path,
-    datasets_dir: Path,
+    corpora_dir: Path,
 ) -> Path:
     """Run end-to-end training. Returns the final model directory path."""
     # Step 1: check deps
@@ -91,7 +91,7 @@ def run_training(
         tokenizer = AutoTokenizer.from_pretrained(resolved.tokenizer_source, use_fast=True)
 
         # Step 4: build datasets (tokenizer needed for alignment)
-        train_ds, eval_ds, bio_labels = build_hf_datasets(cfg, datasets_dir, tokenizer)
+        train_ds, eval_ds, bio_labels = build_hf_datasets(cfg, corpora_dir, tokenizer)
 
         train_doc_count = len(train_ds)
         eval_doc_count = len(eval_ds) if eval_ds is not None else 0
@@ -230,7 +230,7 @@ def run_training(
         test_doc_count = 0
         if cfg.test_dataset is not None:
             from clinical_deid.dataset_store import load_dataset_documents
-            test_docs = load_dataset_documents(datasets_dir, cfg.test_dataset)
+            test_docs = load_dataset_documents(corpora_dir, cfg.test_dataset)
             test_doc_count = len(test_docs)
             if test_docs:
                 if cfg.label_remap:

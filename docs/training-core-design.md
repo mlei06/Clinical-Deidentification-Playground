@@ -254,15 +254,13 @@ Algorithm:
 ```python
 def build_hf_datasets(
     cfg: TrainingConfig,
-    datasets_dir: Path,
+    corpora_dir: Path,
 ) -> tuple[datasets.Dataset, datasets.Dataset | None, list[str]]:
     """Returns (train_ds, eval_ds_or_None, bio_labels)."""
 ```
 
-- Load via `dataset_store.load_dataset_documents(datasets_dir, name)`.
-  **Prerequisite:** add `load_dataset_documents(datasets_dir: Path, name: str) -> list[AnnotatedDocument]`
-  to `dataset_store.py` if it does not already exist. It should load the JSON manifest
-  at `datasets_dir/{name}.json` and return fully hydrated `AnnotatedDocument` objects.
+- Load via `dataset_store.load_dataset_documents(corpora_dir, name)`.
+  Manifests live at `corpora_dir/{name}/dataset.json` with corpus bytes in the same directory.
 - If `eval_dataset` is set, load separately.
 - Else if `eval_fraction` is set, shuffle train with `hyperparams.seed` and
   slice. Do not touch the underlying JSON manifests.
@@ -276,7 +274,7 @@ def build_hf_datasets(
 ## Training flow (runner.py)
 
 ```python
-def run_training(cfg: TrainingConfig, *, models_dir: Path, datasets_dir: Path) -> Path:
+def run_training(cfg: TrainingConfig, *, models_dir: Path, corpora_dir: Path) -> Path:
     """End-to-end training. Returns the output model directory path."""
 ```
 
@@ -479,7 +477,7 @@ import cost on every run.
 - `test_runner.py::test_atomic_failure` — force a write failure mid-save; the
   final output directory must not exist.
 
-Use `tmp_path` for `models_dir` and `datasets_dir` per the project's existing
+Use `tmp_path` for `models_dir` and `corpora_dir` per the project's existing
 convention. Seed every test.
 
 ## Phase 1 acceptance criteria

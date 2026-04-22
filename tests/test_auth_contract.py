@@ -48,12 +48,11 @@ def secured_client(tmp_path, monkeypatch):
     pipelines_dir = tmp_path / "pipelines"
     evaluations_dir = tmp_path / "evaluations"
     inference_runs_dir = tmp_path / "inference_runs"
-    datasets_dir = tmp_path / "datasets"
-    processed_dir = tmp_path / "data" / "processed"
+    corpora_dir = tmp_path / "data" / "corpora"
     dictionaries_dir = tmp_path / "dictionaries"
     for d in (
         pipelines_dir, evaluations_dir, inference_runs_dir,
-        datasets_dir, processed_dir, dictionaries_dir,
+        corpora_dir, dictionaries_dir,
     ):
         d.mkdir(parents=True)
 
@@ -61,8 +60,7 @@ def secured_client(tmp_path, monkeypatch):
     monkeypatch.setenv("CLINICAL_DEID_PIPELINES_DIR", str(pipelines_dir))
     monkeypatch.setenv("CLINICAL_DEID_EVALUATIONS_DIR", str(evaluations_dir))
     monkeypatch.setenv("CLINICAL_DEID_INFERENCE_RUNS_DIR", str(inference_runs_dir))
-    monkeypatch.setenv("CLINICAL_DEID_DATASETS_DIR", str(datasets_dir))
-    monkeypatch.setenv("CLINICAL_DEID_PROCESSED_DIR", str(processed_dir))
+    monkeypatch.setenv("CLINICAL_DEID_CORPORA_DIR", str(corpora_dir))
     monkeypatch.setenv("CLINICAL_DEID_DICTIONARIES_DIR", str(dictionaries_dir))
     # pydantic-settings reads list envs as JSON arrays.
     monkeypatch.setenv("CLINICAL_DEID_ADMIN_API_KEYS", json.dumps([ADMIN_KEY]))

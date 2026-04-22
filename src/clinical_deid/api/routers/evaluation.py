@@ -205,7 +205,7 @@ def run_evaluation(session: SessionDep, body: EvalRunRequest) -> EvalRunDetail:
         from clinical_deid.dataset_store import load_dataset_documents
 
         try:
-            documents = load_dataset_documents(settings.datasets_dir, body.dataset_name)
+            documents = load_dataset_documents(settings.corpora_dir, body.dataset_name)
         except FileNotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except Exception as exc:

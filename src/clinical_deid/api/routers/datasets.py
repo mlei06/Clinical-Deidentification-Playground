@@ -11,12 +11,16 @@ from pydantic import BaseModel, Field
 from clinical_deid.api.auth import require_admin
 from clinical_deid.config import get_settings
 from clinical_deid.dataset_store import (
+    CORPUS_JSONL_NAME,
     DatasetFormat,
     DatasetInfo,
+    commit_colocated_dataset,
     delete_dataset,
     list_datasets,
+    list_import_candidates,
     load_dataset_documents,
     load_dataset_manifest,
+    public_data_path,
     refresh_analytics,
     register_dataset,
     save_dataset_manifest,
@@ -56,6 +60,19 @@ class RegisterDatasetRequest(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class ImportSourceCandidate(BaseModel):
+    """A filesystem entry under the corpora root that can be imported via ``POST /datasets``."""
+
+    label: str
+    data_path: str
+    suggested_format: DatasetFormat
+
+
+class ImportSourcesResponse(BaseModel):
+    corpora_root: str
+    candidates: list[ImportSourceCandidate]
+
+
 class UpdateDatasetRequest(BaseModel):
     description: str | None = None
     metadata: dict[str, Any] | None = None
@@ -84,7 +101,7 @@ class ComposeRequest(BaseModel):
 class TransformRequest(BaseModel):
     """Apply transforms to a dataset and save as a new dataset.
 
-    Output is always JSONL at ``$PROCESSED_DIR/{output_name}.jsonl``. Use
+    Output is written under ``$CORPORA_DIR/{output_name}/corpus.jsonl``. Use
     ``/datasets/{name}/export`` with ``format: "brat"`` to materialize BRAT for external tools.
     """
 
@@ -180,10 +197,11 @@ def _info_to_summary(info: DatasetInfo) -> DatasetSummary:
 
 
 def _manifest_to_detail(m: dict[str, Any]) -> DatasetDetail:
+    root = get_settings().corpora_dir
     return DatasetDetail(
         name=m["name"],
         description=m.get("description", ""),
-        data_path=m["data_path"],
+        data_path=public_data_path(root, m["name"], m),
         format=m["format"],
         document_count=m.get("document_count", 0),
         total_spans=m.get("total_spans", 0),
@@ -194,8 +212,8 @@ def _manifest_to_detail(m: dict[str, Any]) -> DatasetDetail:
     )
 
 
-def _datasets_dir():
-    return get_settings().datasets_dir
+def _corpora_dir():
+    return get_settings().corpora_dir
 
 
 def _apply_source_splits_or_422(
@@ -223,15 +241,26 @@ def list_all_datasets(
     offset: int = Query(default=0, ge=0),
 ) -> list[DatasetSummary]:
     """List registered datasets."""
-    datasets = list_datasets(_datasets_dir())
+    datasets = list_datasets(_corpora_dir())
     datasets = datasets[offset : offset + limit]
     return [_info_to_summary(d) for d in datasets]
+
+
+@router.get("/import-sources", response_model=ImportSourcesResponse)
+def list_dataset_import_sources() -> ImportSourcesResponse:
+    """List JSONL files and unregistered corpus directories under the configured corpora root."""
+    root = _corpora_dir().resolve()
+    raw = list_import_candidates(root)
+    return ImportSourcesResponse(
+        corpora_root=str(root),
+        candidates=[ImportSourceCandidate.model_validate(x) for x in raw],
+    )
 
 
 @router.post("", response_model=DatasetDetail, status_code=201)
 def register_new_dataset(body: RegisterDatasetRequest) -> DatasetDetail:
     """Register a dataset from a local path — validates data, computes analytics."""
-    ds_dir = _datasets_dir()
+    ds_dir = _corpora_dir()
 
     # Check name not taken
     existing = [d.name for d in list_datasets(ds_dir)]
@@ -248,7 +277,10 @@ def register_new_dataset(body: RegisterDatasetRequest) -> DatasetDetail:
             metadata=body.metadata,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        msg = str(exc)
+        if "already exists" in msg:
+            raise HTTPException(status_code=409, detail=msg) from exc
+        raise HTTPException(status_code=422, detail=msg) from exc
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except Exception as exc:
@@ -261,7 +293,7 @@ def register_new_dataset(body: RegisterDatasetRequest) -> DatasetDetail:
 def get_dataset(name: str) -> DatasetDetail:
     """Get full dataset metadata and analytics."""
     try:
-        manifest = load_dataset_manifest(_datasets_dir(), name)
+        manifest = load_dataset_manifest(_corpora_dir(), name)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return _manifest_to_detail(manifest)
@@ -270,7 +302,7 @@ def get_dataset(name: str) -> DatasetDetail:
 @router.put("/{name}", response_model=DatasetDetail)
 def update_dataset(name: str, body: UpdateDatasetRequest) -> DatasetDetail:
     """Update description or metadata (does not re-scan data)."""
-    ds_dir = _datasets_dir()
+    ds_dir = _corpora_dir()
     try:
         manifest = load_dataset_manifest(ds_dir, name)
     except FileNotFoundError as exc:
@@ -287,9 +319,9 @@ def update_dataset(name: str, body: UpdateDatasetRequest) -> DatasetDetail:
 
 @router.delete("/{name}", status_code=204)
 def remove_dataset(name: str) -> None:
-    """Unregister a dataset (does not delete the underlying data files)."""
+    """Delete the dataset directory (manifest and corpus files under ``corpora_dir/name/``)."""
     try:
-        delete_dataset(_datasets_dir(), name)
+        delete_dataset(_corpora_dir(), name)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
@@ -308,7 +340,7 @@ def get_dataset_schema(name: str) -> DatasetSchemaResponse:
     """
     from clinical_deid.analytics.stats import compute_dataset_analytics
 
-    ds_dir = _datasets_dir()
+    ds_dir = _corpora_dir()
     try:
         manifest = load_dataset_manifest(ds_dir, name)
     except FileNotFoundError as exc:
@@ -340,7 +372,7 @@ def get_dataset_schema(name: str) -> DatasetSchemaResponse:
 def refresh_dataset_analytics(name: str) -> DatasetDetail:
     """Reload data from disk and recompute cached analytics."""
     try:
-        manifest = refresh_analytics(_datasets_dir(), name)
+        manifest = refresh_analytics(_corpora_dir(), name)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except Exception as exc:
@@ -356,7 +388,7 @@ def preview_dataset(
 ) -> list[DocumentPreview]:
     """Preview documents from a dataset (paginated)."""
     try:
-        docs = load_dataset_documents(_datasets_dir(), name)
+        docs = load_dataset_documents(_corpora_dir(), name)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except Exception as exc:
@@ -379,7 +411,7 @@ def preview_dataset(
 def get_document(name: str, doc_id: str) -> dict[str, Any]:
     """Return a single document with full text and spans."""
     try:
-        docs = load_dataset_documents(_datasets_dir(), name)
+        docs = load_dataset_documents(_corpora_dir(), name)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
@@ -418,12 +450,12 @@ def export_dataset(name: str, body: ExportTrainingRequest) -> ExportTrainingResp
     - ``conll`` / ``spacy`` / ``huggingface``: training formats
     - ``brat``: flat BRAT folder of ``.txt`` / ``.ann`` pairs (for external tools)
 
-    Output goes under ``$PROCESSED_DIR/{name}_export/``.
+    Output goes under ``$CORPORA_DIR/{name}_export/``.
     """
     from clinical_deid.ingest.sink import write_annotated_corpus
     from clinical_deid.training_export import export_training_data
 
-    ds_dir = _datasets_dir()
+    ds_dir = _corpora_dir()
     try:
         docs = load_dataset_documents(ds_dir, name)
     except FileNotFoundError as exc:
@@ -432,7 +464,7 @@ def export_dataset(name: str, body: ExportTrainingRequest) -> ExportTrainingResp
     if not docs:
         raise HTTPException(status_code=422, detail=f"Dataset {name!r} has no documents")
 
-    output_dir = get_settings().processed_dir / f"{name}_export"
+    output_dir = get_settings().corpora_dir / f"{name}_export"
     try:
         if body.format == "brat":
             write_annotated_corpus(docs, brat_dir=output_dir)
@@ -468,10 +500,10 @@ def compose_datasets(body: ComposeRequest) -> DatasetDetail:
     from clinical_deid.compose.pipeline import compose_corpora
     from clinical_deid.ingest.sink import write_annotated_corpus
 
-    ds_dir = _datasets_dir()
+    corp = _corpora_dir()
 
     # Check output name not taken
-    existing = [d.name for d in list_datasets(ds_dir)]
+    existing = [d.name for d in list_datasets(corp)]
     if body.output_name in existing:
         raise HTTPException(status_code=409, detail=f"Dataset {body.output_name!r} already exists")
 
@@ -479,7 +511,7 @@ def compose_datasets(body: ComposeRequest) -> DatasetDetail:
     source_docs: list[list[Any]] = []
     for src_name in body.source_datasets:
         try:
-            docs = load_dataset_documents(ds_dir, src_name)
+            docs = load_dataset_documents(corp, src_name)
         except FileNotFoundError:
             raise HTTPException(status_code=404, detail=f"Source dataset {src_name!r} not found")
         if not docs:
@@ -507,12 +539,12 @@ def compose_datasets(body: ComposeRequest) -> DatasetDetail:
     if not composed:
         raise HTTPException(status_code=422, detail="Composition produced no documents")
 
-    # Write JSONL under processed root
     settings = get_settings()
-    output_path = settings.processed_dir / f"{body.output_name}.jsonl"
+    home = settings.corpora_dir / body.output_name
+    home.mkdir(parents=True)
+    output_path = home / CORPUS_JSONL_NAME
     write_annotated_corpus(composed, jsonl=output_path)
 
-    # Register
     provenance = {
         "composed_from": body.source_datasets,
         "strategy": body.strategy,
@@ -521,10 +553,9 @@ def compose_datasets(body: ComposeRequest) -> DatasetDetail:
         "seed": body.seed,
         "shuffle": body.shuffle,
     }
-    manifest = register_dataset(
-        ds_dir,
+    manifest = commit_colocated_dataset(
+        settings.corpora_dir,
         body.output_name,
-        str(output_path.resolve()),
         "jsonl",
         description=body.description or f"Composed from: {', '.join(body.source_datasets)}",
         metadata={"provenance": provenance},
@@ -542,9 +573,9 @@ def preview_transform_dataset(body: TransformPreviewRequest) -> TransformPreview
     """Dry-run transform: span keep/drop/rename counts and projected corpus size."""
     from clinical_deid.transform.ops import compute_transform_preview
 
-    ds_dir = _datasets_dir()
+    corp = _corpora_dir()
     try:
-        docs = load_dataset_documents(ds_dir, body.source_dataset)
+        docs = load_dataset_documents(corp, body.source_dataset)
     except FileNotFoundError:
         raise HTTPException(
             status_code=404,
@@ -599,16 +630,16 @@ def transform_dataset(body: TransformRequest) -> DatasetDetail:
     from clinical_deid.ingest.sink import write_annotated_corpus
     from clinical_deid.transform.ops import run_transform_pipeline
 
-    ds_dir = _datasets_dir()
+    corp = _corpora_dir()
 
     # Check output name not taken
-    existing = [d.name for d in list_datasets(ds_dir)]
+    existing = [d.name for d in list_datasets(corp)]
     if body.output_name in existing:
         raise HTTPException(status_code=409, detail=f"Dataset {body.output_name!r} already exists")
 
     # Load source
     try:
-        docs = load_dataset_documents(ds_dir, body.source_dataset)
+        docs = load_dataset_documents(corp, body.source_dataset)
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail=f"Source dataset {body.source_dataset!r} not found")
 
@@ -642,7 +673,9 @@ def transform_dataset(body: TransformRequest) -> DatasetDetail:
         raise HTTPException(status_code=422, detail="Transform produced no documents")
 
     settings = get_settings()
-    output_path = settings.processed_dir / f"{body.output_name}.jsonl"
+    home = settings.corpora_dir / body.output_name
+    home.mkdir(parents=True)
+    output_path = home / CORPUS_JSONL_NAME
     write_annotated_corpus(transformed, jsonl=output_path)
 
     provenance: dict[str, Any] = {"transformed_from": body.source_dataset}
@@ -655,10 +688,9 @@ def transform_dataset(body: TransformRequest) -> DatasetDetail:
         if val and val != 0:
             provenance[field] = val
 
-    manifest = register_dataset(
-        ds_dir,
+    manifest = commit_colocated_dataset(
+        settings.corpora_dir,
         body.output_name,
-        str(output_path.resolve()),
         "jsonl",
         description=body.description or f"Transformed from: {body.source_dataset}",
         metadata={"provenance": provenance},
@@ -683,11 +715,11 @@ def generate_dataset(body: GenerateRequest) -> DatasetDetail:
     from clinical_deid.synthesis.synthesizer import LLMSynthesizer
     from clinical_deid.synthesis.types import FewShotExample
 
-    ds_dir = _datasets_dir()
+    corp = _corpora_dir()
     settings = get_settings()
 
     # Check output name not taken
-    existing = [d.name for d in list_datasets(ds_dir)]
+    existing = [d.name for d in list_datasets(corp)]
     if body.output_name in existing:
         raise HTTPException(status_code=409, detail=f"Dataset {body.output_name!r} already exists")
 
@@ -728,11 +760,11 @@ def generate_dataset(body: GenerateRequest) -> DatasetDetail:
             detail=f"All {body.count} generation attempts failed. Errors: {errors[:5]}",
         )
 
-    # Write
-    output_path = settings.processed_dir / f"{body.output_name}.jsonl"
+    home = settings.corpora_dir / body.output_name
+    home.mkdir(parents=True)
+    output_path = home / CORPUS_JSONL_NAME
     write_annotated_corpus(docs, jsonl=output_path)
 
-    # Register
     provenance: dict[str, Any] = {
         "generated": True,
         "requested_count": body.count,
@@ -743,10 +775,9 @@ def generate_dataset(body: GenerateRequest) -> DatasetDetail:
     if errors:
         provenance["sample_errors"] = errors[:5]
 
-    manifest = register_dataset(
-        ds_dir,
+    manifest = commit_colocated_dataset(
+        settings.corpora_dir,
         body.output_name,
-        str(output_path.resolve()),
         "jsonl",
         description=body.description or f"LLM-generated synthetic data ({len(docs)} notes)",
         metadata={"provenance": provenance},

@@ -349,6 +349,17 @@ export interface RegisterDatasetRequest {
   description?: string;
 }
 
+export interface ImportSourceCandidate {
+  label: string;
+  data_path: string;
+  suggested_format: 'jsonl' | 'brat-dir' | 'brat-corpus';
+}
+
+export interface ImportSourcesResponse {
+  corpora_root: string;
+  candidates: ImportSourceCandidate[];
+}
+
 export interface ComposeRequest {
   output_name: string;
   source_datasets: string[];

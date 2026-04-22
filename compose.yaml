@@ -39,7 +39,7 @@ services:
       # Writable so PUT /deploy can update modes from the Playground (create the file on first deploy if missing).
       - ./modes.json:/app/modes.json
       - ./data/dictionaries:/app/data/dictionaries
-      - ./datasets:/app/datasets
+      - ./data/corpora:/app/data/corpora
       - ./models:/app/models:ro
       - api-var:/app/var
     healthcheck:

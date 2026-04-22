@@ -106,6 +106,46 @@ def test_register_duplicate_rejected(client, tmp_path):
     assert resp.status_code == 409
 
 
+def test_import_sources_lists_corpora_children(client, tmp_path):
+    corpora = tmp_path / "data" / "corpora"
+    corpora.mkdir(parents=True, exist_ok=True)
+    _write_sample_jsonl(corpora / "incoming.jsonl")
+    brat_flat = corpora / "brat_flat"
+    brat_flat.mkdir()
+    (brat_flat / "a.txt").write_text("hi", encoding="utf-8")
+    (brat_flat / "a.ann").write_text("T1\tPER 0 2\thi\n", encoding="utf-8")
+    split_root = corpora / "brat_split"
+    split_root.mkdir()
+    train = split_root / "train"
+    train.mkdir()
+    (train / "b.txt").write_text("yo", encoding="utf-8")
+    (train / "b.ann").write_text("T1\tPER 0 2\tyo\n", encoding="utf-8")
+
+    resp = client.get("/datasets/import-sources")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["corpora_root"] == str(corpora.resolve())
+    by_label = {c["label"]: c for c in body["candidates"]}
+    assert by_label["incoming.jsonl"]["suggested_format"] == "jsonl"
+    assert by_label["incoming.jsonl"]["data_path"] == str((corpora / "incoming.jsonl").resolve())
+    assert by_label["brat_flat"]["suggested_format"] == "brat-dir"
+    assert by_label["brat_split"]["suggested_format"] == "brat-corpus"
+
+    client.post(
+        "/datasets",
+        json={
+            "name": "from-drop",
+            "data_path": str(corpora / "incoming.jsonl"),
+            "format": "jsonl",
+        },
+    )
+    resp2 = client.get("/datasets/import-sources")
+    assert resp2.status_code == 200
+    labels2 = {c["label"] for c in resp2.json()["candidates"]}
+    assert "incoming.jsonl" in labels2
+    assert "from-drop" not in labels2
+
+
 # ---------------------------------------------------------------------------
 # Get / Update / Delete
 # ---------------------------------------------------------------------------
@@ -205,8 +245,8 @@ def test_refresh_analytics(client, tmp_path):
         "/datasets",
         json={"name": "ref", "data_path": str(jsonl), "format": "jsonl"},
     )
-    # Append more data
-    _write_sample_jsonl(tmp_path / "data" / "sample.jsonl", count=8)
+    # Mutate the colocated corpus copy (not the original upload path).
+    _write_sample_jsonl(tmp_path / "data" / "corpora" / "ref" / "corpus.jsonl", count=8)
     resp = client.post("/datasets/ref/refresh")
     assert resp.status_code == 200
     assert resp.json()["document_count"] == 8
@@ -391,8 +431,8 @@ def test_transform_missing_source(client):
     assert resp.status_code == 404
 
 
-def test_transform_writes_jsonl_under_processed_dir(client, tmp_path):
-    """JSONL output goes to $PROCESSED_DIR/{name}.jsonl (not next to manifests)."""
+def test_transform_writes_jsonl_under_corpora_dir(client, tmp_path):
+    """Transform output is ``corpora_dir/{name}/corpus.jsonl``."""
     jsonl = _write_sample_jsonl(tmp_path / "data" / "sample.jsonl", count=4)
     client.post(
         "/datasets",
@@ -405,11 +445,11 @@ def test_transform_writes_jsonl_under_processed_dir(client, tmp_path):
     assert resp.status_code == 201, resp.text
     body = resp.json()
     assert body["format"] == "jsonl"
-    expected = tmp_path / "data" / "processed" / "t-out.jsonl"
+    expected = tmp_path / "data" / "corpora" / "t-out" / "corpus.jsonl"
     assert expected.is_file()
     assert body["data_path"] == str(expected.resolve())
-    # Manifest dir holds only the registry JSON, not the heavy bytes.
-    assert not list((tmp_path / "datasets").glob("*.jsonl"))
+    corpora_root = tmp_path / "data" / "corpora"
+    assert not list(corpora_root.glob("*.jsonl"))
 
 
 def test_transform_rejects_removed_output_format_field(client, tmp_path):
@@ -430,7 +470,7 @@ def test_transform_rejects_removed_output_format_field(client, tmp_path):
     assert resp.json()["format"] == "jsonl"
 
 
-def test_compose_writes_jsonl_under_processed_dir(client, tmp_path):
+def test_compose_writes_jsonl_under_corpora_dir(client, tmp_path):
     a = _write_sample_jsonl(tmp_path / "data" / "a.jsonl", count=2)
     b = _write_sample_jsonl(tmp_path / "data" / "b.jsonl", count=3)
     client.post("/datasets", json={"name": "c-a", "data_path": str(a), "format": "jsonl"})
@@ -444,7 +484,7 @@ def test_compose_writes_jsonl_under_processed_dir(client, tmp_path):
         },
     )
     assert resp.status_code == 201, resp.text
-    expected = tmp_path / "data" / "processed" / "c-out.jsonl"
+    expected = tmp_path / "data" / "corpora" / "c-out" / "corpus.jsonl"
     assert expected.is_file()
     assert resp.json()["data_path"] == str(expected.resolve())
 
@@ -456,7 +496,7 @@ def test_export_brat_writes_flat_dir(client, tmp_path):
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["format"] == "brat"
-    out = tmp_path / "data" / "processed" / "brat-src_export"
+    out = tmp_path / "data" / "corpora" / "brat-src_export"
     assert out.is_dir()
     assert list(out.glob("*.txt"))
     assert list(out.glob("*.ann"))
@@ -544,64 +584,88 @@ def test_store_register_and_load(tmp_path):
         register_dataset,
     )
 
-    jsonl = _write_sample_jsonl(tmp_path / "data" / "corpus.jsonl", count=4)
-    ds_dir = tmp_path / "datasets"
-    ds_dir.mkdir()
+    jsonl = _write_sample_jsonl(tmp_path / "incoming" / "corpus.jsonl", count=4)
+    corpora_dir = tmp_path / "corpora"
+    corpora_dir.mkdir()
 
-    manifest = register_dataset(ds_dir, "unit-test", str(jsonl), "jsonl", description="test")
+    manifest = register_dataset(corpora_dir, "unit-test", str(jsonl), "jsonl", description="test")
     assert manifest["document_count"] == 4
     assert manifest["name"] == "unit-test"
+    assert (corpora_dir / "unit-test" / "corpus.jsonl").is_file()
 
     # Load back
-    loaded = load_dataset_manifest(ds_dir, "unit-test")
+    loaded = load_dataset_manifest(corpora_dir, "unit-test")
     assert loaded["document_count"] == 4
 
     # List
-    datasets = list_datasets(ds_dir)
+    datasets = list_datasets(corpora_dir)
     assert len(datasets) == 1
     assert datasets[0].name == "unit-test"
 
     # Load documents
-    docs = load_dataset_documents(ds_dir, "unit-test")
+    docs = load_dataset_documents(corpora_dir, "unit-test")
     assert len(docs) == 4
 
     # Delete
-    delete_dataset(ds_dir, "unit-test")
-    assert len(list_datasets(ds_dir)) == 0
+    delete_dataset(corpora_dir, "unit-test")
+    assert len(list_datasets(corpora_dir)) == 0
 
 
-def test_deprecated_corpora_dir_env_still_resolves(tmp_path, monkeypatch, caplog):
-    """Legacy ``CLINICAL_DEID_CORPORA_DIR`` still populates ``processed_dir`` and warns."""
+def test_corpora_dir_env_primary(tmp_path, monkeypatch, caplog):
+    """CLINICAL_DEID_CORPORA_DIR sets the corpus data root (no deprecation warning)."""
     import logging
 
     from clinical_deid.config import Settings, reset_settings
 
-    legacy = tmp_path / "legacy-corpora"
-    legacy.mkdir()
+    root = tmp_path / "corp-root"
+    root.mkdir()
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("CLINICAL_DEID_PROCESSED_DIR", raising=False)
     monkeypatch.delenv("CLINICAL_DEID_ENV_FILE", raising=False)
-    monkeypatch.setenv("CLINICAL_DEID_CORPORA_DIR", str(legacy))
+    monkeypatch.setenv("CLINICAL_DEID_CORPORA_DIR", str(root))
     reset_settings()
     with caplog.at_level(logging.WARNING, logger="clinical_deid.config"):
         settings = Settings()
-    assert settings.processed_dir == legacy
-    assert any("CLINICAL_DEID_CORPORA_DIR" in rec.message for rec in caplog.records)
+    assert settings.corpora_dir == root
+    assert not any("deprecated" in rec.message.lower() for rec in caplog.records)
+    reset_settings()
+
+
+def test_legacy_processed_dir_env_still_resolves(tmp_path, monkeypatch, caplog):
+    """CLINICAL_DEID_PROCESSED_DIR still sets corpora_dir but logs a deprecation warning."""
+    import logging
+
+    from clinical_deid.config import Settings, reset_settings
+
+    legacy = tmp_path / "old-processed"
+    legacy.mkdir()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("CLINICAL_DEID_CORPORA_DIR", raising=False)
+    monkeypatch.delenv("CLINICAL_DEID_ENV_FILE", raising=False)
+    monkeypatch.setenv("CLINICAL_DEID_PROCESSED_DIR", str(legacy))
+    reset_settings()
+    with caplog.at_level(logging.WARNING, logger="clinical_deid.config"):
+        settings = Settings()
+    assert settings.corpora_dir == legacy
+    assert any(
+        "PROCESSED_DIR" in rec.message and "deprecated" in rec.message.lower()
+        for rec in caplog.records
+    )
     reset_settings()
 
 
 def test_store_invalid_name(tmp_path):
     from clinical_deid.dataset_store import register_dataset
 
-    jsonl = _write_sample_jsonl(tmp_path / "data" / "corpus.jsonl")
-    ds_dir = tmp_path / "datasets"
-    ds_dir.mkdir()
+    jsonl = _write_sample_jsonl(tmp_path / "incoming" / "corpus.jsonl")
+    corpora_dir = tmp_path / "corpora"
+    corpora_dir.mkdir()
 
     with pytest.raises(ValueError, match="Invalid dataset name"):
-        register_dataset(ds_dir, "../escape", str(jsonl), "jsonl")
+        register_dataset(corpora_dir, "../escape", str(jsonl), "jsonl")
 
     with pytest.raises(ValueError, match="Invalid dataset name"):
-        register_dataset(ds_dir, "", str(jsonl), "jsonl")
+        register_dataset(corpora_dir, "", str(jsonl), "jsonl")
 
 
 # ---------------------------------------------------------------------------

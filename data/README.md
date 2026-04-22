@@ -7,27 +7,18 @@ All contents are git-ignored except `.gitkeep` placeholders.
 ```
 data/
   raw/                  Unprocessed source files before ingestion
-  corpora/              Annotated datasets — gold, transformed, synthesized, merged
-    physionet/
-      brat/             train/valid/test splits with .txt/.ann pairs
-      jsonl/            Same data in JSONL format
-    asq_phi/
-    sredh_chatgpt/
-    physionet-augmented/ (example: output of transform/synthesis)
-    combined-v1/         (example: output of compose)
-  exports/              Training-ready formats (spaCy .spacy, HF datasets, CoNLL)
-    spacy/
-    huggingface/
-  synthetic/            Generation inputs (prompt templates, synthesis configs)
-  evaluations/          Pipeline evaluation results (metrics, per-doc, confusion)
+  corpora/              **Single root for corpus bytes** (see CLINICAL_DEID_CORPORA_DIR)
+                        — BRAT trees, JSONL, outputs from API/CLI transform · compose · LLM generate,
+                        and `{dataset}_export/` folders from dataset export (CoNLL, spaCy, HF, BRAT)
+    physionet/brat/     Example: train/valid/test .txt/.ann
+    physionet/jsonl/    Example: optional parallel JSONL copy
+  evaluations/          Optional: offline copies of eval artifacts (eval JSON also under repo evaluations/)
 ```
 
-`corpora/` is the single home for all annotated datasets regardless of how they were produced — original ingestion, transforms, synthesis, or merging. They all share the same JSONL/BRAT format and are interchangeable as inputs to training, evaluation, and further transforms.
+`corpora/` matches **Settings.corpora_dir** (`data/corpora` by default). Each registered dataset is a subdirectory ``<corpora_dir>/<name>/`` containing ``dataset.json`` (analytics + metadata) and the corpus (typically ``corpus.jsonl`` or BRAT files). Registration **copies** from the path you supply into that layout. API export still writes ``<corpora_dir>/<dataset>_export/`` next to dataset dirs.
 
 | Directory | Purpose | Typical commands |
 |-----------|---------|-----------------|
 | `raw/` | Drop source files before ingestion | `scripts/process_*.py` |
-| `corpora/` | All annotated datasets (gold + derived) | `scripts/transform_dataset.py`, `scripts/compose_datasets.py`, `scripts/dataset_analytics.py` |
-| `exports/` | Framework-specific training formats | `clinical-deid dataset export …` or REST dataset export |
-| `synthetic/` | Prompt templates and synthesis configs | LLM synthesis scripts |
-| `evaluations/` | Pipeline evaluation outputs | `clinical-deid eval`, `POST /eval/run`, or Playground evaluate view |
+| `corpora/` | All corpus files + materialized exports (incl. `POST /datasets/generate` LLM output) | `scripts/transform_dataset.py`, `clinical-deid dataset register`, `POST /datasets/transform`, `POST /datasets/generate`, `dataset export` |
+| `evaluations/` | Optional local mirror of eval runs | `clinical-deid eval`, `POST /eval/run` (default eval JSON is under top-level `evaluations/`) |

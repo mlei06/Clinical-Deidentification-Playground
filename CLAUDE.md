@@ -41,7 +41,7 @@ Node.js 20.19+ or 22.12+ required for the frontend (Vite 8).
 | Pipelines | JSON files | `pipelines/{name}.json` |
 | Eval results | JSON files | `evaluations/{pipeline}_{timestamp}.json` |
 | Models | Directories | `models/{framework}/{name}/` |
-| Datasets | JSON manifests + data files | `datasets/{name}.json` → user-provided paths |
+| Datasets | Colocated under corpora | `data/corpora/{name}/dataset.json` + `corpus.jsonl` or BRAT files |
 | Dictionaries | Term-list files | `data/dictionaries/{whitelist,blacklist}/` |
 | Deploy config | JSON file | `modes.json` |
 | Audit log | SQLite (SQLModel) | `var/dev.sqlite` — `audit_log` table |
@@ -211,7 +211,7 @@ All pipeline routes use **name-based** paths (not UUIDs):
 | `POST` | `/datasets` | Register dataset from local path |
 | `GET` | `/datasets/{name}` | Dataset detail + analytics |
 | `PUT` | `/datasets/{name}` | Update description/metadata |
-| `DELETE` | `/datasets/{name}` | Unregister dataset |
+| `DELETE` | `/datasets/{name}` | Delete dataset directory (manifest + corpus) |
 | `POST` | `/datasets/{name}/refresh` | Recompute analytics |
 | `GET` | `/datasets/{name}/preview` | Preview documents (paginated) |
 | `GET` | `/datasets/{name}/documents/{doc_id}` | Full document with spans |

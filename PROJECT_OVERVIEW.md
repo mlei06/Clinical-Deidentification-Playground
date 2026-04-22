@@ -212,7 +212,7 @@ Multiple detectors then consensus merge (no `parallel` pipe type — use a linea
 | `POST` | `/datasets` | Register dataset from local path |
 | `GET` | `/datasets/{name}` | Dataset detail + analytics |
 | `PUT` | `/datasets/{name}` | Update description/metadata |
-| `DELETE` | `/datasets/{name}` | Unregister dataset |
+| `DELETE` | `/datasets/{name}` | Delete dataset directory under corpora |
 | `POST` | `/datasets/{name}/refresh` | Recompute analytics |
 | `GET` | `/datasets/{name}/preview` | Preview documents (paginated) |
 | `GET` | `/datasets/{name}/documents/{doc_id}` | Full document with spans |

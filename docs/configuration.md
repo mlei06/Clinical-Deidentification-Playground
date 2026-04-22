@@ -12,13 +12,12 @@ All configuration is managed through environment variables, with sensible defaul
 | `CLINICAL_DEID_PIPELINES_DIR` | `pipelines` | Named pipeline JSON configs |
 | `CLINICAL_DEID_EVALUATIONS_DIR` | `evaluations` | Evaluation result JSON files |
 | `CLINICAL_DEID_INFERENCE_RUNS_DIR` | `inference_runs` | Batch inference output directory |
-| `CLINICAL_DEID_DATASETS_DIR` | `datasets` | Dataset manifest JSON files |
 | `CLINICAL_DEID_DICTIONARIES_DIR` | `data/dictionaries` | Whitelist/blacklist term-list files |
 | `CLINICAL_DEID_MODELS_DIR` | `models` | Root directory for model registry |
-| `CLINICAL_DEID_PROCESSED_DIR` | `data/processed` | Materialized corpus bytes (transforms, exports) |
+| `CLINICAL_DEID_CORPORA_DIR` | `data/corpora` | Dataset directories: ``<name>/dataset.json`` + ``corpus.jsonl`` or BRAT files; also `{name}_export/` for training exports |
 | `CLINICAL_DEID_ENV_FILE` | _(auto-detected)_ | Explicit path to `.env` file |
 
-`CLINICAL_DEID_CORPORA_DIR` is a deprecated alias for `CLINICAL_DEID_PROCESSED_DIR` — still honored with a warning.
+`CLINICAL_DEID_PROCESSED_DIR` is a deprecated alias for `CLINICAL_DEID_CORPORA_DIR` — still honored with a warning.
 
 ### HTTP / auth
 

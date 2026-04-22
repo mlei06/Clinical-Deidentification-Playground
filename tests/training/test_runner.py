@@ -44,12 +44,12 @@ def _write_jsonl_dataset(path: Path, docs: list[AnnotatedDocument]) -> None:
             f.write(doc.model_dump_json() + "\n")
 
 
-def _register_dataset(datasets_dir: Path, name: str, docs: list[AnnotatedDocument]) -> None:
+def _register_dataset(corpora_dir: Path, name: str, docs: list[AnnotatedDocument]) -> None:
     from clinical_deid.dataset_store import register_dataset
 
-    data_path = datasets_dir / f"{name}.jsonl"
-    _write_jsonl_dataset(data_path, docs)
-    register_dataset(datasets_dir, name, str(data_path), "jsonl")
+    src = corpora_dir.parent / f"_{name}_upload.jsonl"
+    _write_jsonl_dataset(src, docs)
+    register_dataset(corpora_dir, name, str(src), "jsonl")
 
 
 SAMPLE_DOCS = [
@@ -62,11 +62,12 @@ SAMPLE_DOCS = [
 
 @pytest.fixture()
 def trained_model(tmp_path):
-    """Train one epoch on 4 synthetic docs; return (model_dir, models_dir, datasets_dir)."""
-    datasets_dir = tmp_path / "datasets"
+    """Train one epoch on 4 synthetic docs; return (model_dir, models_dir, corpora_dir)."""
+    corpora_dir = tmp_path / "corpora"
+    corpora_dir.mkdir()
     models_dir = tmp_path / "models"
 
-    _register_dataset(datasets_dir, "tiny-train", SAMPLE_DOCS)
+    _register_dataset(corpora_dir, "tiny-train", SAMPLE_DOCS)
 
     cfg = TrainingConfig(
         base_model=TINY_MODEL,
@@ -76,8 +77,8 @@ def trained_model(tmp_path):
         device="cpu",
         hyperparams=TrainingHyperparams(epochs=1, per_device_train_batch_size=2, seed=42),
     )
-    model_dir = run_training(cfg, models_dir=models_dir, datasets_dir=datasets_dir)
-    return model_dir, models_dir, datasets_dir
+    model_dir = run_training(cfg, models_dir=models_dir, corpora_dir=corpora_dir)
+    return model_dir, models_dir, corpora_dir
 
 
 # ---------------------------------------------------------------------------
@@ -139,7 +140,7 @@ def test_huggingface_ner_loads_and_predicts(trained_model, tmp_path, monkeypatch
 
 @pytest.mark.train
 def test_output_exists_raises(trained_model):
-    _, models_dir, datasets_dir = trained_model
+    _, models_dir, corpora_dir = trained_model
     cfg = TrainingConfig(
         base_model=TINY_MODEL,
         train_dataset="tiny-train",
@@ -148,12 +149,12 @@ def test_output_exists_raises(trained_model):
         hyperparams=TrainingHyperparams(epochs=1, seed=42),
     )
     with pytest.raises(OutputExists):
-        run_training(cfg, models_dir=models_dir, datasets_dir=datasets_dir)
+        run_training(cfg, models_dir=models_dir, corpora_dir=corpora_dir)
 
 
 @pytest.mark.train
 def test_overwrite_replaces_model(trained_model):
-    _, models_dir, datasets_dir = trained_model
+    _, models_dir, corpora_dir = trained_model
     cfg = TrainingConfig(
         base_model=TINY_MODEL,
         train_dataset="tiny-train",
@@ -162,7 +163,7 @@ def test_overwrite_replaces_model(trained_model):
         overwrite=True,
         hyperparams=TrainingHyperparams(epochs=1, seed=0),
     )
-    new_dir = run_training(cfg, models_dir=models_dir, datasets_dir=datasets_dir)
+    new_dir = run_training(cfg, models_dir=models_dir, corpora_dir=corpora_dir)
     manifest = json.loads((new_dir / "model_manifest.json").read_text())
     assert manifest["training"]["seed"] == 0
 
@@ -174,7 +175,7 @@ def test_overwrite_replaces_model(trained_model):
 
 @pytest.mark.train
 def test_continue_from_local(trained_model):
-    model_dir, models_dir, datasets_dir = trained_model
+    model_dir, models_dir, corpora_dir = trained_model
 
     cfg = TrainingConfig(
         base_model="local:tiny-phi-v1",
@@ -183,7 +184,7 @@ def test_continue_from_local(trained_model):
         device="cpu",
         hyperparams=TrainingHyperparams(epochs=1, seed=42),
     )
-    v2_dir = run_training(cfg, models_dir=models_dir, datasets_dir=datasets_dir)
+    v2_dir = run_training(cfg, models_dir=models_dir, corpora_dir=corpora_dir)
     manifest = json.loads((v2_dir / "model_manifest.json").read_text())
     assert manifest["parent_model"] == "tiny-phi-v1"
 
@@ -195,9 +196,10 @@ def test_continue_from_local(trained_model):
 
 @pytest.mark.train
 def test_freeze_encoder(tmp_path):
-    datasets_dir = tmp_path / "datasets"
+    corpora_dir = tmp_path / "corpora"
+    corpora_dir.mkdir()
     models_dir = tmp_path / "models"
-    _register_dataset(datasets_dir, "tiny-train", SAMPLE_DOCS)
+    _register_dataset(corpora_dir, "tiny-train", SAMPLE_DOCS)
 
     import torch
     from transformers import AutoModelForTokenClassification
@@ -211,7 +213,7 @@ def test_freeze_encoder(tmp_path):
         freeze_encoder=True,
         hyperparams=TrainingHyperparams(epochs=2, per_device_train_batch_size=2, seed=42),
     )
-    model_dir = run_training(cfg, models_dir=models_dir, datasets_dir=datasets_dir)
+    model_dir = run_training(cfg, models_dir=models_dir, corpora_dir=corpora_dir)
 
     # Reload and verify encoder params are frozen
     model = AutoModelForTokenClassification.from_pretrained(str(model_dir))
@@ -231,9 +233,10 @@ def test_freeze_encoder(tmp_path):
 @pytest.mark.train
 def test_atomic_failure_leaves_no_final_dir(tmp_path, monkeypatch):
     """If writing the manifest fails, the final output directory must not exist."""
-    datasets_dir = tmp_path / "datasets"
+    corpora_dir = tmp_path / "corpora"
+    corpora_dir.mkdir()
     models_dir = tmp_path / "models"
-    _register_dataset(datasets_dir, "tiny-train", SAMPLE_DOCS)
+    _register_dataset(corpora_dir, "tiny-train", SAMPLE_DOCS)
 
     import clinical_deid.training.manifest as manifest_mod
 
@@ -251,7 +254,7 @@ def test_atomic_failure_leaves_no_final_dir(tmp_path, monkeypatch):
     )
 
     with pytest.raises(RuntimeError, match="simulated"):
-        run_training(cfg, models_dir=models_dir, datasets_dir=datasets_dir)
+        run_training(cfg, models_dir=models_dir, corpora_dir=corpora_dir)
 
     final_dir = models_dir / "huggingface" / "will-fail"
     assert not final_dir.exists()

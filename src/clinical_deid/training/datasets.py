@@ -170,7 +170,7 @@ def _remap_doc(doc: AnnotatedDocument, remap: dict[str, str]) -> AnnotatedDocume
 
 def build_hf_datasets(
     cfg: "TrainingConfig",
-    datasets_dir: Path,
+    corpora_dir: Path,
     tokenizer: "PreTrainedTokenizerFast",
 ) -> "tuple[hf_datasets.Dataset, hf_datasets.Dataset | None, list[str]]":
     """Return (train_ds, eval_ds_or_None, bio_labels).
@@ -183,12 +183,12 @@ def build_hf_datasets(
     from clinical_deid.training.errors import EmptyDataset, NoLabelsFound
 
     # Load documents
-    train_docs = load_dataset_documents(datasets_dir, cfg.train_dataset)
+    train_docs = load_dataset_documents(corpora_dir, cfg.train_dataset)
     if not train_docs:
         raise EmptyDataset(f"Dataset {cfg.train_dataset!r} has no documents.")
 
     for extra_name in cfg.extra_train_datasets:
-        extra = load_dataset_documents(datasets_dir, extra_name)
+        extra = load_dataset_documents(corpora_dir, extra_name)
         if not extra:
             logger.warning("Extra train dataset %r has no documents; skipping.", extra_name)
         else:
@@ -198,7 +198,7 @@ def build_hf_datasets(
     eval_docs: list[AnnotatedDocument] | None = None
 
     if cfg.eval_dataset is not None:
-        eval_docs = load_dataset_documents(datasets_dir, cfg.eval_dataset)
+        eval_docs = load_dataset_documents(corpora_dir, cfg.eval_dataset)
         if cfg.eval_fraction is not None:
             logger.warning(
                 "Both eval_dataset and eval_fraction are set; using eval_dataset and ignoring eval_fraction."

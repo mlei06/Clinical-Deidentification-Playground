@@ -5,6 +5,7 @@ import type {
   DocumentPreview,
   DocumentDetail,
   RegisterDatasetRequest,
+  ImportSourcesResponse,
   ComposeRequest,
   TransformRequest,
   TransformPreviewRequest,
@@ -36,6 +37,10 @@ export function getDatasetSchema(name: string): Promise<DatasetSchemaResponse> {
 
 export function registerDataset(req: RegisterDatasetRequest): Promise<DatasetDetail> {
   return apiFetch('/datasets', { method: 'POST', body: JSON.stringify(req) });
+}
+
+export function listImportSources(): Promise<ImportSourcesResponse> {
+  return apiFetch('/datasets/import-sources');
 }
 
 export function updateDataset(

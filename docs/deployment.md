@@ -6,7 +6,7 @@ One FastAPI application serves the Playground, automation, and the Production UI
 
 - **API:** `clinical-deid-api` → `uvicorn clinical_deid.api.app:app` (see root `Dockerfile` and `compose.yaml`).
 - **Playground UI** (`frontend/`) and **Production UI** (`frontend-production/`) are static SPAs. They call the API using `VITE_API_BASE_URL` and optional `VITE_API_KEY` (see each app’s `.env.example`).
-- **Volumes:** Mount persistent directories for `pipelines/`, `modes.json` (writable if you use `PUT /deploy` from the Playground), `data/dictionaries/`, `datasets/`, `models/`, and the SQLite path behind `CLINICAL_DEID_DATABASE_URL` (default under `var/` in the container).
+- **Volumes:** Mount persistent directories for `pipelines/`, `modes.json` (writable if you use `PUT /deploy` from the Playground), `data/dictionaries/`, `data/corpora/` (each dataset is a subdirectory with `dataset.json` + corpus files; export outputs use `{name}_export/`), `models/`, and the SQLite path behind `CLINICAL_DEID_DATABASE_URL` (default under `var/` in the container).
 - **NeuroNER:** Optional HTTP sidecar (`docker/neuroner/`); set `CLINICAL_DEID_NEURONER_HTTP_URL`.
 
 ## Authentication
