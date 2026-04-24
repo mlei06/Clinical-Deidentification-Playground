@@ -4,6 +4,7 @@ import { RefreshCw, Loader2, Download, FlaskConical } from 'lucide-react';
 import { useDataset, useRefreshAnalytics, useExportDataset } from '../../hooks/useDatasets';
 import AnalyticsDashboard from './AnalyticsDashboard';
 import DocumentBrowser from './DocumentBrowser';
+import SplitSummary from './SplitSummary';
 import type { TrainingExportFormat, ExportTrainingResponse } from '../../api/types';
 
 interface DatasetDetailProps {
@@ -140,6 +141,10 @@ export default function DatasetDetail({ name }: DatasetDetailProps) {
         </div>
       )}
 
+      {Object.keys(dataset.split_document_counts ?? {}).length > 0 && (
+        <SplitSummary datasetName={name} splitDocumentCounts={dataset.split_document_counts ?? {}} />
+      )}
+
       {/* Tabs */}
       <div className="flex gap-1 border-b border-gray-200">
         {(['analytics', 'documents'] as const).map((t) => (
@@ -159,7 +164,12 @@ export default function DatasetDetail({ name }: DatasetDetailProps) {
 
       {/* Content */}
       {tab === 'analytics' && <AnalyticsDashboard dataset={dataset} />}
-      {tab === 'documents' && <DocumentBrowser datasetName={name} />}
+      {tab === 'documents' && (
+        <DocumentBrowser
+          datasetName={name}
+          splitDocumentCounts={dataset.split_document_counts ?? {}}
+        />
+      )}
     </div>
   );
 }

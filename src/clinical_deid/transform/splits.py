@@ -66,12 +66,15 @@ def reassign_splits(
     split_fractions: dict[str, float],
     *,
     seed: int = 42,
+    shuffle: bool = True,
 ) -> list[AnnotatedDocument]:
     """
     Recompute document-level splits stored in ``metadata[\"split\"]``.
 
     ``split_fractions`` maps split name → non-negative weight (need not sum to 1; normalized).
-    Documents keep their order in the list; assignment is random but reproducible with ``seed``.
+    When ``shuffle`` is True, assignment order is random but reproducible with ``seed``;
+    when False, document order is sorted by id before the same proportional allocation
+    (deterministic).
 
     Common names: ``train``, ``valid``, ``test``, ``deploy`` (any string keys are allowed).
     """
@@ -92,7 +95,10 @@ def reassign_splits(
 
     rng = random.Random(seed)
     indices = list(range(n))
-    rng.shuffle(indices)
+    if shuffle:
+        rng.shuffle(indices)
+    else:
+        indices.sort(key=lambda i: docs[i].document.id)
 
     split_by_index: dict[int, str] = {}
     pos = 0

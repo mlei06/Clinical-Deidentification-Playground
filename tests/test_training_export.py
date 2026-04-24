@@ -11,7 +11,9 @@ from clinical_deid.training_export import (
     FORMATS,
     _bio_tags,
     _tokenize,
+    export_annotated_jsonl,
     export_training_data,
+    to_annotated_jsonl,
     to_conll,
     to_huggingface_jsonl,
     write_conll,
@@ -206,6 +208,51 @@ def test_formats_constant():
     assert "conll" in FORMATS
     assert "spacy" in FORMATS
     assert "huggingface" in FORMATS
+    assert "jsonl" in FORMATS
+
+
+# ---------------------------------------------------------------------------
+# Annotated JSONL export
+# ---------------------------------------------------------------------------
+
+
+def test_annotated_jsonl_roundtrip(sample_docs, tmp_path):
+    path = export_annotated_jsonl(sample_docs, tmp_path)
+    assert path.exists()
+    assert path.name == "train.jsonl"
+    lines = [ln for ln in path.read_text(encoding="utf-8").splitlines() if ln.strip()]
+    assert len(lines) == len(sample_docs)
+    restored = [AnnotatedDocument.model_validate_json(ln) for ln in lines]
+    for original, parsed in zip(sample_docs, restored):
+        assert parsed.document.id == original.document.id
+        assert parsed.document.text == original.document.text
+        assert [(s.start, s.end, s.label) for s in parsed.spans] == [
+            (s.start, s.end, s.label) for s in original.spans
+        ]
+
+
+def test_annotated_jsonl_to_string(sample_docs):
+    out = to_annotated_jsonl(sample_docs)
+    lines = out.split("\n")
+    assert len(lines) == len(sample_docs)
+    first = json.loads(lines[0])
+    assert first["document"]["id"] == "doc1"
+    assert len(first["spans"]) == 2
+
+
+def test_export_training_data_jsonl(sample_docs, tmp_path):
+    path = export_training_data(sample_docs, tmp_path, "jsonl")
+    assert path.exists()
+    assert path.name == "train.jsonl"
+    lines = [ln for ln in path.read_text(encoding="utf-8").splitlines() if ln.strip()]
+    assert len(lines) == len(sample_docs)
+
+
+def test_export_training_data_jsonl_custom_filename(sample_docs, tmp_path):
+    path = export_training_data(
+        sample_docs, tmp_path, "jsonl", filename="gold.jsonl"
+    )
+    assert path.name == "gold.jsonl"
 
 
 # ---------------------------------------------------------------------------

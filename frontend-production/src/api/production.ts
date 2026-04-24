@@ -30,13 +30,22 @@ export function inferText(
   requestId?: string,
   trace = false,
   clientId?: string,
+  options?: {
+    outputMode?: 'annotated' | 'redacted' | 'surrogate';
+    includeSurrogateSpans?: boolean;
+    surrogateSeed?: number | null;
+  },
 ): Promise<ProcessResponse> {
   const params = new URLSearchParams();
   if (trace) params.set('trace', 'true');
+  if (options?.outputMode) params.set('output_mode', options.outputMode);
   const qs = params.toString() ? `?${params}` : '';
+  const body: Record<string, unknown> = { text, request_id: requestId };
+  if (options?.includeSurrogateSpans) body.include_surrogate_spans = true;
+  if (options?.surrogateSeed != null) body.surrogate_seed = options.surrogateSeed;
   return apiFetch(`/process/${encodeURIComponent(target)}${qs}`, {
     method: 'POST',
-    body: JSON.stringify({ text, request_id: requestId }),
+    body: JSON.stringify(body),
     headers: clientIdHeaders(clientId),
   });
 }

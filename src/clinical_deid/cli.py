@@ -386,7 +386,7 @@ def batch(
     required=False,
     type=click.Path(exists=True),
     default=None,
-    help="Gold-standard corpus (JSONL or brat dir). Use exactly one of --corpus or --dataset.",
+    help="Gold-standard corpus (JSONL only). Use exactly one of --corpus or --dataset.",
 )
 @click.option(
     "--dataset",
@@ -400,12 +400,6 @@ def batch(
     "dataset_splits_raw",
     default=None,
     help="Comma-separated document splits to include (metadata['split']). Applies to --corpus or --dataset.",
-)
-@click.option(
-    "--corpus-format",
-    type=click.Choice(["jsonl", "brat-dir", "brat-corpus"]),
-    default="jsonl",
-    show_default=True,
 )
 @click.option(
     "--profile",
@@ -432,7 +426,6 @@ def eval_cmd(
     corpus: str | None,
     dataset_name: str | None,
     dataset_splits_raw: str | None,
-    corpus_format: str,
     profile: str,
     pipeline_name: str | None,
     config_path: str | None,
@@ -452,7 +445,7 @@ def eval_cmd(
     from clinical_deid.eval.risk import HIPAA_IDENTIFIER_NAMES, hipaa_coverage_report
     from clinical_deid.eval.runner import evaluate_pipeline
     from clinical_deid.ingest.sources import load_annotated_corpus
-    from clinical_deid.transform.ops import filter_documents_by_splits
+    from clinical_deid.transform.ops import filter_documents_by_split_query
 
     if (corpus is None) == (dataset_name is None):
         raise click.UsageError("Provide exactly one of --corpus PATH or --dataset NAME.")
@@ -480,16 +473,19 @@ def eval_cmd(
         dataset_source = _source_with_splits(f"dataset:{dataset_name}")
     else:
         corpus_path = Path(corpus)  # type: ignore[arg-type]
-        fmt_map = {
-            "jsonl": {"jsonl": corpus_path},
-            "brat-dir": {"brat_dir": corpus_path},
-            "brat-corpus": {"brat_corpus": corpus_path},
-        }
-        golds = load_annotated_corpus(**fmt_map[corpus_format])
+        if corpus_path.suffix.lower() != ".jsonl":
+            click.echo(
+                f"Error: --corpus must be a .jsonl file (got {corpus_path.name!r}). "
+                "Convert BRAT trees first with:  "
+                "clinical-deid dataset import-brat <path> --name <name>",
+                err=True,
+            )
+            raise SystemExit(1)
+        golds = load_annotated_corpus(jsonl=corpus_path)
         dataset_source = _source_with_splits(str(corpus_path.resolve()))
 
     if split_list:
-        golds = filter_documents_by_splits(golds, split_list)
+        golds = filter_documents_by_split_query(golds, split_list)
         if not golds:
             click.echo(
                 "No documents match --dataset-splits; check metadata['split'] on documents.",
@@ -627,7 +623,7 @@ def audit() -> None:
 
 @audit.command(name="list")
 @click.option("--limit", type=int, default=20, show_default=True)
-@click.option("--source", type=click.Choice(["cli", "api"]), default=None)
+@click.option("--source", type=click.Choice(["cli", "api-admin", "api-inference"]), default=None)
 def audit_list(limit: int, source: str | None) -> None:
     """List recent audit records."""
     from clinical_deid.audit import list_runs
@@ -1001,30 +997,32 @@ def dataset_list(limit: int) -> None:
 @dataset.command(name="register")
 @click.argument("data_path", type=click.Path(exists=True))
 @click.option("--name", required=True, help="Dataset name.")
-@click.option(
-    "--format",
-    "fmt",
-    type=click.Choice(["jsonl", "brat-dir", "brat-corpus"]),
-    default="jsonl",
-    show_default=True,
-)
 @click.option("--description", default="", help="Optional description.")
-def dataset_register(data_path: str, name: str, fmt: str, description: str) -> None:
-    """Register a dataset from a local path.
+def dataset_register(data_path: str, name: str, description: str) -> None:
+    """Import a JSONL corpus into a new dataset home.
+
+    BRAT trees must be converted first with ``clinical-deid dataset import-brat``.
 
     \b
     Examples:
       clinical-deid dataset register data/corpus.jsonl --name i2b2-2014
-      clinical-deid dataset register data/brat/ --name physionet --format brat-dir
     """
-    from clinical_deid.dataset_store import register_dataset
+    from clinical_deid.dataset_store import import_jsonl_dataset
+
+    src = Path(data_path)
+    if src.suffix.lower() != ".jsonl":
+        click.echo(
+            f"Error: {src.name!r} is not a .jsonl file. "
+            "Use `clinical-deid dataset import-brat` for BRAT trees.",
+            err=True,
+        )
+        raise SystemExit(1)
 
     try:
-        manifest = register_dataset(
+        manifest = import_jsonl_dataset(
             _corpora_dir(),
             name,
-            str(Path(data_path).resolve()),
-            fmt,
+            str(src.resolve()),
             description=description,
         )
     except (ValueError, FileNotFoundError) as exc:
@@ -1036,6 +1034,77 @@ def dataset_register(data_path: str, name: str, fmt: str, description: str) -> N
         f"{manifest['total_spans']} spans, "
         f"labels: {', '.join(manifest['labels'])}"
     )
+
+
+@dataset.command(name="import-brat")
+@click.argument("brat_path", type=click.Path(exists=True, file_okay=False, dir_okay=True))
+@click.option("--name", required=True, help="Dataset name.")
+@click.option("--description", default="", help="Optional description.")
+def dataset_import_brat(brat_path: str, name: str, description: str) -> None:
+    """Convert a BRAT tree (flat or split) into a new JSONL dataset home.
+
+    \b
+    Examples:
+      clinical-deid dataset import-brat data/physionet-brat/ --name physionet
+      clinical-deid dataset import-brat data/2014-i2b2-brat/ --name i2b2-2014
+    """
+    from clinical_deid.dataset_store import import_brat_to_jsonl
+
+    try:
+        manifest = import_brat_to_jsonl(
+            _corpora_dir(),
+            name,
+            Path(brat_path),
+            description=description,
+        )
+    except (ValueError, FileNotFoundError, FileExistsError) as exc:
+        click.echo(f"Error: {exc}", err=True)
+        raise SystemExit(1)
+
+    click.echo(
+        f"Imported {name!r} from BRAT: {manifest['document_count']} docs, "
+        f"{manifest['total_spans']} spans, "
+        f"labels: {', '.join(manifest['labels'])}"
+    )
+
+
+@dataset.command(name="refresh")
+@click.argument("name")
+def dataset_refresh(name: str) -> None:
+    """Recompute cached analytics for one dataset from ``corpus.jsonl``."""
+    from clinical_deid.dataset_store import refresh_dataset
+
+    try:
+        manifest = refresh_dataset(_corpora_dir(), name)
+    except FileNotFoundError as exc:
+        click.echo(f"Error: {exc}", err=True)
+        raise SystemExit(1)
+    click.echo(
+        f"Refreshed {name!r}: {manifest['document_count']} docs, "
+        f"{manifest['total_spans']} spans"
+    )
+
+
+@dataset.command(name="refresh-all")
+def dataset_refresh_all() -> None:
+    """Recompute analytics for every discovered dataset; per-home errors are reported inline."""
+    from clinical_deid.dataset_store import refresh_all_datasets
+
+    results = refresh_all_datasets(_corpora_dir())
+    if not results:
+        click.echo("No datasets discovered.")
+        return
+    ok = err = 0
+    for r in results:
+        if r.status == "ok":
+            click.echo(f"  [ok]    {r.name}")
+            ok += 1
+        else:
+            click.echo(f"  [error] {r.name}: {r.error}")
+            err += 1
+    click.echo(f"\n{ok} ok, {err} error(s)")
+    if err and ok == 0:
+        raise SystemExit(1)
 
 
 @dataset.command(name="show")
@@ -1082,6 +1151,145 @@ def dataset_delete(name: str) -> None:
         click.echo(f"Error: {exc}", err=True)
         raise SystemExit(1)
     click.echo(f"Deleted dataset {name!r}")
+
+
+@dataset.command(name="ingest-run")
+@click.option(
+    "--input",
+    "input_path",
+    type=click.Path(exists=True),
+    required=True,
+    help="Directory of .txt files, a single .txt, or a .jsonl of {id, text} rows.",
+)
+@click.option("--pipeline", "pipeline_name", required=True, help="Saved pipeline name.")
+@click.option(
+    "--output-name",
+    default=None,
+    help="Register result as a new dataset under CORPORA_DIR/<name>/.",
+)
+@click.option(
+    "--output-jsonl",
+    type=click.Path(),
+    default=None,
+    help="Write a one-off JSONL file (no registration). Mutually exclusive with --output-name.",
+)
+@click.option(
+    "--on-error",
+    type=click.Choice(["skip", "stop"]),
+    default="skip",
+    show_default=True,
+)
+@click.option("--description", default="", help="Description for the registered dataset.")
+def dataset_ingest_run(
+    input_path: str,
+    pipeline_name: str,
+    output_name: str | None,
+    output_jsonl: str | None,
+    on_error: str,
+    description: str,
+) -> None:
+    """Run a saved pipeline over raw text and register/export the annotated output.
+
+    \b
+    Examples:
+      clinical-deid dataset ingest-run --input notes/ \\
+        --pipeline fast --output-name notes_fast_silver
+      clinical-deid dataset ingest-run --input notes.jsonl \\
+        --pipeline my-pipeline --output-jsonl /tmp/out.jsonl
+    """
+    from clinical_deid.config import get_settings
+    from clinical_deid.dataset_store import commit_colocated_dataset, list_datasets
+    from clinical_deid.ingest.from_batch import ingest_paths_with_pipeline
+    from clinical_deid.ingest.sink import write_annotated_corpus
+
+    if bool(output_name) == bool(output_jsonl):
+        click.echo(
+            "Error: provide exactly one of --output-name or --output-jsonl.",
+            err=True,
+        )
+        raise SystemExit(1)
+
+    settings = get_settings()
+    corpora_dir = settings.corpora_dir
+
+    if output_name:
+        existing = {d.name for d in list_datasets(corpora_dir)}
+        if output_name in existing:
+            click.echo(f"Error: dataset {output_name!r} already exists.", err=True)
+            raise SystemExit(1)
+
+    t0 = time.perf_counter()
+    docs: list[AnnotatedDocument] = []
+    errors: list[dict[str, Any]] = []
+    try:
+        stream = ingest_paths_with_pipeline(
+            [Path(input_path)],
+            pipeline_name=pipeline_name,
+        )
+        for doc in stream:
+            try:
+                docs.append(doc)
+            except Exception as exc:
+                if on_error == "stop":
+                    raise
+                errors.append({"doc_id": doc.document.id, "error": str(exc)})
+    except FileNotFoundError as exc:
+        click.echo(f"Error: {exc}", err=True)
+        raise SystemExit(1)
+    except RuntimeError as exc:
+        click.echo(f"Error: {exc}", err=True)
+        raise SystemExit(1)
+
+    duration = time.perf_counter() - t0
+
+    if not docs:
+        click.echo("No documents produced.", err=True)
+        raise SystemExit(1)
+
+    total_spans = sum(len(d.spans) for d in docs)
+
+    if output_name:
+        home = corpora_dir / output_name
+        home.mkdir(parents=True)
+        write_annotated_corpus(docs, jsonl=home / "corpus.jsonl")
+        manifest = commit_colocated_dataset(
+            corpora_dir,
+            output_name,
+            "jsonl",
+            description=description or f"Ingested via pipeline {pipeline_name!r}",
+            metadata={
+                "provenance": {
+                    "ingested_from": str(Path(input_path).resolve()),
+                    "pipeline_name": pipeline_name,
+                }
+            },
+        )
+        click.echo(
+            f"Registered {output_name!r}: {manifest['document_count']} docs, "
+            f"{manifest['total_spans']} spans"
+        )
+    else:
+        assert output_jsonl is not None
+        out = Path(output_jsonl)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        write_annotated_corpus(docs, jsonl=out)
+        click.echo(f"Wrote {len(docs)} docs ({total_spans} spans) to {out}")
+
+    try:
+        from clinical_deid.audit import log_run
+
+        log_run(
+            command="dataset_ingest",
+            pipeline_name=pipeline_name,
+            dataset_source=str(Path(input_path).resolve()),
+            doc_count=len(docs),
+            error_count=len(errors),
+            span_count=total_spans,
+            duration_seconds=duration,
+            source="cli",
+        )
+    except Exception:
+        logger.warning("Failed to write audit record", exc_info=True)
 
 
 # ---------------------------------------------------------------------------
@@ -1285,26 +1493,58 @@ def train_show(name: str) -> None:
 
 @dataset.command(name="export")
 @click.argument("name")
-@click.option("-o", "--output", "output_dir", type=click.Path(), required=True)
+@click.option("-o", "--output", "output_dir", type=click.Path(), required=False, default=None)
 @click.option(
     "--format",
     "fmt",
-    type=click.Choice(["conll", "spacy", "huggingface", "brat"]),
+    type=click.Choice(["conll", "spacy", "huggingface", "brat", "jsonl"]),
     default="conll",
     show_default=True,
-    help="Downstream format (training or BRAT for external tools).",
+    help="Downstream format (training, annotated JSONL, or BRAT for external tools).",
 )
 @click.option("--filename", default=None, help="Override output filename (ignored for brat).")
-def dataset_export(name: str, output_dir: str, fmt: str, filename: str | None) -> None:
+@click.option(
+    "--target-text",
+    type=click.Choice(["original", "surrogate"]),
+    default="original",
+    show_default=True,
+    help="Emit docs with original text or surrogate-aligned replacements.",
+)
+@click.option(
+    "--seed",
+    "surrogate_seed",
+    type=int,
+    default=None,
+    help="Seed for --target-text surrogate (determinism).",
+)
+def dataset_export(
+    name: str,
+    output_dir: str | None,
+    fmt: str,
+    filename: str | None,
+    target_text: str,
+    surrogate_seed: int | None,
+) -> None:
     """Export a registered dataset to a training or tooling format.
+
+    ``-o``/``--output`` is required for ``conll``/``spacy``/``huggingface``/``jsonl``. For
+    ``--format brat`` it defaults to ``$EXPORTS_DIR/<name>/brat`` when unset.
+
+    The ``jsonl`` format writes one ``AnnotatedDocument`` per line and can be
+    re-registered via ``POST /datasets`` (``format: "jsonl"``). Use
+    ``--target-text surrogate`` to replace each document's text with a surrogate
+    and realign spans.
 
     \b
     Examples:
       clinical-deid dataset export i2b2-2014 -o training/ --format conll
       clinical-deid dataset export physionet -o training/ --format spacy
-      clinical-deid dataset export i2b2-2014 -o training/ --format huggingface
-      clinical-deid dataset export i2b2-2014 -o brat_out/ --format brat
+      clinical-deid dataset export i2b2-2014 -o exports/ --format jsonl
+      clinical-deid dataset export i2b2-2014 --format brat
+      clinical-deid dataset export i2b2-2014 -o exports/ --format jsonl \\
+        --target-text surrogate --seed 42
     """
+    from clinical_deid.config import get_settings
     from clinical_deid.dataset_store import load_dataset_documents
     from clinical_deid.ingest.sink import write_annotated_corpus
     from clinical_deid.training_export import export_training_data
@@ -1319,7 +1559,49 @@ def dataset_export(name: str, output_dir: str, fmt: str, filename: str | None) -
         click.echo("Dataset has no documents.", err=True)
         raise SystemExit(1)
 
-    out_path = Path(output_dir)
+    if target_text == "surrogate":
+        try:
+            from clinical_deid.domain import AnnotatedDocument
+            from clinical_deid.pipes.surrogate.align import surrogate_text_with_spans
+        except ImportError as exc:
+            click.echo(f"Error: surrogate export requires faker: {exc}", err=True)
+            raise SystemExit(1)
+        projected: list[AnnotatedDocument] = []
+        offenders: list[str] = []
+        for d in docs:
+            try:
+                new_text, new_spans = surrogate_text_with_spans(
+                    d.document.text, list(d.spans), seed=surrogate_seed
+                )
+            except ValueError:
+                offenders.append(d.document.id)
+                continue
+            projected.append(
+                AnnotatedDocument(
+                    document=d.document.model_copy(update={"text": new_text}),
+                    spans=new_spans,
+                )
+            )
+        if offenders:
+            click.echo(
+                f"Error: overlapping spans prevent surrogate alignment for "
+                f"{len(offenders)} doc(s): {offenders[:10]}",
+                err=True,
+            )
+            raise SystemExit(1)
+        docs = projected
+
+    if output_dir is None:
+        if fmt != "brat":
+            click.echo(
+                f"Error: -o/--output is required for --format {fmt}.",
+                err=True,
+            )
+            raise SystemExit(1)
+        out_path = get_settings().exports_dir / name / "brat"
+    else:
+        out_path = Path(output_dir)
+
     try:
         if fmt == "brat":
             write_annotated_corpus(docs, brat_dir=out_path)

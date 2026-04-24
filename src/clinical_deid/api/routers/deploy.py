@@ -30,14 +30,12 @@ class DeployConfigResponse(BaseModel):
     modes: dict[str, ModeEntrySchema]
     default_mode: str | None = None
     allowed_pipelines: list[str] | None = None
-    production_api_url: str | None = None
 
 
 class UpdateDeployConfigRequest(BaseModel):
     modes: dict[str, ModeEntrySchema]
     default_mode: str | None = None
     allowed_pipelines: list[str] | None = None
-    production_api_url: str | None = None
 
 
 class ModeHealth(BaseModel):
@@ -73,7 +71,6 @@ def get_deploy_config() -> DeployConfigResponse:
         },
         default_mode=cfg.default_mode,
         allowed_pipelines=cfg.allowed_pipelines,
-        production_api_url=cfg.production_api_url,
     )
 
 
@@ -123,12 +120,10 @@ def update_deploy_config(body: UpdateDeployConfigRequest) -> DeployConfigRespons
         modes=modes,
         default_mode=body.default_mode,
         allowed_pipelines=body.allowed_pipelines,
-        production_api_url=body.production_api_url,
     )
     save_mode_config(cfg, _modes_path())
     return DeployConfigResponse(
         modes=body.modes,
         default_mode=body.default_mode,
         allowed_pipelines=body.allowed_pipelines,
-        production_api_url=body.production_api_url,
     )

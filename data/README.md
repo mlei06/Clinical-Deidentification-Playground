@@ -17,12 +17,17 @@ data/
   evaluations/          Eval result JSON            (CLINICAL_DEID_EVALUATIONS_DIR)
   inference_runs/       Saved batch inference runs  (CLINICAL_DEID_INFERENCE_RUNS_DIR)
   app.sqlite            Audit log (SQLite)          (CLINICAL_DEID_DATABASE_URL)
-  corpora/              Registered datasets          (CLINICAL_DEID_CORPORA_DIR)
-                        — each dataset is ``<name>/dataset.json`` + corpus
-                          (``corpus.jsonl`` or BRAT). Training exports land in
-                          ``<name>_export/`` next to dataset dirs.
-    physionet/brat/     Example: train/valid/test .txt/.ann
-    physionet/jsonl/    Example: optional parallel JSONL copy
+  corpora/              Dataset homes (JSONL-only)  (CLINICAL_DEID_CORPORA_DIR)
+                        — each dataset is ``<name>/corpus.jsonl`` plus optional
+                          ``dataset.json`` (cached analytics). Drop a folder with
+                          only ``corpus.jsonl`` and the API will create the manifest
+                          on first list/refresh. BRAT on disk is not a stored layout
+                          here; convert with ``POST /datasets/import/brat`` or
+                          ``clinical-deid dataset import-brat``.
+  exports/              Materialized exports        (CLINICAL_DEID_EXPORTS_DIR)
+                        — default target for ``POST /datasets/{name}/export``
+                          (BRAT, CoNLL, etc.), kept outside ``corpora/`` so the
+                          corpus root stays canonical JSONL-only.
   dictionaries/         Whitelist / blacklist term lists (CLINICAL_DEID_DICTIONARIES_DIR)
   raw/                  Unprocessed source files before ingestion
 ```
@@ -34,6 +39,7 @@ data/
 | `evaluations/` | Eval results | `clinical-deid eval`, `POST /eval/run` |
 | `inference_runs/` | Batch inference snapshots | `clinical-deid batch`, `POST /process/*` |
 | `app.sqlite` | Audit log | Written by `log_run()` on every run |
-| `corpora/` | All corpus files + materialized exports | `clinical-deid dataset register`, `POST /datasets/*` |
+| `corpora/` | Canonical **JSONL** datasets | `clinical-deid dataset register` (JSONL), `import-brat`, `POST /datasets/*` |
+| `exports/` | Exports (BRAT, training formats) | `POST /datasets/{name}/export`, `clinical-deid dataset export` |
 | `dictionaries/` | Whitelist / blacklist term lists | `clinical-deid dict import`, `POST /dictionaries` |
 | `raw/` | Drop source files before ingestion | `scripts/process_*.py` |

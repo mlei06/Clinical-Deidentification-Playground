@@ -44,7 +44,8 @@ All mutable state lives under `data/` and all model weights live under `models/`
 | Eval results | JSON files | `data/evaluations/{pipeline}_{timestamp}.json` |
 | Inference runs | JSON files | `data/inference_runs/{pipeline}_{timestamp}.json` |
 | Models | Directories | `models/{framework}/{name}/` |
-| Datasets | Colocated under corpora | `data/corpora/{name}/dataset.json` + `corpus.jsonl` or BRAT files |
+| Datasets | JSONL under corpora | `data/corpora/{name}/corpus.jsonl` + `dataset.json` (cached analytics). BRAT is ingest/export only — not stored as the canonical corpus layout |
+| Dataset exports | Filesystem under `data/exports` | `data/exports/{name}/` for materialized BRAT / training exports from `POST /datasets/{name}/export` (`CLINICAL_DEID_EXPORTS_DIR`) |
 | Dictionaries | Term-list files | `data/dictionaries/{whitelist,blacklist}/` |
 | Deploy config | JSON file | `data/modes.json` (`CLINICAL_DEID_MODES_PATH`; mutable via UI or on disk) |
 | Audit log | SQLite (SQLModel) | `data/app.sqlite` — `audit_log` table |
@@ -127,10 +128,10 @@ frontend/                # Vite + React + TypeScript playground UI
     create/              # Visual pipeline builder (drag-and-drop canvas)
     inference/           # Text input, span highlighting, trace timeline
     evaluate/            # Eval dashboard, metrics, confusion matrix, comparison
-    datasets/            # Dataset register, browse, compose, transform, generate
+    datasets/            # Discover/import JSONL, BRAT→JSONL, compose, transform, generate, export, refresh
     dictionaries/        # Dictionary upload / browse / manage
     deploy/              # Deploy config: inference modes, pipeline allowlist
-    audit/               # Audit log viewer with stats, filters, local/production toggle
+    audit/               # Audit log viewer with stats, filters
     layout/              # Shell layout
     shared/              # Reusable components (SpanHighlighter, LabelBadge, etc.)
 
@@ -156,7 +157,7 @@ src/clinical_deid/
     surrogate/           # Realistic fake data replacement (optional)
   api/
     app.py               # FastAPI application
-    routers/             # pipelines, process, evaluation, audit, models, dictionaries, datasets, deploy, audit_proxy
+    routers/             # pipelines, process, evaluation, audit, models, dictionaries, datasets, deploy
     schemas.py           # Pydantic request/response models
   eval/
     matching.py          # 4 matching modes (strict, exact boundary, partial, token-level)
@@ -164,7 +165,7 @@ src/clinical_deid/
     runner.py            # Batch evaluation with per-label/per-doc results
   ingest/                # JSONL, BRAT, ASQ-PHI, MIMIC loaders
   cli.py                 # Click CLI: run, batch, eval, audit, dict, dataset, setup, serve
-  dataset_store.py       # Filesystem dataset registry (register, list, analytics)
+  dataset_store.py       # JSONL-only corpora; discover/list, import JSONL/BRAT, refresh analytics
   mode_config.py         # Deploy config (data/modes.json) load/save
   config.py              # Pydantic settings (env vars, .env file)
   tables.py              # AuditLogRecord (only DB table)
@@ -206,28 +207,30 @@ All pipeline routes use **name-based** paths (not UUIDs):
 | `POST` | `/process/scrub` | Zero-config log cleaning (text in, clean text out) |
 | `POST` | `/process/{pipeline_name}?output_mode=` | Run pipeline on text (annotated/redacted/surrogate) |
 | `POST` | `/process/{pipeline_name}/batch` | Batch process |
-| `POST` | `/eval/run` | Run evaluation |
+| `POST` | `/eval/run` | Run evaluation (`dataset_path` must be `.jsonl`; BRAT gold → import as JSONL first) |
 | `GET` | `/eval/runs` | List eval results |
 | `GET` | `/eval/runs/{id}` | Eval result detail |
 | `POST` | `/eval/compare` | Compare two runs |
-| `GET` | `/datasets` | List registered datasets |
-| `POST` | `/datasets` | Register dataset from local path |
+| `GET` | `/datasets` | List datasets (JSONL homes under corpora; lazy `dataset.json`) |
+| `POST` | `/datasets` | Import JSONL copy into `corpora/{name}/` (alias: `POST /datasets/import/jsonl`) |
+| `POST` | `/datasets/import/brat` | Convert BRAT tree on disk → JSONL dataset home |
+| `GET` | `/datasets/import-sources` | JSONL import candidates under corpora root |
+| `GET` | `/datasets/import-sources/brat` | BRAT trees available for conversion |
+| `POST` | `/datasets/refresh-all` | Recompute analytics for every discovered dataset |
+| `POST` | `/datasets/ingest-from-pipeline` | Run a saved pipeline over raw text under `CORPORA_DIR` and register the result |
 | `GET` | `/datasets/{name}` | Dataset detail + analytics |
 | `PUT` | `/datasets/{name}` | Update description/metadata |
-| `DELETE` | `/datasets/{name}` | Delete dataset directory (manifest + corpus) |
-| `POST` | `/datasets/{name}/refresh` | Recompute analytics |
+| `DELETE` | `/datasets/{name}` | Delete dataset directory |
+| `POST` | `/datasets/{name}/refresh` | Recompute analytics from `corpus.jsonl` |
 | `GET` | `/datasets/{name}/preview` | Preview documents (paginated) |
 | `GET` | `/datasets/{name}/documents/{doc_id}` | Full document with spans |
 | `POST` | `/datasets/compose` | Compose multiple datasets |
 | `POST` | `/datasets/transform` | Apply transforms to dataset |
 | `POST` | `/datasets/generate` | Generate synthetic data via LLM |
-| `POST` | `/datasets/{name}/export` | Export dataset to training format |
+| `POST` | `/datasets/{name}/export` | Export to `conll`/`spacy`/`huggingface`/`jsonl` (annotated) or `brat` under `exports_dir/{name}/` |
 | `GET` | `/audit/logs` | Query audit trail |
 | `GET` | `/audit/logs/{id}` | Audit detail |
 | `GET` | `/audit/stats` | Aggregate stats |
-| `GET` | `/audit/production/logs` | Proxy production audit logs |
-| `GET` | `/audit/production/logs/{id}` | Proxy production log detail |
-| `GET` | `/audit/production/stats` | Proxy production stats |
 | `GET` | `/deploy` | Get deploy config (modes + allowlist) |
 | `PUT` | `/deploy` | Update deploy config |
 | `GET` | `/deploy/pipelines` | List deployable pipeline names |
@@ -240,16 +243,20 @@ All pipeline routes use **name-based** paths (not UUIDs):
 ```
 clinical-deid run [FILES]           # De-identify text from stdin or files
 clinical-deid batch INPUT -o OUT    # Batch process directory or JSONL
-clinical-deid eval --corpus FILE    # Evaluate against gold standard
+clinical-deid eval --corpus FILE.jsonl  # Gold JSONL only; convert BRAT via dataset import-brat first
 clinical-deid dict list             # List dictionaries
 clinical-deid dict preview KIND NAME  # Preview dictionary terms
 clinical-deid dict import FILE --kind KIND --name NAME  # Import dictionary
 clinical-deid dict delete KIND NAME # Delete dictionary
-clinical-deid dataset list          # List registered datasets
-clinical-deid dataset register PATH --name NAME  # Register dataset
+clinical-deid dataset list          # List datasets (discovered JSONL homes)
+clinical-deid dataset register PATH --name NAME  # Import a JSONL file into corpora
+clinical-deid dataset import-brat DIR --name NAME  # BRAT (flat or split) → JSONL under corpora
+clinical-deid dataset ingest-run --input PATH --pipeline NAME --output-name OUT  # Run pipeline over raw text → JSONL dataset
+clinical-deid dataset refresh NAME  # Recompute stats from corpus.jsonl
+clinical-deid dataset refresh-all
 clinical-deid dataset show NAME     # Dataset details + analytics
-clinical-deid dataset delete NAME   # Unregister dataset
-clinical-deid dataset export NAME -o DIR  # Export to training format (conll/spacy/huggingface)
+clinical-deid dataset delete NAME   # Delete dataset directory
+clinical-deid dataset export NAME -o DIR  # conll/spacy/huggingface/jsonl; --format brat defaults to data/exports/…
 clinical-deid audit list            # List audit records
 clinical-deid audit show ID         # Show audit detail
 clinical-deid setup                 # Verify deps, init DB
@@ -270,7 +277,11 @@ The full pipe system (11 cataloged types), CLI, FastAPI, Playground UI (7 views)
 
 ## What's not built yet
 
-- **Rich production file ingest** — drag-and-drop corpus upload to Production UI (batch today is API-driven / copy-paste workflows; extend as needed)
+- **Rich production file ingest** — drag-and-drop corpus upload to Production UI (batch today is API-driven / copy-paste workflows; extend as needed).
+- NER dataset creation (bulk ingest → pipeline → review → BRAT/JSONL, plus
+  surrogate-aligned spans) has landed end-to-end — see
+  [docs/plans/dataset-creation-implementation.md](docs/plans/dataset-creation-implementation.md)
+  for the milestone breakdown (IMPL-M1 through IMPL-M8).
 
 ## Conventions
 

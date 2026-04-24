@@ -101,6 +101,11 @@ Zero-config cleaning: uses `default_mode` from deploy config (or body override) 
 
 Run one document through the pipeline.
 
+**Optional surrogate alignment:** set `include_surrogate_spans: true` together
+with `?output_mode=surrogate` to receive a parallel `surrogate_text` and
+`surrogate_spans` list whose character offsets point into the surrogate text.
+`surrogate_seed` enables deterministic replacement.
+
 ### `POST /process/{pipeline_name}/batch`
 
 Batch variant; body lists `items` with `text` and optional `request_id`.
@@ -123,6 +128,34 @@ Base path: `/eval` — `POST /eval/run`, list/detail/compare runs (admin when au
 
 Base path: `/datasets` — register, browse, compose, transform, generate, export (see inline routes in OpenAPI or source).
 
+### `POST /datasets/ingest-from-pipeline`
+
+Run a saved pipeline over raw inputs under `CORPORA_DIR` and register the
+annotated output as a new dataset.
+
+```json
+{
+  "source_path": "raw_txts",
+  "pipeline_name": "fast",
+  "output_name": "raw_txts_fast_silver"
+}
+```
+
+- `source_path` is resolved **relative to `CORPORA_DIR`** (absolute paths must
+  still resolve under it); `..` escapes are rejected with 400.
+- `pipeline_name` must be a saved pipeline (`GET /pipelines`).
+- `output_name` must not already exist.
+
+### `POST /datasets/{name}/export`
+
+Export formats: `conll`, `spacy`, `huggingface`, `jsonl` (annotated), or `brat`.
+The `jsonl` form writes an annotated JSONL that can be re-registered via
+`POST /datasets` (`format: "jsonl"`).
+
+Pass `"target_text": "surrogate"` (plus an optional `"surrogate_seed"`) to
+project every document through surrogate alignment before writing — both text
+and spans reflect the replacement. Overlapping spans are rejected with 422.
+
 ---
 
 ## Dictionaries (admin)
@@ -141,7 +174,7 @@ Base path: `/models` — list, detail, `POST /models/refresh` to rescan `models/
 
 Base path: `/deploy`.
 
-- `GET /deploy` — Full deploy config (modes, allowlist, `production_api_url`). **Admin.**
+- `GET /deploy` — Full deploy config (modes, allowlist). **Admin.**
 - `PUT /deploy` — Write `data/modes.json`. **Admin.**
 - `GET /deploy/health` — Per-mode availability (missing deps, missing pipeline file). **Admin or inference.**
 - `GET /deploy/pipelines` — Saved pipeline names for dropdowns. **Admin.**
@@ -150,17 +183,11 @@ Base path: `/deploy`.
 
 ## Audit
 
-Base path: `/audit`. **Admin or inference** for local log reads.
+Base path: `/audit`. **Admin or inference** for log reads.
 
 - `GET /audit/logs`, `GET /audit/logs/{id}`, `GET /audit/stats`
 
-### Production proxy (admin)
-
-When `production_api_url` is set in `data/modes.json`:
-
-- `GET /audit/production/logs`, `GET /audit/production/logs/{id}`, `GET /audit/production/stats`
-
-These forward to the remote API’s audit endpoints (Playground ops).
+Records carry a `source` field distinguishing callers: `api-admin` (admin-scoped HTTP), `api-inference` (inference-scoped HTTP), or `cli`.
 
 ---
 
@@ -172,6 +199,7 @@ These forward to the remote API’s audit endpoints (Playground ops).
 | Batch size | 100 items | `MAX_BATCH_SIZE` in `schemas.py` |
 | Dictionary / list upload | 2 MB per file | Pipeline helper uploads |
 | HTTP body | `CLINICAL_DEID_MAX_BODY_BYTES` (default 10 MiB) | Middleware `Content-Length` check |
+| Ingest documents | `max_documents` (default 10,000, max 1,000,000) | `IngestFromPipelineRequest` cap for `/datasets/ingest-from-pipeline` |
 
 ---
 

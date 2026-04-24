@@ -72,7 +72,7 @@ mounts are just:
 
 | Host | Container | Mode | Contents |
 |------|-----------|------|----------|
-| `./data` | `/app/data` | `rw` | `pipelines/`, `modes.json`, `evaluations/`, `inference_runs/`, `corpora/`, `dictionaries/`, `app.sqlite` |
+| `./data` | `/app/data` | `rw` | `pipelines/`, `modes.json`, `evaluations/`, `inference_runs/`, `corpora/`, `exports/`, `dictionaries/`, `app.sqlite` |
 | `./models` | `/app/models` | `ro` | Model weights under `{framework}/{name}/` |
 
 `./data` **must** be writable — the API writes the SQLite audit log, saves eval
@@ -81,8 +81,6 @@ results, and persists pipeline/deploy edits made in the Playground UI.
 `POST /models/refresh` (or restart) to pick them up.
 
 ## 4. Plain `docker run` (without Compose)
-
-From a POSIX shell (`bash`, WSL, Git Bash), repo root as current directory:
 
 ```bash
 docker run --rm -p 8000:8000 \
@@ -94,8 +92,6 @@ docker run --rm -p 8000:8000 \
     -e WEB_CONCURRENCY=2 \
     clinical-deid-api
 ```
-
-On **PowerShell**, use `${PWD}` or absolute paths instead of `$(pwd)` in volume mounts.
 
 Verify:
 

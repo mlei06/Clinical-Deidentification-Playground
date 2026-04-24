@@ -60,25 +60,33 @@ def apply_output_mode(
 
     if output_mode == OutputMode.surrogate:
         try:
-            from clinical_deid.pipes.surrogate.strategies import SurrogateGenerator
+            from clinical_deid.pipes.surrogate.align import surrogate_text_with_spans
         except ImportError as exc:
             raise HTTPException(
                 status_code=400,
                 detail=f"surrogate mode requires faker: {exc}",
             ) from exc
 
-        gen = SurrogateGenerator(seed=surrogate_seed, consistency=surrogate_consistency)
-        phi_spans = sorted(
-            [PHISpan(start=s.start, end=s.end, label=s.label) for s in spans],
-            key=lambda s: s.start,
-            reverse=True,
-        )
-        result = original_text
-        for s in phi_spans:
-            original = original_text[s.start : s.end]
-            replacement = gen.replace(s.label, original)
-            result = result[: s.start] + replacement + result[s.end :]
-        return result
+        phi_spans = [
+            PHISpan(
+                start=s.start,
+                end=s.end,
+                label=s.label,
+                confidence=s.confidence,
+                source=s.source,
+            )
+            for s in spans
+        ]
+        try:
+            surrogate_text, _aligned = surrogate_text_with_spans(
+                original_text,
+                phi_spans,
+                seed=surrogate_seed,
+                consistency=surrogate_consistency,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        return surrogate_text
 
     phi_spans = [PHISpan(start=s.start, end=s.end, label=s.label) for s in spans]
     return tag_replace(original_text, phi_spans)
@@ -93,6 +101,9 @@ def process_single(
     *,
     trace: bool = False,
     output_mode: OutputMode = OutputMode.redacted,
+    include_surrogate_spans: bool = False,
+    surrogate_seed: int | None = None,
+    surrogate_consistency: bool = True,
 ) -> ProcessResponse:
     req_id = request_id or str(uuid4())
 
@@ -125,7 +136,54 @@ def process_single(
         for s in result.spans
     ]
 
-    redacted = apply_output_mode(text, span_responses, output_mode)
+    redacted = apply_output_mode(
+        text,
+        span_responses,
+        output_mode,
+        surrogate_seed=surrogate_seed,
+        surrogate_consistency=surrogate_consistency,
+    )
+
+    surrogate_text: str | None = None
+    surrogate_spans: list[PHISpanResponse] | None = None
+    if include_surrogate_spans and output_mode == OutputMode.surrogate:
+        try:
+            from clinical_deid.pipes.surrogate.align import surrogate_text_with_spans
+        except ImportError as exc:
+            raise HTTPException(
+                status_code=400,
+                detail=f"surrogate mode requires faker: {exc}",
+            ) from exc
+        phi_spans = [
+            PHISpan(
+                start=s.start,
+                end=s.end,
+                label=s.label,
+                confidence=s.confidence,
+                source=s.source,
+            )
+            for s in span_responses
+        ]
+        try:
+            surrogate_text, aligned = surrogate_text_with_spans(
+                text,
+                phi_spans,
+                seed=surrogate_seed,
+                consistency=surrogate_consistency,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        surrogate_spans = [
+            PHISpanResponse(
+                start=s.start,
+                end=s.end,
+                label=s.label,
+                text=surrogate_text[s.start:s.end],
+                confidence=s.confidence,
+                source=s.source,
+            )
+            for s in aligned
+        ]
 
     return ProcessResponse(
         request_id=req_id,
@@ -135,6 +193,8 @@ def process_single(
         pipeline_name=pipeline_name,
         processing_time_ms=round(elapsed_ms, 2),
         intermediary_trace=intermediary_trace,
+        surrogate_text=surrogate_text,
+        surrogate_spans=surrogate_spans,
     )
 
 
@@ -153,7 +213,7 @@ def log_audit(
     pipeline_config: dict[str, Any],
     responses: list[ProcessResponse],
     *,
-    source: str = "api",
+    source: str = "api-admin",
     output_mode: OutputMode = OutputMode.redacted,
     client_id: str = "",
     service_type: str = "inference",

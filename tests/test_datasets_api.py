@@ -106,20 +106,32 @@ def test_register_duplicate_rejected(client, tmp_path):
     assert resp.status_code == 409
 
 
-def test_import_sources_lists_corpora_children(client, tmp_path):
+def _write_brat_flat(directory: Path) -> Path:
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / "a.txt").write_text("CALVERT HOSPITAL here", encoding="utf-8")
+    (directory / "a.ann").write_text(
+        "T1\tHOSPITAL 0 16\tCALVERT HOSPITAL\n", encoding="utf-8"
+    )
+    return directory
+
+
+def _write_brat_split(directory: Path) -> Path:
+    directory.mkdir(parents=True, exist_ok=True)
+    train = directory / "train"
+    train.mkdir(parents=True, exist_ok=True)
+    (train / "b.txt").write_text("LENOX HILL admit", encoding="utf-8")
+    (train / "b.ann").write_text(
+        "T1\tHOSPITAL 0 10\tLENOX HILL\n", encoding="utf-8"
+    )
+    return directory
+
+
+def test_import_sources_lists_jsonl_only(client, tmp_path):
     corpora = tmp_path / "data" / "corpora"
     corpora.mkdir(parents=True, exist_ok=True)
     _write_sample_jsonl(corpora / "incoming.jsonl")
-    brat_flat = corpora / "brat_flat"
-    brat_flat.mkdir()
-    (brat_flat / "a.txt").write_text("hi", encoding="utf-8")
-    (brat_flat / "a.ann").write_text("T1\tPER 0 2\thi\n", encoding="utf-8")
-    split_root = corpora / "brat_split"
-    split_root.mkdir()
-    train = split_root / "train"
-    train.mkdir()
-    (train / "b.txt").write_text("yo", encoding="utf-8")
-    (train / "b.ann").write_text("T1\tPER 0 2\tyo\n", encoding="utf-8")
+    _write_brat_flat(corpora / "brat_flat")
+    _write_brat_split(corpora / "brat_split")
 
     resp = client.get("/datasets/import-sources")
     assert resp.status_code == 200, resp.text
@@ -128,8 +140,9 @@ def test_import_sources_lists_corpora_children(client, tmp_path):
     by_label = {c["label"]: c for c in body["candidates"]}
     assert by_label["incoming.jsonl"]["suggested_format"] == "jsonl"
     assert by_label["incoming.jsonl"]["data_path"] == str((corpora / "incoming.jsonl").resolve())
-    assert by_label["brat_flat"]["suggested_format"] == "brat-dir"
-    assert by_label["brat_split"]["suggested_format"] == "brat-corpus"
+    # BRAT trees are NOT surfaced on the JSONL endpoint anymore.
+    assert "brat_flat" not in by_label
+    assert "brat_split" not in by_label
 
     client.post(
         "/datasets",
@@ -146,6 +159,25 @@ def test_import_sources_lists_corpora_children(client, tmp_path):
     assert "from-drop" not in labels2
 
 
+def test_brat_import_sources_endpoint(client, tmp_path):
+    corpora = tmp_path / "data" / "corpora"
+    corpora.mkdir(parents=True, exist_ok=True)
+    _write_brat_flat(corpora / "brat_flat")
+    _write_brat_split(corpora / "brat_split")
+    _write_sample_jsonl(corpora / "stray.jsonl")
+
+    resp = client.get("/datasets/import-sources/brat")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["corpora_root"] == str(corpora.resolve())
+    by_label = {c["label"]: c for c in body["candidates"]}
+    assert by_label["brat_flat"]["kind"] == "brat-dir"
+    assert by_label["brat_flat"]["data_path"] == str((corpora / "brat_flat").resolve())
+    assert by_label["brat_split"]["kind"] == "brat-corpus"
+    # JSONL files are NOT surfaced on the BRAT endpoint.
+    assert "stray.jsonl" not in by_label
+
+
 # ---------------------------------------------------------------------------
 # Get / Update / Delete
 # ---------------------------------------------------------------------------
@@ -159,7 +191,10 @@ def test_get_dataset(client, tmp_path):
     )
     resp = client.get("/datasets/get-me")
     assert resp.status_code == 200
-    assert resp.json()["document_count"] == 5
+    body = resp.json()
+    assert body["document_count"] == 5
+    assert body.get("has_split_metadata") is False
+    assert body.get("split_document_counts", {}).get("(none)") == 5
 
 
 def test_get_missing_returns_404(client):
@@ -206,9 +241,35 @@ def test_preview(client, tmp_path):
     )
     resp = client.get("/datasets/prev/preview?limit=3")
     assert resp.status_code == 200
-    previews = resp.json()
-    assert len(previews) == 3
-    assert previews[0]["span_count"] == 2
+    body = resp.json()
+    assert body["total"] == 5
+    assert len(body["items"]) == 3
+    assert body["items"][0]["span_count"] == 2
+    assert body["items"][0].get("split") is None
+
+
+def test_split_counts_preview_and_subset_analytics(client, tmp_path):
+    jsonl = _write_jsonl_with_doc_splits(
+        tmp_path / "splits.jsonl", ["train", "train", "test", "test", "test"]
+    )
+    client.post(
+        "/datasets",
+        json={"name": "splitty", "data_path": str(jsonl), "format": "jsonl"},
+    )
+    d = client.get("/datasets/splitty").json()
+    assert d["has_split_metadata"] is True
+    sc = d["split_document_counts"]
+    assert sc.get("train") == 2
+    assert sc.get("test") == 3
+
+    p = client.get("/datasets/splitty/preview?splits=train&limit=10").json()
+    assert p["total"] == 2
+    assert len(p["items"]) == 2
+    assert p["items"][0]["split"] == "train"
+
+    a = client.get("/datasets/splitty/analytics?split=train").json()
+    assert a["document_count"] == 2
+    assert client.get("/datasets/splitty/analytics").json()["document_count"] == 5
 
 
 def test_get_document(client, tmp_path):
@@ -250,6 +311,76 @@ def test_refresh_analytics(client, tmp_path):
     resp = client.post("/datasets/ref/refresh")
     assert resp.status_code == 200
     assert resp.json()["document_count"] == 8
+
+
+def test_refresh_all_endpoint(client, tmp_path):
+    ok = _write_sample_jsonl(tmp_path / "data" / "good.jsonl", count=2)
+    client.post("/datasets", json={"name": "ok1", "data_path": str(ok), "format": "jsonl"})
+    client.post("/datasets", json={"name": "ok2", "data_path": str(ok), "format": "jsonl"})
+
+    # Deliberately corrupt one corpus.jsonl so its refresh errors.
+    broken = tmp_path / "data" / "corpora" / "ok2" / "corpus.jsonl"
+    broken.write_text("not json\n", encoding="utf-8")
+
+    resp = client.post("/datasets/refresh-all")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    by_name = {r["name"]: r for r in body}
+    assert by_name["ok1"]["status"] == "ok"
+    assert by_name["ok2"]["status"] == "error"
+    assert by_name["ok2"]["error"]
+
+
+# ---------------------------------------------------------------------------
+# BRAT import endpoint
+# ---------------------------------------------------------------------------
+
+
+def test_import_brat_flat_endpoint(client, tmp_path):
+    brat_dir = tmp_path / "brat_flat"
+    _write_brat_flat(brat_dir)
+
+    resp = client.post(
+        "/datasets/import/brat",
+        json={"name": "from-brat", "brat_path": str(brat_dir), "description": "brat → jsonl"},
+    )
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert body["name"] == "from-brat"
+    assert body["format"] == "jsonl"
+    assert body["document_count"] == 1
+    assert "HOSPITAL" in body["labels"]
+
+    home = tmp_path / "data" / "corpora" / "from-brat"
+    assert (home / "corpus.jsonl").is_file()
+    # No BRAT leftovers inside the home.
+    assert not list(home.glob("*.txt"))
+    assert not list(home.glob("*.ann"))
+
+
+def test_import_brat_duplicate_name_conflicts(client, tmp_path):
+    brat_dir = tmp_path / "brat_flat"
+    _write_brat_flat(brat_dir)
+    resp1 = client.post(
+        "/datasets/import/brat",
+        json={"name": "dup-brat", "brat_path": str(brat_dir)},
+    )
+    assert resp1.status_code == 201
+    resp2 = client.post(
+        "/datasets/import/brat",
+        json={"name": "dup-brat", "brat_path": str(brat_dir)},
+    )
+    assert resp2.status_code == 409
+
+
+def test_import_jsonl_alias_route(client, tmp_path):
+    jsonl = _write_sample_jsonl(tmp_path / "data" / "alias.jsonl", count=2)
+    resp = client.post(
+        "/datasets/import/jsonl",
+        json={"name": "aliased", "data_path": str(jsonl), "format": "jsonl"},
+    )
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["document_count"] == 2
 
 
 # ---------------------------------------------------------------------------
@@ -338,6 +469,39 @@ def test_transform_filter_labels(client, tmp_path):
     assert body["name"] == "persons-only"
     assert body["labels"] == ["PERSON"]
     assert body["total_spans"] == 5  # 1 PERSON per doc
+
+
+def test_transform_in_place(client, tmp_path):
+    jsonl = _write_sample_jsonl(tmp_path / "data" / "sample.jsonl", count=5)
+    client.post(
+        "/datasets",
+        json={"name": "inplace-src", "data_path": str(jsonl), "format": "jsonl"},
+    )
+    resp = client.post(
+        "/datasets/transform",
+        json={
+            "source_dataset": "inplace-src",
+            "in_place": True,
+            "keep_labels": ["PERSON"],
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["name"] == "inplace-src"
+    assert body["labels"] == ["PERSON"]
+
+
+def test_transform_new_dataset_requires_output_name(client, tmp_path):
+    jsonl = _write_sample_jsonl(tmp_path / "data" / "sample.jsonl", count=2)
+    client.post(
+        "/datasets",
+        json={"name": "need-name", "data_path": str(jsonl), "format": "jsonl"},
+    )
+    resp = client.post(
+        "/datasets/transform",
+        json={"source_dataset": "need-name", "in_place": False, "keep_labels": ["PERSON"]},
+    )
+    assert resp.status_code == 422
 
 
 def test_transform_label_mapping(client, tmp_path):
@@ -496,10 +660,13 @@ def test_export_brat_writes_flat_dir(client, tmp_path):
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["format"] == "brat"
-    out = tmp_path / "data" / "corpora" / "brat-src_export"
+    # Exports now live under exports_dir, not inside corpora_dir.
+    out = tmp_path / "data" / "exports" / "brat-src"
     assert out.is_dir()
     assert list(out.glob("*.txt"))
     assert list(out.glob("*.ann"))
+    # No residue inside the corpora root.
+    assert not (tmp_path / "data" / "corpora" / "brat-src_export").exists()
 
 
 def test_dataset_schema_endpoint(client, tmp_path):
@@ -540,6 +707,7 @@ def test_transform_preview_endpoint(client, tmp_path):
     assert p["spans_renamed"] == 3
     assert "conflicts" in p
     assert p["projected_document_count"] == 3
+    assert p.get("untouched_document_count", 0) == 0
 
     clash = client.post(
         "/datasets/transform/preview",
@@ -590,6 +758,8 @@ def test_store_register_and_load(tmp_path):
 
     manifest = register_dataset(corpora_dir, "unit-test", str(jsonl), "jsonl", description="test")
     assert manifest["document_count"] == 4
+    assert manifest.get("split_document_counts", {}).get("(none)") == 4
+    assert manifest.get("has_split_metadata") is False
     assert manifest["name"] == "unit-test"
     assert (corpora_dir / "unit-test" / "corpus.jsonl").is_file()
 
@@ -668,6 +838,96 @@ def test_store_invalid_name(tmp_path):
         register_dataset(corpora_dir, "", str(jsonl), "jsonl")
 
 
+def test_register_rejects_non_jsonl_format(tmp_path):
+    """register_dataset is a back-compat shim and must reject BRAT formats."""
+    from clinical_deid.dataset_store import register_dataset
+
+    jsonl = _write_sample_jsonl(tmp_path / "incoming" / "corpus.jsonl")
+    corpora_dir = tmp_path / "corpora"
+    corpora_dir.mkdir()
+    with pytest.raises(ValueError, match="only 'jsonl' is supported"):
+        register_dataset(corpora_dir, "nope", str(jsonl), "brat-dir")
+
+
+def test_list_datasets_discovers_jsonl_and_auto_creates_manifest(tmp_path):
+    """A bare ``corpus.jsonl`` under a home counts; ``dataset.json`` is lazy."""
+    from clinical_deid.dataset_store import list_datasets
+
+    corpora_dir = tmp_path / "corpora"
+    (corpora_dir / "handmade").mkdir(parents=True)
+    _write_sample_jsonl(corpora_dir / "handmade" / "corpus.jsonl", count=3)
+    assert not (corpora_dir / "handmade" / "dataset.json").is_file()
+
+    found = list_datasets(corpora_dir)
+    assert [d.name for d in found] == ["handmade"]
+    assert found[0].document_count == 3
+    assert (corpora_dir / "handmade" / "dataset.json").is_file()
+
+
+def test_list_datasets_skips_legacy_brat_homes(tmp_path, caplog):
+    """Legacy homes with format != 'jsonl' must be dropped from discovery."""
+    import json
+    import logging
+
+    from clinical_deid.dataset_store import list_datasets
+
+    corpora_dir = tmp_path / "corpora"
+    legacy = corpora_dir / "oldbrat"
+    legacy.mkdir(parents=True)
+    # Legacy BRAT layout: .txt/.ann + dataset.json saying format="brat-dir"
+    (legacy / "a.txt").write_text("hi", encoding="utf-8")
+    (legacy / "a.ann").write_text("T1\tPER 0 2\thi\n", encoding="utf-8")
+    # Also create corpus.jsonl to prove the format gate (not just file presence) drops it.
+    _write_sample_jsonl(legacy / "corpus.jsonl", count=1)
+    (legacy / "dataset.json").write_text(
+        json.dumps(
+            {
+                "name": "oldbrat",
+                "format": "brat-dir",
+                "document_count": 1,
+                "total_spans": 0,
+                "labels": [],
+                "analytics": {},
+                "metadata": {},
+                "created_at": "2024-01-01T00:00:00+00:00",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with caplog.at_level(logging.DEBUG, logger="clinical_deid.dataset_store"):
+        found = list_datasets(corpora_dir)
+
+    assert [d.name for d in found] == []
+
+
+def test_import_brat_to_jsonl_unit(tmp_path):
+    from clinical_deid.dataset_store import import_brat_to_jsonl
+
+    brat_dir = tmp_path / "brat_flat"
+    brat_dir.mkdir()
+    (brat_dir / "a.txt").write_text("CALVERT HOSPITAL here", encoding="utf-8")
+    (brat_dir / "a.ann").write_text(
+        "T1\tHOSPITAL 0 16\tCALVERT HOSPITAL\n", encoding="utf-8"
+    )
+    corpora_dir = tmp_path / "corpora"
+    corpora_dir.mkdir()
+
+    manifest = import_brat_to_jsonl(
+        corpora_dir,
+        "from-brat",
+        brat_dir,
+        description="from brat",
+    )
+    assert manifest["name"] == "from-brat"
+    assert manifest["format"] == "jsonl"
+    assert manifest["document_count"] == 1
+    home = corpora_dir / "from-brat"
+    assert (home / "corpus.jsonl").is_file()
+    assert not list(home.glob("*.txt"))
+    assert not list(home.glob("*.ann"))
+
+
 # ---------------------------------------------------------------------------
 # Eval integration with dataset_name
 # ---------------------------------------------------------------------------
@@ -737,3 +997,245 @@ def test_eval_dataset_splits_no_match_422(client, tmp_path):
     )
     assert resp.status_code == 422
     assert "dataset_splits" in resp.json()["detail"].lower()
+
+
+# ---------------------------------------------------------------------------
+# Ingest via saved pipeline
+# ---------------------------------------------------------------------------
+
+
+def test_ingest_from_pipeline(client, tmp_path):
+    corpora = tmp_path / "data" / "corpora"
+    raw = corpora / "raw_txts"
+    raw.mkdir(parents=True, exist_ok=True)
+    (raw / "note1.txt").write_text("Patient John Smith visited on 01/15/1980", encoding="utf-8")
+    (raw / "note2.txt").write_text("Call 555-1234 for a follow-up appointment", encoding="utf-8")
+
+    client.post(
+        "/pipelines",
+        json={"name": "ingest-pipe", "config": {"pipes": [{"type": "regex_ner"}]}},
+    )
+
+    resp = client.post(
+        "/datasets/ingest-from-pipeline",
+        json={
+            "source_path": "raw_txts",
+            "pipeline_name": "ingest-pipe",
+            "output_name": "raw-fast-silver",
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert body["name"] == "raw-fast-silver"
+    assert body["document_count"] == 2
+
+    list_resp = client.get("/datasets")
+    names = [d["name"] for d in list_resp.json()]
+    assert "raw-fast-silver" in names
+
+    corpus_jsonl = corpora / "raw-fast-silver" / "corpus.jsonl"
+    assert corpus_jsonl.is_file()
+    lines = [ln for ln in corpus_jsonl.read_text(encoding="utf-8").splitlines() if ln.strip()]
+    assert len(lines) == 2
+
+
+def test_ingest_from_pipeline_path_escape_rejected(client, tmp_path):
+    client.post(
+        "/pipelines",
+        json={"name": "ingest-pipe-2", "config": {"pipes": [{"type": "regex_ner"}]}},
+    )
+    resp = client.post(
+        "/datasets/ingest-from-pipeline",
+        json={
+            "source_path": "../../etc/passwd",
+            "pipeline_name": "ingest-pipe-2",
+            "output_name": "escape-attempt",
+        },
+    )
+    assert resp.status_code == 400, resp.text
+    assert "corpora root" in resp.json()["detail"].lower()
+
+
+def test_ingest_from_pipeline_duplicate_name(client, tmp_path):
+    corpora = tmp_path / "data" / "corpora"
+    raw = corpora / "raw_dup"
+    raw.mkdir(parents=True, exist_ok=True)
+    (raw / "a.txt").write_text("simple text", encoding="utf-8")
+
+    client.post(
+        "/pipelines",
+        json={"name": "ingest-pipe-3", "config": {"pipes": [{"type": "regex_ner"}]}},
+    )
+    first = client.post(
+        "/datasets/ingest-from-pipeline",
+        json={
+            "source_path": "raw_dup",
+            "pipeline_name": "ingest-pipe-3",
+            "output_name": "ingest-dup",
+        },
+    )
+    assert first.status_code == 201, first.text
+    second = client.post(
+        "/datasets/ingest-from-pipeline",
+        json={
+            "source_path": "raw_dup",
+            "pipeline_name": "ingest-pipe-3",
+            "output_name": "ingest-dup",
+        },
+    )
+    assert second.status_code == 409
+
+
+def test_ingest_from_pipeline_missing_pipeline(client, tmp_path):
+    corpora = tmp_path / "data" / "corpora"
+    raw = corpora / "raw_missing"
+    raw.mkdir(parents=True, exist_ok=True)
+    (raw / "a.txt").write_text("text", encoding="utf-8")
+
+    resp = client.post(
+        "/datasets/ingest-from-pipeline",
+        json={
+            "source_path": "raw_missing",
+            "pipeline_name": "does-not-exist",
+            "output_name": "nope",
+        },
+    )
+    assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# PUT /datasets/{name}/documents/{doc_id}
+# ---------------------------------------------------------------------------
+
+
+def test_put_document_replaces_spans(client, tmp_path):
+    jsonl = _write_sample_jsonl(tmp_path / "data" / "sample.jsonl", count=2)
+    client.post(
+        "/datasets",
+        json={"name": "edit-ds", "data_path": str(jsonl), "format": "jsonl"},
+    )
+
+    resp = client.put(
+        "/datasets/edit-ds/documents/doc_0",
+        json={"spans": [{"start": 8, "end": 18, "label": "NAME"}]},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["document_id"] == "doc_0"
+    assert len(body["spans"]) == 1
+    assert body["spans"][0]["label"] == "NAME"
+
+    fetched = client.get("/datasets/edit-ds/documents/doc_0").json()
+    assert len(fetched["spans"]) == 1
+    assert fetched["spans"][0]["label"] == "NAME"
+
+    # Analytics must reflect the new span count for that doc.
+    detail = client.get("/datasets/edit-ds").json()
+    # doc_0 now has 1 span; doc_1 still has 2 → total 3.
+    assert detail["total_spans"] == 3
+
+
+def test_put_document_allows_text_override(client, tmp_path):
+    jsonl = _write_sample_jsonl(tmp_path / "data" / "sample.jsonl", count=1)
+    client.post(
+        "/datasets",
+        json={"name": "edit-text", "data_path": str(jsonl), "format": "jsonl"},
+    )
+    resp = client.put(
+        "/datasets/edit-text/documents/doc_0",
+        json={
+            "text": "Jane Doe",
+            "spans": [{"start": 0, "end": 8, "label": "NAME"}],
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["text"] == "Jane Doe"
+
+
+def test_put_document_rejects_out_of_range_span(client, tmp_path):
+    jsonl = _write_sample_jsonl(tmp_path / "data" / "sample.jsonl", count=1)
+    client.post(
+        "/datasets",
+        json={"name": "edit-range", "data_path": str(jsonl), "format": "jsonl"},
+    )
+    resp = client.put(
+        "/datasets/edit-range/documents/doc_0",
+        json={"spans": [{"start": 0, "end": 9999, "label": "NAME"}]},
+    )
+    assert resp.status_code == 422, resp.text
+
+
+def test_put_document_missing_id_returns_404(client, tmp_path):
+    jsonl = _write_sample_jsonl(tmp_path / "data" / "sample.jsonl", count=1)
+    client.post(
+        "/datasets",
+        json={"name": "edit-missing", "data_path": str(jsonl), "format": "jsonl"},
+    )
+    resp = client.put(
+        "/datasets/edit-missing/documents/does_not_exist",
+        json={"spans": []},
+    )
+    assert resp.status_code == 404
+
+
+def test_put_document_unknown_dataset_returns_404(client):
+    resp = client.put(
+        "/datasets/nope/documents/whatever",
+        json={"spans": []},
+    )
+    assert resp.status_code == 404
+
+
+def test_ingest_from_pipeline_symlink_escape_rejected(client, tmp_path):
+    """A symlink under CORPORA_DIR that points outside must be rejected."""
+    import os
+
+    corpora = tmp_path / "data" / "corpora"
+    corpora.mkdir(parents=True, exist_ok=True)
+    outside = tmp_path / "outside_root"
+    outside.mkdir(parents=True, exist_ok=True)
+    (outside / "a.txt").write_text("secret", encoding="utf-8")
+    link = corpora / "escape_link"
+    try:
+        os.symlink(outside, link, target_is_directory=True)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks not supported on this filesystem")
+
+    client.post(
+        "/pipelines",
+        json={"name": "sym-pipe", "config": {"pipes": [{"type": "regex_ner"}]}},
+    )
+    resp = client.post(
+        "/datasets/ingest-from-pipeline",
+        json={
+            "source_path": "escape_link",
+            "pipeline_name": "sym-pipe",
+            "output_name": "sym-escape",
+        },
+    )
+    assert resp.status_code == 400, resp.text
+    assert "corpora root" in resp.json()["detail"].lower()
+
+
+def test_ingest_from_pipeline_max_documents(client, tmp_path):
+    corpora = tmp_path / "data" / "corpora"
+    raw = corpora / "many"
+    raw.mkdir(parents=True, exist_ok=True)
+    for i in range(5):
+        (raw / f"f{i}.txt").write_text(f"content {i}", encoding="utf-8")
+
+    client.post(
+        "/pipelines",
+        json={"name": "limit-pipe", "config": {"pipes": [{"type": "regex_ner"}]}},
+    )
+    resp = client.post(
+        "/datasets/ingest-from-pipeline",
+        json={
+            "source_path": "many",
+            "pipeline_name": "limit-pipe",
+            "output_name": "limit-ingest",
+            "max_documents": 2,
+        },
+    )
+    assert resp.status_code == 422, resp.text
+    assert "max_documents" in resp.json()["detail"]

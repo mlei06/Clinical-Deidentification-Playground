@@ -157,8 +157,8 @@ export default function AuditView() {
                 className="mt-0.5 block rounded-md border border-gray-300 px-2 py-1.5 text-sm"
               >
                 <option value="">All sources</option>
-                <option value="production-api">production-api</option>
-                <option value="api">api</option>
+                <option value="api-inference">api-inference</option>
+                <option value="api-admin">api-admin</option>
                 <option value="cli">cli</option>
               </select>
             </label>
@@ -302,9 +302,9 @@ function LogRow({
         <span
           className={clsx(
             'rounded px-1.5 py-0.5 text-xs font-medium',
-            log.source === 'production-api'
+            log.source === 'api-inference'
               ? 'bg-green-100 text-green-700'
-              : log.source === 'api'
+              : log.source === 'api-admin'
                 ? 'bg-blue-100 text-blue-700'
                 : 'bg-gray-100 text-gray-600',
           )}

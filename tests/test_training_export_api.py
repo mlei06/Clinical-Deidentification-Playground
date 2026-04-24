@@ -83,3 +83,118 @@ def test_export_custom_filename(client, dataset_with_docs):
     )
     assert resp.status_code == 200
     assert resp.json()["path"].endswith("custom.conll")
+
+
+def test_export_annotated_jsonl(client, dataset_with_docs, tmp_path):
+    resp = client.post(
+        f"/datasets/{dataset_with_docs}/export",
+        json={"format": "jsonl"},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["format"] == "jsonl"
+    assert body["document_count"] == 2
+    assert body["total_spans"] == 4
+
+    from pathlib import Path
+
+    exported = Path(body["path"])
+    assert exported.is_file()
+    assert exported.name == "train.jsonl"
+    assert exported.parent == tmp_path / "data" / "exports" / dataset_with_docs
+    lines = [ln for ln in exported.read_text(encoding="utf-8").splitlines() if ln.strip()]
+    assert len(lines) == 2
+    first = json.loads(lines[0])
+    assert first["document"]["id"] == "doc1"
+    assert len(first["spans"]) == 2
+
+
+def test_export_annotated_jsonl_reimportable(client, dataset_with_docs):
+    """Re-register the exported JSONL via POST /datasets (round-trip contract)."""
+    resp = client.post(
+        f"/datasets/{dataset_with_docs}/export",
+        json={"format": "jsonl"},
+    )
+    assert resp.status_code == 200, resp.text
+    exported_path = resp.json()["path"]
+
+    resp2 = client.post(
+        "/datasets",
+        json={
+            "name": "reimported-ds",
+            "data_path": exported_path,
+            "format": "jsonl",
+        },
+    )
+    assert resp2.status_code == 201, resp2.text
+    body = resp2.json()
+    assert body["document_count"] == 2
+    assert body["total_spans"] == 4
+
+
+def test_export_surrogate_jsonl_line_shape(client, dataset_with_docs):
+    """Surrogate export rewrites text and spans in-place."""
+    import pytest
+    pytest.importorskip("faker", reason="surrogate export requires faker")
+
+    resp = client.post(
+        f"/datasets/{dataset_with_docs}/export",
+        json={"format": "jsonl", "target_text": "surrogate", "surrogate_seed": 42},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["format"] == "jsonl"
+    assert body["target_text"] == "surrogate"
+
+    from pathlib import Path
+
+    exported = Path(body["path"])
+    assert exported.is_file()
+    lines = [ln for ln in exported.read_text(encoding="utf-8").splitlines() if ln.strip()]
+    assert len(lines) == 2
+    first = json.loads(lines[0])
+    # Every span in the surrogate corpus must point into the surrogate text.
+    for s in first["spans"]:
+        assert 0 <= s["start"] < s["end"] <= len(first["document"]["text"])
+    # Seed should produce deterministic output; second run matches.
+    resp2 = client.post(
+        f"/datasets/{dataset_with_docs}/export",
+        json={"format": "jsonl", "target_text": "surrogate", "surrogate_seed": 42},
+    )
+    assert resp2.status_code == 200, resp2.text
+    exported2 = Path(resp2.json()["path"])
+    assert exported.read_text(encoding="utf-8") == exported2.read_text(encoding="utf-8")
+
+
+def test_export_surrogate_brat_round_trip(client, dataset_with_docs):
+    """Exporting to BRAT with surrogate text and re-importing yields the same spans."""
+    import pytest
+    pytest.importorskip("faker", reason="surrogate export requires faker")
+
+    resp = client.post(
+        f"/datasets/{dataset_with_docs}/export",
+        json={"format": "brat", "target_text": "surrogate", "surrogate_seed": 1},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["target_text"] == "surrogate"
+
+    # Re-import the surrogate BRAT as a new dataset and confirm it has the same
+    # document count and span count as the export indicated.
+    resp_import = client.post(
+        "/datasets/import/brat",
+        json={"name": "surrogate-brat", "brat_path": body["path"]},
+    )
+    assert resp_import.status_code == 201, resp_import.text
+    reimported = resp_import.json()
+    assert reimported["document_count"] == body["document_count"]
+    assert reimported["total_spans"] == body["total_spans"]
+
+
+def test_export_surrogate_default_is_original(client, dataset_with_docs):
+    resp = client.post(
+        f"/datasets/{dataset_with_docs}/export",
+        json={"format": "jsonl"},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["target_text"] == "original"

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Literal
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
@@ -50,14 +50,10 @@ class EvalMetricsResponse(BaseModel):
     risk_weighted_recall: float
 
 
-DatasetFormat = Literal["jsonl", "brat-dir", "brat-corpus"]
-
-
 class EvalRunRequest(BaseModel):
     pipeline_name: str
     dataset_path: str | None = None
     dataset_name: str | None = None
-    dataset_format: DatasetFormat = "jsonl"
     #: If set, only documents whose ``metadata["split"]`` is in this list are evaluated.
     dataset_splits: list[str] | None = None
 
@@ -182,7 +178,7 @@ def run_evaluation(session: SessionDep, body: EvalRunRequest) -> EvalRunDetail:
 
     from clinical_deid.eval.runner import evaluate_pipeline
     from clinical_deid.ingest.sources import load_annotated_corpus
-    from clinical_deid.transform.ops import filter_documents_by_splits
+    from clinical_deid.transform.ops import filter_documents_by_split_query
 
     settings = get_settings()
 
@@ -226,15 +222,18 @@ def run_evaluation(session: SessionDep, body: EvalRunRequest) -> EvalRunDetail:
             )
         if not corpus_path.exists():
             raise HTTPException(status_code=404, detail=f"dataset path not found: {body.dataset_path}")
-
-        fmt_map: dict[DatasetFormat, dict[str, Path]] = {
-            "jsonl": {"jsonl": corpus_path},
-            "brat-dir": {"brat_dir": corpus_path},
-            "brat-corpus": {"brat_corpus": corpus_path},
-        }
+        if corpus_path.suffix.lower() != ".jsonl":
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "dataset_path must be a .jsonl file. "
+                    "Convert BRAT to JSONL first (e.g. POST /datasets/import/brat or "
+                    "`clinical-deid dataset import-brat`)."
+                ),
+            )
 
         try:
-            documents = load_annotated_corpus(**fmt_map[body.dataset_format])
+            documents = load_annotated_corpus(jsonl=corpus_path)
         except Exception as exc:
             raise HTTPException(
                 status_code=422, detail=f"failed to load dataset: {exc}"
@@ -252,7 +251,7 @@ def run_evaluation(session: SessionDep, body: EvalRunRequest) -> EvalRunDetail:
         raise HTTPException(status_code=422, detail="dataset is empty")
 
     if body.dataset_splits and any(str(s).strip() for s in body.dataset_splits):
-        documents = filter_documents_by_splits(documents, body.dataset_splits)
+        documents = filter_documents_by_split_query(documents, body.dataset_splits)
         if not documents:
             raise HTTPException(
                 status_code=422,
@@ -310,7 +309,7 @@ def run_evaluation(session: SessionDep, body: EvalRunRequest) -> EvalRunDetail:
                 "strict_f1": result.overall.strict.f1,
                 "risk_weighted_recall": result.risk_weighted_recall,
             },
-            source="api",
+            source="api-admin",
         )
         session.add(record)
     except Exception:

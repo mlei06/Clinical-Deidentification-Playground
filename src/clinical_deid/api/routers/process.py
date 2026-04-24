@@ -94,7 +94,7 @@ def redact_document(
             pipeline_name="",
             doc_count=1,
             span_count=len(body.spans),
-            source="api",
+            source="api-inference" if caller.scope == "inference" else "api-admin",
             client_id=caller.id or x_client_id or "",
             output_mode=body.output_mode.value,
             service_type="redact",
@@ -143,6 +143,7 @@ def scrub_text(
 
     log_audit(
         session, pipeline_name, config, [resp],
+        source="api-inference" if caller.scope == "inference" else "api-admin",
         output_mode=body.output_mode,
         client_id=caller.id or x_client_id or "",
         service_type="scrub",
@@ -181,10 +182,13 @@ def process_text(
     resp = process_single(
         body.text, body.request_id, pipe_chain, resolved, config,
         trace=trace, output_mode=output_mode,
+        include_surrogate_spans=body.include_surrogate_spans,
+        surrogate_seed=body.surrogate_seed,
+        surrogate_consistency=body.surrogate_consistency,
     )
     log_audit(
         session, resolved, config, [resp],
-        source="production-api" if caller.scope == "inference" else "api",
+        source="api-inference" if caller.scope == "inference" else "api-admin",
         output_mode=output_mode,
         client_id=caller.id or x_client_id or "",
     )
@@ -212,6 +216,9 @@ def process_batch(
         process_single(
             item.text, item.request_id, pipe_chain, resolved, config,
             trace=trace, output_mode=output_mode,
+            include_surrogate_spans=item.include_surrogate_spans,
+            surrogate_seed=item.surrogate_seed,
+            surrogate_consistency=item.surrogate_consistency,
         )
         for item in body.items
     ]
@@ -219,7 +226,7 @@ def process_batch(
 
     log_audit(
         session, resolved, config, results,
-        source="production-api" if caller.scope == "inference" else "api",
+        source="api-inference" if caller.scope == "inference" else "api-admin",
         output_mode=output_mode,
         client_id=caller.id or x_client_id or "",
         service_type="batch",

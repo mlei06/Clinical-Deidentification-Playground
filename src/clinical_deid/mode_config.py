@@ -1,4 +1,4 @@
-"""Production mode configuration — maps mode names (fast/balanced/accurate) to saved pipelines.
+"""Deploy configuration — maps mode names (fast/balanced/accurate) to saved pipelines.
 
 The mapping lives in a JSON file (default ``modes.json``; override with
 ``CLINICAL_DEID_MODES_PATH`` / ``Settings.modes_path``).
@@ -31,7 +31,6 @@ class DeployConfig:
     modes: dict[str, ModeEntry] = field(default_factory=dict)
     default_mode: str | None = None
     allowed_pipelines: list[str] | None = None  # None = all allowed
-    production_api_url: str | None = None  # e.g. "https://prod:8000"
 
     def resolve(self, mode_or_pipeline: str) -> str:
         """Return the pipeline name for a mode alias, or pass through as-is."""
@@ -48,10 +47,6 @@ class DeployConfig:
 
     def mode_names(self) -> list[str]:
         return sorted(self.modes)
-
-
-# Keep ModeConfig as alias for backwards compat with production app
-ModeConfig = DeployConfig
 
 
 def load_mode_config(path: Path = DEFAULT_MODES_PATH) -> DeployConfig:
@@ -77,7 +72,6 @@ def load_mode_config(path: Path = DEFAULT_MODES_PATH) -> DeployConfig:
         modes=modes,
         default_mode=raw.get("default_mode"),
         allowed_pipelines=raw.get("allowed_pipelines"),
-        production_api_url=raw.get("production_api_url"),
     )
 
 
@@ -92,8 +86,6 @@ def save_mode_config(config: DeployConfig, path: Path = DEFAULT_MODES_PATH) -> N
     }
     if config.allowed_pipelines is not None:
         raw["allowed_pipelines"] = config.allowed_pipelines
-    if config.production_api_url is not None:
-        raw["production_api_url"] = config.production_api_url
 
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w") as f:

@@ -1,5 +1,10 @@
-import { Clock, Trash2 } from 'lucide-react';
-import { useDatasets, useDeleteDataset } from '../../hooks/useDatasets';
+import { Clock, RefreshCw, Trash2 } from 'lucide-react';
+import {
+  useDatasets,
+  useDeleteDataset,
+  useRefreshAnalytics,
+  useRefreshAllDatasets,
+} from '../../hooks/useDatasets';
 import LabelBadge from '../shared/LabelBadge';
 import type { DatasetSummary } from '../../api/types';
 
@@ -11,17 +16,44 @@ interface DatasetListProps {
 export default function DatasetList({ onSelect, selectedName }: DatasetListProps) {
   const { data: datasets, isLoading } = useDatasets();
   const deleteMutation = useDeleteDataset();
+  const refreshOne = useRefreshAnalytics();
+  const refreshAll = useRefreshAllDatasets();
 
   if (isLoading) {
     return <div className="text-sm text-gray-400">Loading datasets...</div>;
   }
 
   if (!datasets?.length) {
-    return <div className="text-sm text-gray-400">No datasets registered yet</div>;
+    return <div className="text-sm text-gray-400">No datasets yet (add corpus.jsonl under corpora)</div>;
   }
 
   return (
-    <div className="overflow-hidden rounded-lg border border-gray-200 bg-white">
+    <div className="space-y-2">
+      <div className="flex justify-end">
+        <button
+          type="button"
+          onClick={() => {
+            refreshAll.mutate(undefined, {
+              onSuccess: (results) => {
+                const failed = results.filter((r) => r.status === 'error');
+                if (failed.length) {
+                  window.alert(
+                    `Refresh completed with ${failed.length} error(s): ${failed
+                      .map((f) => `${f.name}: ${f.error}`)
+                      .join('; ')}`,
+                  );
+                }
+              },
+            });
+          }}
+          disabled={refreshAll.isPending}
+          className="inline-flex items-center gap-1 rounded-md border border-gray-200 bg-white px-2 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+        >
+          <RefreshCw size={12} className={refreshAll.isPending ? 'animate-spin' : ''} />
+          Refresh all stats
+        </button>
+      </div>
+      <div className="overflow-hidden rounded-lg border border-gray-200 bg-white">
       <table className="w-full text-sm">
         <thead className="border-b border-gray-200 bg-gray-50">
           <tr>
@@ -30,6 +62,7 @@ export default function DatasetList({ onSelect, selectedName }: DatasetListProps
             <th className="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-gray-500">Spans</th>
             <th className="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-gray-500">Labels</th>
             <th className="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-gray-500">Date</th>
+            <th className="px-3 py-2 text-[10px] font-semibold uppercase tracking-wider text-gray-500"></th>
             <th className="px-3 py-2 text-[10px] font-semibold uppercase tracking-wider text-gray-500"></th>
           </tr>
         </thead>
@@ -68,6 +101,18 @@ export default function DatasetList({ onSelect, selectedName }: DatasetListProps
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
+                    refreshOne.mutate(d.name);
+                  }}
+                  className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-800"
+                  title="Refresh stats from corpus.jsonl"
+                >
+                  <RefreshCw size={13} />
+                </button>
+              </td>
+              <td className="px-3 py-1.5">
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
                     if (confirm(`Delete dataset "${d.name}"?`)) {
                       deleteMutation.mutate(d.name);
                     }
@@ -82,6 +127,7 @@ export default function DatasetList({ onSelect, selectedName }: DatasetListProps
           ))}
         </tbody>
       </table>
+      </div>
     </div>
   );
 }

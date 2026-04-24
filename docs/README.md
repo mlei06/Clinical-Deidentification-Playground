@@ -12,6 +12,8 @@
 | [models.md](models.md) | Filesystem model registry (`models/{framework}/{name}/`) |
 | [evaluation.md](evaluation.md) | Metrics, matching modes, eval API |
 | [data-ingestion.md](data-ingestion.md) | Dataset formats, registration, transforms |
+| [plans/ner-dataset-creation.md](plans/ner-dataset-creation.md) | **Roadmap:** NER dataset workflow (ingest → review → BRAT/JSONL → surrogate alignment) |
+| [design/production-ui-assisted-ner-datasets.md](design/production-ui-assisted-ner-datasets.md) | **Design spec:** Production UI as the home for assisted NER dataset creation |
 | [ui.md](ui.md) | Playground UI views |
 | [synthesis.md](synthesis.md) | LLM note synthesis |
 | [neuroner-setup.md](neuroner-setup.md) | NeuroNER Docker sidecar |

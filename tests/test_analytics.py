@@ -1,6 +1,11 @@
 from __future__ import annotations
 
-from clinical_deid.analytics.stats import compute_dataset_analytics
+from clinical_deid.analytics.stats import (
+    compute_dataset_analytics,
+    compute_split_document_counts,
+    has_split_metadata,
+    UNSPLIT_BUCKET,
+)
 from clinical_deid.domain import AnnotatedDocument, Document, PHISpan
 
 
@@ -53,3 +58,24 @@ def test_documents_by_span_count_mixed() -> None:
     assert s.documents_by_span_count["0"] == 1
     assert s.documents_by_span_count["1"] == 1
     assert s.documents_by_span_count["2"] == 1
+
+
+def test_split_counts_and_flags() -> None:
+    a = AnnotatedDocument(
+        document=Document(id="1", text="a", metadata={"split": "train"}),
+        spans=[],
+    )
+    b = AnnotatedDocument(
+        document=Document(id="2", text="b", metadata={}),
+        spans=[],
+    )
+    c = AnnotatedDocument(
+        document=Document(id="3", text="c", metadata={"split": "  test  "}),
+        spans=[],
+    )
+    d = [a, b, c]
+    assert has_split_metadata(d) is True
+    counts = compute_split_document_counts(d)
+    assert counts.get("train") == 1
+    assert counts.get("test") == 1
+    assert counts[UNSPLIT_BUCKET] == 1

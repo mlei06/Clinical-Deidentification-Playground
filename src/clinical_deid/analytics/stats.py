@@ -158,3 +158,42 @@ def compute_dataset_analytics(docs: list[AnnotatedDocument]) -> DatasetAnalytics
         overlapping_span_pairs=overlap_pairs,
         label_cooccurrence=dict(sorted(cooc.items(), key=lambda x: (-x[1], x[0]))),
     )
+
+
+#: Metadata bucket for documents without a non-empty string ``metadata["split"]``.
+#: Matches filter/query conventions in :func:`filter_documents_by_split_query`.
+UNSPLIT_BUCKET = "(none)"
+
+
+def _order_split_count_keys(counts: dict[str, int]) -> dict[str, int]:
+    """Stable display order: known splits first, then other names, ``(none)`` last."""
+    preferred = ("train", "valid", "dev", "test", "deploy")
+    out: dict[str, int] = {}
+    for k in preferred:
+        if k in counts:
+            out[k] = counts[k]
+    for k in sorted(x for x in counts if x not in preferred and x != UNSPLIT_BUCKET):
+        out[k] = counts[k]
+    if UNSPLIT_BUCKET in counts:
+        out[UNSPLIT_BUCKET] = counts[UNSPLIT_BUCKET]
+    return out
+
+
+def compute_split_document_counts(docs: list[AnnotatedDocument]) -> dict[str, int]:
+    """Count documents per ``metadata['split']``; invalid/missing split → ``(none)``."""
+    raw: Counter[str] = Counter()
+    for ad in docs:
+        sp = ad.document.metadata.get("split")
+        if isinstance(sp, str) and sp.strip():
+            raw[sp.strip()] += 1
+        else:
+            raw[UNSPLIT_BUCKET] += 1
+    return _order_split_count_keys(dict(raw))
+
+
+def has_split_metadata(docs: list[AnnotatedDocument]) -> bool:
+    """True if at least one document has a non-empty string ``metadata['split']``."""
+    return any(
+        isinstance(ad.document.metadata.get("split"), str) and ad.document.metadata.get("split", "").strip()
+        for ad in docs
+    )

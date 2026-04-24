@@ -1,11 +1,19 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
-import { CheckCircle2, Flag, SkipForward, Loader2, Columns2, Wand2, Plus } from 'lucide-react';
+import {
+  CheckCircle2,
+  Flag,
+  Loader2,
+  Columns2,
+  Wand2,
+  Plus,
+  RotateCcw,
+} from 'lucide-react';
 import SpanHighlighter, { type SpanHighlighterHandle } from '../shared/SpanHighlighter';
 import RedactedView from '../shared/RedactedView';
 import LabelBadge from '../shared/LabelBadge';
 import SpanEditor from '../shared/SpanEditor';
 import { redactDocument } from '../../api/production';
-import { useReviewQueue, type QueueDoc } from './store';
+import { useProductionStore, type DatasetFile } from './store';
 import { CANONICAL_LABELS } from '../../lib/canonicalLabels';
 import { phiSpanKey } from '../../lib/phiSpanKey';
 import {
@@ -17,7 +25,8 @@ import {
 import type { OutputMode, PHISpanResponse } from '../../api/types';
 
 interface DocumentReviewerProps {
-  doc: QueueDoc;
+  datasetId: string;
+  file: DatasetFile;
   reviewer: string;
 }
 
@@ -27,27 +36,37 @@ interface GhostSelection {
   text: string;
 }
 
-export default function DocumentReviewer({ doc, reviewer }: DocumentReviewerProps) {
-  const { updateDoc, advance } = useReviewQueue();
-  const [outputMode, setOutputMode] = useState<OutputMode>('redacted');
+export default function DocumentReviewer({
+  datasetId,
+  file,
+  reviewer,
+}: DocumentReviewerProps) {
+  const updateFile = useProductionStore((s) => s.updateFile);
+  const setFileResolved = useProductionStore((s) => s.setFileResolved);
+
+  const [previewMode, setPreviewMode] = useState<OutputMode>('redacted');
+  const [previewText, setPreviewText] = useState<string>('');
   const [isApplying, setIsApplying] = useState(false);
   const [redactError, setRedactError] = useState<string | null>(null);
-  const [note, setNote] = useState(doc.note ?? '');
+  const [note, setNote] = useState(file.note ?? '');
   const [activeSpanKey, setActiveSpanKey] = useState<string | null>(null);
   const [flashSpanKey, setFlashSpanKey] = useState<string | null>(null);
   const [ghostSelection, setGhostSelection] = useState<GhostSelection | null>(null);
-  const [pulseRange, setPulseRange] = useState<{ start: number; end: number } | null>(null);
+  const [pulseRange, setPulseRange] = useState<{ start: number; end: number } | null>(
+    null,
+  );
   const [addLabel, setAddLabel] = useState<string>('OTHER');
   const highlighterRef = useRef<SpanHighlighterHandle>(null);
 
   useEffect(() => {
-    setNote(doc.note ?? '');
+    setNote(file.note ?? '');
     setRedactError(null);
     setActiveSpanKey(null);
     setFlashSpanKey(null);
     setGhostSelection(null);
     setPulseRange(null);
-  }, [doc.id]);
+    setPreviewText('');
+  }, [file.id]);
 
   useEffect(() => {
     if (!flashSpanKey) return;
@@ -62,21 +81,22 @@ export default function DocumentReviewer({ doc, reviewer }: DocumentReviewerProp
   }, [pulseRange]);
 
   const uniqueLabels = useMemo(
-    () => [...new Set(doc.editedSpans.map((s) => s.label))].sort(),
-    [doc.editedSpans],
+    () => [...new Set(file.annotations.map((s) => s.label))].sort(),
+    [file.annotations],
   );
 
-  const originalIsDirty = useMemo(() => {
-    if (doc.editedSpans.length !== doc.detectedSpans.length) return true;
-    return doc.editedSpans.some((s, i) => {
-      const o = doc.detectedSpans[i];
+  const annotationsDiffer = useMemo(() => {
+    const detected = file.detectedAt ?? [];
+    if (file.annotations.length !== detected.length) return true;
+    return file.annotations.some((s, i) => {
+      const o = detected[i];
       return !o || s.start !== o.start || s.end !== o.end || s.label !== o.label;
     });
-  }, [doc.editedSpans, doc.detectedSpans]);
+  }, [file.annotations, file.detectedAt]);
 
   const conflictSets = useMemo(
-    () => findConflictSets(doc.editedSpans, doc.text),
-    [doc.editedSpans, doc.text],
+    () => findConflictSets(file.annotations, file.originalText),
+    [file.annotations, file.originalText],
   );
 
   const overlapConflictRangeKeys = useMemo(
@@ -91,80 +111,78 @@ export default function DocumentReviewer({ doc, reviewer }: DocumentReviewerProp
   }, [conflictSets]);
 
   const handleChangeSpans = (spans: PHISpanResponse[]) => {
-    updateDoc(doc.id, { editedSpans: spans });
+    updateFile(datasetId, file.id, { annotations: spans });
   };
 
   const handleReset = () => {
-    updateDoc(doc.id, { editedSpans: doc.detectedSpans });
+    if (file.detectedAt) {
+      updateFile(datasetId, file.id, { annotations: file.detectedAt });
+    }
   };
 
   const handleResolveConflict = useCallback(
     (kept: PHISpanResponse) => {
-      updateDoc(doc.id, { editedSpans: resolveConflictKeepSpan(doc.editedSpans, kept) });
+      updateFile(datasetId, file.id, {
+        annotations: resolveConflictKeepSpan(file.annotations, kept),
+      });
     },
-    [doc.id, doc.editedSpans, updateDoc],
+    [datasetId, file.id, file.annotations, updateFile],
   );
 
   const handleDropConflict = useCallback(
     (range: { start: number; end: number }) => {
-      updateDoc(doc.id, { editedSpans: resolveConflictDropAll(doc.editedSpans, range) });
+      updateFile(datasetId, file.id, {
+        annotations: resolveConflictDropAll(file.annotations, range),
+      });
     },
-    [doc.id, doc.editedSpans, updateDoc],
+    [datasetId, file.id, file.annotations, updateFile],
   );
 
   const handleQuickResolve = useCallback(() => {
-    updateDoc(doc.id, { editedSpans: mergeLabelPrioritySpans(doc.editedSpans) });
-  }, [doc.id, doc.editedSpans, updateDoc]);
+    updateFile(datasetId, file.id, {
+      annotations: mergeLabelPrioritySpans(file.annotations),
+    });
+  }, [datasetId, file.id, file.annotations, updateFile]);
 
-  const regenerateRedacted = useCallback(async () => {
+  const regeneratePreview = useCallback(async () => {
     setRedactError(null);
     setIsApplying(true);
     try {
       const res = await redactDocument(
         {
-          text: doc.text,
-          spans: doc.editedSpans.map((s) => ({
+          text: file.originalText,
+          spans: file.annotations.map((s) => ({
             start: s.start,
             end: s.end,
             label: s.label,
           })),
-          output_mode: outputMode,
+          output_mode: previewMode,
         },
         reviewer || 'production-ui',
       );
-      updateDoc(doc.id, { redactedText: res.output_text });
-      return res.output_text;
+      setPreviewText(res.output_text);
     } catch (err) {
       setRedactError(err instanceof Error ? err.message : 'redact failed');
-      return null;
     } finally {
       setIsApplying(false);
     }
-  }, [doc.editedSpans, doc.id, doc.text, outputMode, reviewer, updateDoc]);
+  }, [file.annotations, file.originalText, previewMode, reviewer]);
 
-  const commitReview = async (status: 'reviewed' | 'flagged' | 'skipped') => {
-    if (status === 'skipped') {
-      advance();
-      return;
-    }
-    let redactedText = doc.redactedText;
-    if (originalIsDirty || !redactedText) {
-      const next = await regenerateRedacted();
-      if (next == null) return;
-      redactedText = next;
-    }
-    updateDoc(doc.id, {
-      status,
-      note: note.trim() || undefined,
-      redactedText,
-      reviewedAt: new Date().toISOString(),
-    });
-    advance();
+  const commitNote = () => {
+    updateFile(datasetId, file.id, { note: note.trim() || undefined });
+  };
+
+  const toggleFlagged = () => {
+    updateFile(datasetId, file.id, { flagged: !file.flagged });
+  };
+
+  const toggleResolved = () => {
+    setFileResolved(datasetId, file.id, !file.resolved);
   };
 
   const addSpanFromGhost = () => {
     if (!ghostSelection) return;
-    const exists = doc.editedSpans.some(
+    const exists = file.annotations.some(
       (s) =>
         s.start === ghostSelection.start &&
         s.end === ghostSelection.end &&
@@ -179,10 +197,10 @@ export default function DocumentReviewer({ doc, reviewer }: DocumentReviewerProp
         confidence: null,
         source: 'manual',
       };
-      const merged = [...doc.editedSpans, next].sort(
+      const merged = [...file.annotations, next].sort(
         (a, b) => a.start - b.start || a.end - b.end,
       );
-      updateDoc(doc.id, { editedSpans: merged });
+      updateFile(datasetId, file.id, { annotations: merged });
       setFlashSpanKey(phiSpanKey(next));
     }
     setGhostSelection(null);
@@ -192,56 +210,71 @@ export default function DocumentReviewer({ doc, reviewer }: DocumentReviewerProp
     <section className="flex min-h-0 flex-1 flex-col">
       <header className="flex flex-wrap items-center gap-3 border-b border-gray-200 bg-white px-4 py-2">
         <div className="flex min-w-0 flex-col">
-          <span className="truncate text-sm font-medium text-gray-900">{doc.sourceName}</span>
+          <span className="truncate text-sm font-medium text-gray-900">
+            {file.sourceLabel}
+          </span>
           <span className="text-[11px] text-gray-400">
-            {doc.text.length} chars · {doc.editedSpans.length} spans
-            {doc.processingTimeMs != null && ` · ${doc.processingTimeMs.toFixed(0)}ms detect`}
+            {file.originalText.length} chars · {file.annotations.length} spans
+            {file.processingTimeMs != null &&
+              ` · ${file.processingTimeMs.toFixed(0)}ms detect`}
+            {file.lastDetectionTarget && ` · via ${file.lastDetectionTarget}`}
           </span>
         </div>
         <div className="ml-auto flex items-center gap-2">
           <select
-            value={outputMode}
-            onChange={(e) => setOutputMode(e.target.value as OutputMode)}
+            value={previewMode}
+            onChange={(e) => setPreviewMode(e.target.value as OutputMode)}
             className="rounded border border-gray-200 bg-white px-2 py-1.5 text-xs text-gray-700"
-            title="Output mode for re-redaction"
+            title="Preview mode (does not change export)"
           >
-            <option value="redacted">Redacted tags</option>
-            <option value="surrogate">Surrogate data</option>
+            <option value="redacted">Preview: redacted</option>
+            <option value="surrogate">Preview: surrogate</option>
           </select>
           <button
             type="button"
-            onClick={() => void regenerateRedacted()}
-            disabled={isApplying || doc.editedSpans.length === 0}
+            onClick={() => void regeneratePreview()}
+            disabled={isApplying || file.annotations.length === 0}
             className="flex items-center gap-1 rounded border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-40"
-            title="Regenerate the redacted output from current spans"
+            title="Regenerate the preview pane from current spans"
           >
             {isApplying ? <Loader2 size={12} className="animate-spin" /> : <Wand2 size={12} />}
-            Apply
+            Preview
           </button>
+          {annotationsDiffer && (
+            <button
+              type="button"
+              onClick={handleReset}
+              className="inline-flex items-center gap-1 rounded border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
+              title="Reset spans to last detection output"
+            >
+              <RotateCcw size={12} />
+              Reset
+            </button>
+          )}
           <button
             type="button"
-            onClick={() => commitReview('skipped')}
-            className="flex items-center gap-1 rounded border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
-          >
-            <SkipForward size={12} />
-            Skip
-          </button>
-          <button
-            type="button"
-            onClick={() => commitReview('flagged')}
-            className="flex items-center gap-1 rounded border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-800 hover:bg-amber-100"
+            onClick={toggleFlagged}
+            className={`flex items-center gap-1 rounded border px-3 py-1.5 text-xs font-medium ${
+              file.flagged
+                ? 'border-amber-300 bg-amber-100 text-amber-900'
+                : 'border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100'
+            }`}
           >
             <Flag size={12} />
-            Flag
+            {file.flagged ? 'Flagged' : 'Flag'}
           </button>
           <button
             type="button"
-            onClick={() => commitReview('reviewed')}
-            disabled={isApplying}
-            className="flex items-center gap-1 rounded bg-green-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-green-800 disabled:opacity-40"
+            onClick={toggleResolved}
+            className={`flex items-center gap-1 rounded px-3 py-1.5 text-xs font-medium ${
+              file.resolved
+                ? 'bg-green-700 text-white hover:bg-green-800'
+                : 'border border-green-200 bg-green-50 text-green-800 hover:bg-green-100'
+            }`}
+            title="Mark annotations final for export"
           >
-            {isApplying ? <Loader2 size={12} className="animate-spin" /> : <CheckCircle2 size={12} />}
-            Approve & next
+            <CheckCircle2 size={12} />
+            {file.resolved ? 'Resolved' : 'Mark resolved'}
           </button>
         </div>
       </header>
@@ -266,8 +299,8 @@ export default function DocumentReviewer({ doc, reviewer }: DocumentReviewerProp
           <div className="relative flex-1 overflow-auto p-3 pt-6 text-sm">
             <SpanHighlighter
               ref={highlighterRef}
-              text={doc.text}
-              spans={doc.editedSpans}
+              text={file.originalText}
+              spans={file.annotations}
               activeSpanKey={activeSpanKey}
               flashSpanKey={flashSpanKey}
               onSpanHover={setActiveSpanKey}
@@ -315,21 +348,21 @@ export default function DocumentReviewer({ doc, reviewer }: DocumentReviewerProp
           <div className="flex items-center justify-between border-b border-gray-100 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-gray-400">
             <span className="flex items-center gap-1">
               <Columns2 size={11} />
-              Redacted output ({outputMode})
+              Preview ({previewMode})
             </span>
           </div>
           <div className="flex-1 overflow-auto p-3 text-sm">
-            <RedactedView text={doc.redactedText} />
+            <RedactedView text={previewText} />
           </div>
         </div>
         <aside className="flex min-h-0 flex-col border-l border-gray-200 bg-gray-50 p-2">
           <SpanEditor
-            originalText={doc.text}
-            spans={doc.editedSpans}
+            originalText={file.originalText}
+            spans={file.annotations}
             onChange={handleChangeSpans}
             onReset={handleReset}
             isApplying={isApplying}
-            isDirty={originalIsDirty}
+            isDirty={annotationsDiffer}
             error={redactError}
             ghostSelection={ghostSelection}
             onClearGhostSelection={() => setGhostSelection(null)}
@@ -344,7 +377,7 @@ export default function DocumentReviewer({ doc, reviewer }: DocumentReviewerProp
             onResolveConflict={handleResolveConflict}
             onDropConflict={handleDropConflict}
             onQuickResolveLabelPriority={handleQuickResolve}
-            onUpdateOutput={() => void regenerateRedacted()}
+            onUpdateOutput={() => void regeneratePreview()}
           />
         </aside>
       </div>
@@ -356,7 +389,8 @@ export default function DocumentReviewer({ doc, reviewer }: DocumentReviewerProp
             type="text"
             value={note}
             onChange={(e) => setNote(e.target.value)}
-            placeholder="Optional — stored with this doc in the batch manifest"
+            onBlur={commitNote}
+            placeholder="Optional — stored with this file and in export metadata"
             className="flex-1 rounded border border-gray-200 bg-white px-2 py-1 text-xs text-gray-800 focus:border-blue-400 focus:outline-none"
           />
         </div>

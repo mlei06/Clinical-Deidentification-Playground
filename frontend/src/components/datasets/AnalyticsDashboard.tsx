@@ -1,5 +1,9 @@
+import { useState } from 'react';
+import { Loader2 } from 'lucide-react';
 import LabelBadge from '../shared/LabelBadge';
-import type { DatasetDetail } from '../../api/types';
+import type { DatasetAnalytics, DatasetDetail } from '../../api/types';
+import { useDatasetSplitAnalytics } from '../../hooks/useDatasets';
+import { splitLabelForDisplay } from './splitLabels';
 
 interface AnalyticsDashboardProps {
   dataset: DatasetDetail;
@@ -28,9 +32,36 @@ function NumericRow({ label, stats }: { label: string; stats: { mean: number; mi
 }
 
 export default function AnalyticsDashboard({ dataset }: AnalyticsDashboardProps) {
-  const a = dataset.analytics;
-  if (!a || !a.document_count) {
+  const splitOptions = Object.keys(dataset.split_document_counts ?? {});
+  const [selected, setSelected] = useState<'all' | string>('all');
+  const activeSplit = selected === 'all' ? null : selected;
+  const { data: splitAnalytics, isLoading: splitLoading } = useDatasetSplitAnalytics(
+    dataset.name,
+    activeSplit,
+  );
+
+  const a: DatasetAnalytics | undefined =
+    selected === 'all' ? dataset.analytics : splitAnalytics ?? undefined;
+
+  if (!dataset.analytics) {
     return <div className="text-sm text-gray-400">No analytics available</div>;
+  }
+
+  if (selected !== 'all' && splitLoading) {
+    return (
+      <div className="flex items-center gap-2 text-sm text-gray-500">
+        <Loader2 size={16} className="animate-spin" />
+        Loading metrics for this split…
+      </div>
+    );
+  }
+
+  if (!a) {
+    return <div className="text-sm text-gray-400">No analytics for this selection</div>;
+  }
+
+  if (a.document_count === 0 && selected === 'all') {
+    return <div className="text-sm text-gray-400">This dataset has no documents.</div>;
   }
 
   const labelEntries = Object.entries(a.label_counts ?? {}).sort((a, b) => b[1] - a[1]);
@@ -39,6 +70,31 @@ export default function AnalyticsDashboard({ dataset }: AnalyticsDashboardProps)
 
   return (
     <div className="flex flex-col gap-5">
+      {splitOptions.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs font-medium text-gray-500">Metrics for</span>
+          <select
+            value={selected}
+            onChange={(e) => {
+              const v = e.target.value;
+              setSelected(v === 'all' ? 'all' : v);
+            }}
+            className="rounded-md border border-gray-200 bg-white px-2 py-1.5 text-sm text-gray-800 shadow-sm focus:border-gray-500 focus:outline-none focus:ring-1 focus:ring-gray-500"
+          >
+            <option value="all">All documents</option>
+            {splitOptions.map((k) => (
+              <option key={k} value={k}>
+                {splitLabelForDisplay(k)}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+
+      {a.document_count === 0 && selected !== 'all' && (
+        <p className="text-sm text-amber-700">No documents in this split.</p>
+      )}
+
       {/* Summary cards */}
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <StatCard label="Documents" value={a.document_count} />

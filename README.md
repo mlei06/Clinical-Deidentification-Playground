@@ -98,7 +98,7 @@ The frontend is a React + TypeScript app (Vite, Tailwind CSS) with seven views:
 | **Datasets** | `/datasets` | Register, browse, compose, transform, generate datasets |
 | **Dictionaries** | `/dictionaries` | Upload/manage whitelist & blacklist term lists |
 | **Deploy** | `/deploy` | Configure production inference modes & pipeline allowlist |
-| **Audit** | `/audit` | Browse audit trail with stats, filters, detail panel; toggle local/production |
+| **Audit** | `/audit` | Browse audit trail with stats, filters, detail panel |
 
 ```bash
 cd frontend
@@ -162,9 +162,6 @@ Default SQLite database: `./data/app.sqlite` (audit log only). Override with `CL
 | Audit | `GET` | `/audit/logs` | Query audit trail (filtered, paginated) |
 | Audit | `GET` | `/audit/logs/{id}` | Audit log detail |
 | Audit | `GET` | `/audit/stats` | Aggregate stats |
-| Audit | `GET` | `/audit/production/logs` | Proxy production audit logs |
-| Audit | `GET` | `/audit/production/logs/{id}` | Proxy production log detail |
-| Audit | `GET` | `/audit/production/stats` | Proxy production stats |
 | Deploy | `GET` | `/deploy` | Get deploy config (modes + allowlist) |
 | Deploy | `PUT` | `/deploy` | Update deploy config |
 | Deploy | `GET` | `/deploy/health` | Per-mode availability (Production UI) |

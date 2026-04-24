@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Loader2, Plus, Trash2, Save, Shield, Rocket, Globe } from 'lucide-react';
+import { Loader2, Plus, Trash2, Save, Shield, Rocket } from 'lucide-react';
 import { clsx } from 'clsx';
 import { useDeployConfig, useDeployablePipelines, useUpdateDeployConfig } from '../../hooks/useDeploy';
 import type { DeployConfig } from '../../api/types';
@@ -17,7 +17,6 @@ export default function DeployView() {
   const [modes, setModes] = useState<Record<string, ModeFormEntry>>({});
   const [defaultMode, setDefaultMode] = useState<string | null>(null);
   const [allowedPipelines, setAllowedPipelines] = useState<string[] | null>(null);
-  const [productionApiUrl, setProductionApiUrl] = useState<string>('');
   const [newModeName, setNewModeName] = useState('');
   const [dirty, setDirty] = useState(false);
 
@@ -26,7 +25,6 @@ export default function DeployView() {
       setModes(config.modes);
       setDefaultMode(config.default_mode);
       setAllowedPipelines(config.allowed_pipelines);
-      setProductionApiUrl(config.production_api_url ?? '');
       setDirty(false);
     }
   }, [config]);
@@ -46,7 +44,6 @@ export default function DeployView() {
       modes,
       default_mode: defaultMode,
       allowed_pipelines: allowedPipelines,
-      production_api_url: productionApiUrl.trim() || null,
     };
     updateConfig.mutate(payload, { onSuccess: () => setDirty(false) });
   };
@@ -104,7 +101,7 @@ export default function DeployView() {
               Deploy Configuration
             </h1>
             <p className="mt-1 text-sm text-gray-500">
-              Configure which pipelines are available in production and map them to inference modes.
+              Configure inference-scoped access: mode aliases and the pipeline allowlist applied to <code className="text-xs">/process/*</code>.
             </p>
           </div>
           <button
@@ -136,7 +133,7 @@ export default function DeployView() {
         <section>
           <h2 className="text-sm font-semibold text-gray-900 mb-3">Inference Modes</h2>
           <p className="text-xs text-gray-500 mb-4">
-            Clients request a mode name (e.g. "fast") and the production API routes to the configured pipeline.
+            Clients call <code>POST /process/&lt;mode&gt;</code> (e.g. "fast") and the API routes to the configured pipeline.
           </p>
 
           <div className="space-y-3">
@@ -239,7 +236,7 @@ export default function DeployView() {
                 Pipeline Allowlist
               </h2>
               <p className="text-xs text-gray-500 mt-1">
-                When enabled, only checked pipelines can be used in production. Unchecked pipelines return 403.
+                When enabled, inference-scoped callers may only invoke checked pipelines. Admin-scoped callers bypass the allowlist.
               </p>
             </div>
             <button
@@ -288,34 +285,8 @@ export default function DeployView() {
 
           {allowedPipelines === null && (
             <div className="rounded-lg border border-dashed border-gray-300 bg-gray-50 px-4 py-6 text-center text-sm text-gray-400">
-              Allowlist disabled — all saved pipelines are available in production.
+              Allowlist disabled — inference-scoped callers may invoke any saved pipeline.
             </div>
-          )}
-        </section>
-
-        {/* Production API URL */}
-        <section>
-          <h2 className="text-sm font-semibold text-gray-900 mb-1 flex items-center gap-1.5">
-            <Globe size={14} />
-            Production API URL
-          </h2>
-          <p className="text-xs text-gray-500 mb-3">
-            Set this to your production server's base URL to view production audit logs from the Audit tab.
-          </p>
-          <input
-            type="url"
-            value={productionApiUrl}
-            onChange={(e) => {
-              setProductionApiUrl(e.target.value);
-              markDirty();
-            }}
-            placeholder="https://your-production-server:8000"
-            className="block w-full max-w-lg rounded-md border border-gray-300 px-3 py-2 text-sm font-mono placeholder:text-gray-300"
-          />
-          {productionApiUrl.trim() && (
-            <p className="mt-1.5 text-xs text-green-600">
-              The Audit tab will show a toggle to view production logs via this URL.
-            </p>
           )}
         </section>
       </div>

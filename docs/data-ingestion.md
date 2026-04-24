@@ -2,6 +2,8 @@
 
 This guide covers converting raw clinical datasets into the platform's annotated formats (JSONL and BRAT). Each dataset has a dedicated script under `scripts/` and a corresponding parser module under `src/clinical_deid/ingest/`.
 
+**Datasets tab / registry:** the admin **corpora** root keeps **one canonical layout** — `data/corpora/<name>/corpus.jsonl` plus `dataset.json` (analytics cache). If a script below writes **BRAT** under `data/corpora/...`, use **Convert BRAT → JSONL** in the UI or `clinical-deid dataset import-brat <brat_dir> --name <name>` to produce that JSONL home. Intermediate BRAT trees can stay on disk until you import; materialized tool exports (BRAT, CoNLL, …) go under `data/exports/` by default (`CLINICAL_DEID_EXPORTS_DIR`).
+
 ## Output formats
 
 All scripts produce one or both of:
@@ -214,6 +216,72 @@ python scripts/list_spans_by_label.py \
 ```
 
 Default output is TSV with columns: `document_id`, `start`, `end`, `label`, `text`, `split`.
+
+---
+
+## Ingest raw text through a pipeline
+
+Turn a folder of `.txt` files (or a plain `{id, text}` JSONL) into a registered
+dataset by running a saved pipeline over it. The result is an annotated
+corpus (`corpus.jsonl` + `dataset.json`) under `CORPORA_DIR/<output>`.
+
+```bash
+# CLI — dir of .txt files
+clinical-deid dataset ingest-run \
+  --input data/corpora/raw_txts \
+  --pipeline fast \
+  --output-name raw_txts_fast_silver
+
+# CLI — one-off file (no registration)
+clinical-deid dataset ingest-run \
+  --input notes.jsonl \
+  --pipeline my-pipeline \
+  --output-jsonl /tmp/out.jsonl
+
+# API — source_path is resolved under CORPORA_DIR; '..' is rejected
+curl -X POST http://localhost:8000/datasets/ingest-from-pipeline \
+  -H "content-type: application/json" \
+  -d '{
+    "source_path": "raw_txts",
+    "pipeline_name": "fast",
+    "output_name": "raw_txts_fast_silver"
+  }'
+```
+
+JSONL rows may be bare `{id, text}` or a wrapped `{document: {id, text}, spans: []}`;
+spans on the input are ignored — detection comes from the pipeline.
+
+---
+
+## Annotated JSONL export
+
+Export any registered dataset as an annotated JSONL file (one
+`AnnotatedDocument` per line) that can be re-registered via `POST /datasets`
+(`format: "jsonl"`) — a convenient round-trip for backups, review dumps, or
+moving a dataset across environments.
+
+```bash
+# CLI
+clinical-deid dataset export i2b2-2014 -o data/exports/i2b2-2014 --format jsonl
+
+# API
+curl -X POST http://localhost:8000/datasets/i2b2-2014/export \
+  -H "content-type: application/json" \
+  -d '{"format": "jsonl"}'
+```
+
+The response `path` points at a `train.jsonl` under the configured exports
+directory (`CLINICAL_DEID_EXPORTS_DIR`, default `data/exports/<name>/`). Override
+the filename with `--filename` / `"filename": "..."`.
+
+### Surrogate-aligned exports
+
+Add `--target-text surrogate` (CLI) or `"target_text": "surrogate"` (API) to
+replace each document's text with a surrogate and realign spans into the new
+text before export. Supply `--seed` / `"surrogate_seed"` for deterministic
+runs. Any dataset containing overlapping spans is rejected with a 422 listing
+the offending documents — resolve overlaps first (e.g. via the transform
+endpoint).
 
 ---
 

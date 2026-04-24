@@ -1,6 +1,6 @@
 # Evaluation
 
-Span-level evaluation metrics for measuring PHI detection quality. Currently available as a Python library; an evaluation API endpoint is planned.
+Span-level evaluation metrics for measuring PHI detection quality. Available as a Python library, via `POST /eval/run`, and via `clinical-deid eval`.
 
 ## Strict micro F1
 
@@ -97,4 +97,6 @@ for label in ["PATIENT", "DATE", "PHONE", "HOSPITAL"]:
 
 ## API and CLI
 
-Server-side evaluation is available via `POST /eval/run` and the `clinical-deid eval` CLI. The runner supports multiple matching modes (strict, exact boundary, partial overlap, token-level), risk-weighted metrics, run comparison, and per-document breakdowns — see the implementation in `src/clinical_deid/eval/` and the OpenAPI schema when `/docs` is enabled.
+Server-side evaluation is available via `POST /eval/run` and the `clinical-deid eval` CLI. The runner supports multiple matching modes (strict, exact boundary, partial overlap, token-level), risk-weighted metrics, run comparison, and per-document breakdowns — see `src/clinical_deid/eval/` and the OpenAPI schema when `/docs` is enabled.
+
+**Gold data sources:** use a **registered dataset** (`dataset_name`) or a **`dataset_path` to a `.jsonl` file** on the server (paths must stay within the project working directory). BRAT gold must be converted to JSONL first (Datasets tab: **Convert BRAT → JSONL**, or `clinical-deid dataset import-brat`). In Python, `load_annotated_corpus` can still load BRAT or JSONL from any path for ad-hoc scripts.

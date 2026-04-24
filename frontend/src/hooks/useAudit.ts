@@ -1,28 +1,25 @@
 import { useQuery } from '@tanstack/react-query';
 import * as api from '../api/audit';
-import type { AuditLogFilters, AuditSource } from '../api/audit';
+import type { AuditLogFilters } from '../api/audit';
 
-export function useAuditLogs(filters: AuditLogFilters = {}, source: AuditSource = 'local') {
+export function useAuditLogs(filters: AuditLogFilters = {}) {
   return useQuery({
-    queryKey: ['audit-logs', source, filters],
-    queryFn: () => api.listAuditLogs(filters, source),
+    queryKey: ['audit-logs', filters],
+    queryFn: () => api.listAuditLogs(filters),
   });
 }
 
-export function useAuditLog(id: string | null, source: AuditSource = 'local') {
+export function useAuditLog(id: string | null) {
   return useQuery({
-    queryKey: ['audit-log', source, id],
-    queryFn: () => api.getAuditLog(id!, source),
+    queryKey: ['audit-log', id],
+    queryFn: () => api.getAuditLog(id!),
     enabled: !!id,
   });
 }
 
-export function useAuditStats(
-  filters: { pipeline_name?: string; source?: string } = {},
-  source: AuditSource = 'local',
-) {
+export function useAuditStats(filters: { pipeline_name?: string; source?: string } = {}) {
   return useQuery({
-    queryKey: ['audit-stats', source, filters],
-    queryFn: () => api.getAuditStats(filters, source),
+    queryKey: ['audit-stats', filters],
+    queryFn: () => api.getAuditStats(filters),
   });
 }

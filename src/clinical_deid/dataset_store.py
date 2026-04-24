@@ -1,13 +1,15 @@
-"""Filesystem-based dataset registry (colocated layout).
+"""Filesystem-based dataset registry (colocated, JSONL-only).
 
 Each dataset named ``my-set`` lives in ``<corpora_dir>/my-set/``:
 
-- ``dataset.json`` — manifest (analytics, metadata, format)
-- ``corpus.jsonl`` — when ``format`` is ``jsonl``
-- Or BRAT ``.txt`` / ``.ann`` (flat) / split subdirs when format is ``brat-dir`` / ``brat-corpus``
+- ``corpus.jsonl`` — the canonical corpus (one :class:`~clinical_deid.domain.AnnotatedDocument` per line)
+- ``dataset.json`` — cached manifest (analytics, metadata)
 
-Registering **imports** a source path into that directory (copy). Compose / transform / generate
-write ``corpus.jsonl`` inside the new home first, then call :func:`commit_colocated_dataset`.
+Listing is discovery-based: any subdirectory containing ``corpus.jsonl`` qualifies, and
+``dataset.json`` is auto-created on first read if missing. BRAT is an ingest/export
+format, not a storage layout — use :func:`import_brat_to_jsonl` to convert a BRAT tree
+into a JSONL home, and ``write_annotated_corpus(brat_dir=…)`` under ``exports_dir`` to
+export back out.
 """
 
 from __future__ import annotations
@@ -21,13 +23,20 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
 
-from clinical_deid.analytics.stats import DatasetAnalytics, compute_dataset_analytics
+from clinical_deid.analytics.stats import (
+    compute_dataset_analytics,
+    compute_split_document_counts,
+    has_split_metadata,
+)
 from clinical_deid.domain import AnnotatedDocument
 from clinical_deid.ingest.sources import load_annotated_corpus
+from clinical_deid.ingest.sink import write_annotated_corpus
 
 logger = logging.getLogger(__name__)
 
-DatasetFormat = Literal["jsonl", "brat-dir", "brat-corpus"]
+#: The on-disk storage format. Only ``"jsonl"`` is supported; the alias is kept for
+#: grep-ability and for the small number of call sites that still pass it explicitly.
+DatasetFormat = Literal["jsonl"]
 
 DATASET_MANIFEST_NAME = "dataset.json"
 CORPUS_JSONL_NAME = "corpus.jsonl"
@@ -60,53 +69,51 @@ def manifest_path(corpora_dir: Path, name: str) -> Path:
     return dataset_home(corpora_dir, name) / DATASET_MANIFEST_NAME
 
 
-def corpus_data_path(home: Path, fmt: DatasetFormat) -> Path:
-    """Filesystem path passed to :func:`load_annotated_corpus` (file for jsonl, dir for brat)."""
-    if fmt == "jsonl":
-        return home / CORPUS_JSONL_NAME
-    return home
+def corpus_data_path(home: Path, fmt: DatasetFormat = "jsonl") -> Path:
+    """Path to ``corpus.jsonl`` inside *home* (kept as a helper for call sites)."""
+    return home / CORPUS_JSONL_NAME
 
 
-def _load_documents(data_path: str, fmt: DatasetFormat) -> list[AnnotatedDocument]:
-    p = Path(data_path)
-    fmt_map: dict[DatasetFormat, dict[str, Path]] = {
-        "jsonl": {"jsonl": p},
-        "brat-dir": {"brat_dir": p},
-        "brat-corpus": {"brat_corpus": p},
-    }
-    return load_annotated_corpus(**fmt_map[fmt])
+def _load_documents(home: Path) -> list[AnnotatedDocument]:
+    jsonl = home / CORPUS_JSONL_NAME
+    return load_annotated_corpus(jsonl=jsonl)
 
 
 def _compute_summary(docs: list[AnnotatedDocument]) -> dict[str, Any]:
     analytics = compute_dataset_analytics(docs)
+    split_document_counts = compute_split_document_counts(docs)
     return {
         "document_count": analytics.document_count,
         "total_spans": analytics.total_spans,
         "labels": sorted(analytics.label_counts.keys()),
         "analytics": json.loads(analytics.model_dump_json()),
+        "split_document_counts": split_document_counts,
+        "has_split_metadata": has_split_metadata(docs),
     }
 
 
 def _build_manifest(
     name: str,
-    fmt: DatasetFormat,
     *,
     description: str,
     metadata: dict[str, Any],
     summary: dict[str, Any],
+    created_at: str | None = None,
 ) -> dict[str, Any]:
     return {
         "name": name,
         "schema_version": MANIFEST_SCHEMA_COLOCATED,
         "layout": "colocated",
-        "format": fmt,
+        "format": "jsonl",
         "description": description,
         "document_count": summary["document_count"],
         "total_spans": summary["total_spans"],
         "labels": summary["labels"],
         "analytics": summary["analytics"],
+        "split_document_counts": summary.get("split_document_counts", {}),
+        "has_split_metadata": summary.get("has_split_metadata", False),
         "metadata": metadata,
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": created_at or datetime.now(timezone.utc).isoformat(),
     }
 
 
@@ -122,7 +129,7 @@ class DatasetInfo:
     name: str
     path: Path  # manifest path (…/name/dataset.json)
     description: str
-    data_path: str  # resolved path to corpus.jsonl or BRAT root (for API / CLI)
+    data_path: str  # resolved path to corpus.jsonl (for API / CLI)
     format: DatasetFormat
     document_count: int
     total_spans: int
@@ -131,8 +138,17 @@ class DatasetInfo:
     metadata: dict[str, Any]
 
 
+@dataclass(frozen=True)
+class RefreshResult:
+    """Outcome of a single dataset refresh (used by :func:`refresh_all_datasets`)."""
+
+    name: str
+    status: Literal["ok", "error"]
+    error: str | None = None
+
+
 # ---------------------------------------------------------------------------
-# CRUD
+# BRAT detection (reused by import helpers)
 # ---------------------------------------------------------------------------
 
 
@@ -151,27 +167,20 @@ def _looks_like_brat_split_corpus(d: Path) -> bool:
     return False
 
 
-def _suggest_dir_import(d: Path) -> tuple[Path, DatasetFormat] | None:
-    """If *d* looks like an importable corpus tree, return source path and format."""
-    corpus_jsonl = d / CORPUS_JSONL_NAME
-    if corpus_jsonl.is_file():
-        return corpus_jsonl, "jsonl"
-    jsonl_files = sorted(d.glob("*.jsonl"))
-    if len(jsonl_files) == 1:
-        return jsonl_files[0], "jsonl"
-    if len(jsonl_files) > 1:
-        return None
-    if _looks_like_brat_split_corpus(d):
-        return d, "brat-corpus"
-    if _has_brat_pairs(d):
-        return d, "brat-dir"
-    return None
+# ---------------------------------------------------------------------------
+# Import candidates (JSONL + BRAT discovery surfaces)
+# ---------------------------------------------------------------------------
 
 
 def list_import_candidates(corpora_dir: Path) -> list[dict[str, Any]]:
-    """Top-level files and folders under *corpora_dir* that can be passed to :func:`register_dataset`.
+    """JSONL-only import candidates under *corpora_dir*.
 
-    Skips registered dataset homes (directories that already contain ``dataset.json``).
+    Suggests any ``.jsonl`` file or any unregistered directory that contains a single
+    ``.jsonl`` (or ``corpus.jsonl``). BRAT trees are surfaced separately via
+    :func:`list_brat_import_candidates`.
+
+    Registered dataset homes (directories that already contain ``corpus.jsonl``) are
+    skipped so ``register`` cannot accidentally re-import a live dataset.
     """
     _ensure_corpora_root(corpora_dir)
     out: list[dict[str, Any]] = []
@@ -190,55 +199,115 @@ def list_import_candidates(corpora_dir: Path) -> list[dict[str, Any]]:
             continue
         if not child.is_dir():
             continue
-        if (child / DATASET_MANIFEST_NAME).is_file():
+        # Skip registered homes — discovery already surfaces these.
+        if (child / CORPUS_JSONL_NAME).is_file():
             continue
-        suggested = _suggest_dir_import(child)
-        if suggested is None:
+        jsonl_files = sorted(child.glob("*.jsonl"))
+        if len(jsonl_files) == 1:
+            src = jsonl_files[0]
+            label = f"{child.name}/{src.name}" if src.name != CORPUS_JSONL_NAME else child.name
+            out.append(
+                {
+                    "label": label,
+                    "data_path": str(src.resolve()),
+                    "suggested_format": "jsonl",
+                }
+            )
+    return out
+
+
+def list_brat_import_candidates(corpora_dir: Path) -> list[dict[str, Any]]:
+    """BRAT import candidates: directories under *corpora_dir* that look like BRAT trees.
+
+    Flat directories with ``*.txt``/``*.ann`` pairs are tagged ``"brat-dir"``; split
+    corpora (``train``/``valid``/…) are tagged ``"brat-corpus"``. These are *suggestions*
+    for :func:`import_brat_to_jsonl`; nothing is written until the caller imports.
+    """
+    _ensure_corpora_root(corpora_dir)
+    out: list[dict[str, Any]] = []
+    for child in sorted(corpora_dir.iterdir(), key=lambda p: p.name.lower()):
+        if child.name.startswith(".") or not child.is_dir():
             continue
-        src_path, fmt = suggested
-        if src_path.parent == child and src_path.is_file() and src_path.name != CORPUS_JSONL_NAME:
-            label = f"{child.name}/{src_path.name}"
+        # Skip registered homes.
+        if (child / CORPUS_JSONL_NAME).is_file():
+            continue
+        if _looks_like_brat_split_corpus(child):
+            kind: Literal["brat-dir", "brat-corpus"] = "brat-corpus"
+        elif _has_brat_pairs(child):
+            kind = "brat-dir"
         else:
-            label = child.name
+            continue
         out.append(
             {
-                "label": label,
-                "data_path": str(src_path.resolve()),
-                "suggested_format": fmt,
+                "label": child.name,
+                "data_path": str(child.resolve()),
+                "kind": kind,
             }
         )
     return out
 
 
+# ---------------------------------------------------------------------------
+# Discovery + CRUD
+# ---------------------------------------------------------------------------
+
+
 def list_datasets(corpora_dir: Path) -> list[DatasetInfo]:
-    """Return all registered datasets (directories under *corpora_dir* with ``dataset.json``)."""
+    """Discover datasets: every subdir with ``corpus.jsonl`` qualifies.
+
+    ``dataset.json`` is lazily computed on first listing if missing. Homes whose
+    existing ``dataset.json`` declares a non-JSONL ``format`` (legacy BRAT-colocated
+    layout) are skipped — those users need to re-import via
+    :func:`import_brat_to_jsonl`.
+    """
     _ensure_corpora_root(corpora_dir)
     results: list[DatasetInfo] = []
     for child in sorted(corpora_dir.iterdir(), key=lambda p: p.name.lower()):
-        if not child.is_dir():
+        if not child.is_dir() or child.name.startswith("."):
             continue
+        if not _SAFE_NAME.match(child.name):
+            continue
+        if not (child / CORPUS_JSONL_NAME).is_file():
+            continue
+        name = child.name
         mp = child / DATASET_MANIFEST_NAME
-        if not mp.is_file():
-            continue
         try:
-            data = json.loads(mp.read_text(encoding="utf-8"))
-            results.append(_manifest_to_info(corpora_dir, child.name, mp, data))
-        except (json.JSONDecodeError, OSError, KeyError, ValueError):
-            logger.warning("Skipping broken dataset manifest: %s", mp)
+            if mp.is_file():
+                data = json.loads(mp.read_text(encoding="utf-8"))
+                existing_fmt = data.get("format")
+                if existing_fmt and existing_fmt != "jsonl":
+                    logger.debug(
+                        "Skipping legacy dataset home %s (format=%r; re-import via BRAT → JSONL)",
+                        child,
+                        existing_fmt,
+                    )
+                    continue
+                # Auto-migrate missing format → jsonl without refreshing analytics.
+                if existing_fmt != "jsonl":
+                    data["format"] = "jsonl"
+                    save_dataset_manifest(corpora_dir, name, data)
+            else:
+                data = commit_colocated_dataset(corpora_dir, name)
+            results.append(_manifest_to_info(corpora_dir, name, mp, data))
+        except (json.JSONDecodeError, OSError, KeyError, ValueError) as exc:
+            logger.warning("Skipping broken dataset home %s: %s", child, exc)
             continue
     return results
 
 
 def load_dataset_manifest(corpora_dir: Path, name: str) -> dict[str, Any]:
-    """Load the full manifest dict."""
+    """Load the full manifest dict (auto-writes it on first access if missing)."""
     _validate_name(name)
-    path = manifest_path(corpora_dir, name)
+    home = dataset_home(corpora_dir, name)
+    path = home / DATASET_MANIFEST_NAME
     if not path.is_file():
-        available = _available_dataset_names(corpora_dir)
-        raise FileNotFoundError(
-            f"Dataset {name!r} not found under {corpora_dir}. "
-            f"Available: {', '.join(sorted(available)) or '(none)'}"
-        )
+        if not (home / CORPUS_JSONL_NAME).is_file():
+            available = _available_dataset_names(corpora_dir)
+            raise FileNotFoundError(
+                f"Dataset {name!r} not found under {corpora_dir}. "
+                f"Available: {', '.join(sorted(available)) or '(none)'}"
+            )
+        return commit_colocated_dataset(corpora_dir, name)
     return json.loads(path.read_text(encoding="utf-8"))
 
 
@@ -247,7 +316,7 @@ def _available_dataset_names(corpora_dir: Path) -> list[str]:
         return []
     out: list[str] = []
     for child in corpora_dir.iterdir():
-        if child.is_dir() and (child / DATASET_MANIFEST_NAME).is_file():
+        if child.is_dir() and (child / CORPUS_JSONL_NAME).is_file():
             out.append(child.name)
     return out
 
@@ -269,7 +338,7 @@ def delete_dataset(corpora_dir: Path, name: str) -> None:
     """Remove the dataset directory (manifest + corpus files)."""
     _validate_name(name)
     home = dataset_home(corpora_dir, name)
-    if not home.is_dir() or not (home / DATASET_MANIFEST_NAME).is_file():
+    if not home.is_dir() or not (home / CORPUS_JSONL_NAME).is_file():
         raise FileNotFoundError(f"Dataset {name!r} not found under {corpora_dir}")
     shutil.rmtree(home)
 
@@ -279,56 +348,20 @@ def delete_dataset(corpora_dir: Path, name: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _import_corpus_into_home(home: Path, source: Path, fmt: DatasetFormat) -> None:
-    """Copy *source* corpus into *home* using the colocated layout."""
-    src = source.resolve()
-    if fmt == "jsonl":
-        if not src.is_file():
-            raise ValueError(f"JSONL source must be a file: {src}")
-        shutil.copy2(src, home / CORPUS_JSONL_NAME)
-        return
-    if fmt == "brat-dir":
-        if not src.is_dir():
-            raise ValueError(f"BRAT directory source must be a directory: {src}")
-        copied = 0
-        for txt in sorted(src.glob("*.txt")):
-            ann = txt.with_suffix(".ann")
-            if ann.is_file():
-                shutil.copy2(txt, home / txt.name)
-                shutil.copy2(ann, home / ann.name)
-                copied += 1
-        if copied == 0:
-            raise ValueError(f"No paired .txt/.ann files found under {src}")
-        return
-    if fmt == "brat-corpus":
-        if not src.is_dir():
-            raise ValueError(f"BRAT corpus root must be a directory: {src}")
-        for entry in src.iterdir():
-            if entry.name.startswith("."):
-                continue
-            if entry.is_dir():
-                shutil.copytree(entry, home / entry.name, dirs_exist_ok=False)
-            elif entry.is_file():
-                shutil.copy2(entry, home / entry.name)
-        return
-    raise ValueError(f"Unknown format {fmt!r}")
-
-
-def register_dataset(
+def import_jsonl_dataset(
     corpora_dir: Path,
     name: str,
     data_path: str,
-    fmt: DatasetFormat,
     *,
     description: str = "",
     metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Import *data_path* into ``corpora_dir/name/`` and write ``dataset.json``.
-
-    Returns the full manifest dict.
-    """
+    """Copy a JSONL source into ``corpora_dir/name/`` and write ``dataset.json``."""
     _validate_name(name)
     _ensure_corpora_root(corpora_dir)
+    src = Path(data_path).resolve()
+    if not src.is_file():
+        raise ValueError(f"JSONL source must be a file: {src}")
     home = dataset_home(corpora_dir, name)
     if home.exists():
         raise ValueError(
@@ -337,17 +370,108 @@ def register_dataset(
         )
     home.mkdir(parents=True)
     try:
-        _import_corpus_into_home(home, Path(data_path), fmt)
-        rel = corpus_data_path(home, fmt)
-        docs = _load_documents(str(rel.resolve()), fmt)
+        shutil.copy2(src, home / CORPUS_JSONL_NAME)
+        docs = _load_documents(home)
         if not docs:
-            raise ValueError(f"No documents found after import into {home} (format={fmt})")
+            raise ValueError(f"No documents found after import into {home}")
         summary = _compute_summary(docs)
         manifest = _build_manifest(
             name,
-            fmt,
             description=description,
             metadata=metadata or {},
+            summary=summary,
+        )
+        save_dataset_manifest(corpora_dir, name, manifest)
+    except Exception:
+        if home.is_dir():
+            shutil.rmtree(home)
+        raise
+    return manifest
+
+
+def register_dataset(
+    corpora_dir: Path,
+    name: str,
+    data_path: str,
+    fmt: DatasetFormat = "jsonl",
+    *,
+    description: str = "",
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Back-compat shim for :func:`import_jsonl_dataset`.
+
+    Only ``fmt="jsonl"`` is supported. BRAT sources must go through
+    :func:`import_brat_to_jsonl`.
+    """
+    if fmt != "jsonl":
+        raise ValueError(
+            f"register_dataset no longer accepts fmt={fmt!r}; only 'jsonl' is supported. "
+            "Use import_brat_to_jsonl() to convert BRAT → JSONL first."
+        )
+    return import_jsonl_dataset(
+        corpora_dir,
+        name,
+        data_path,
+        description=description,
+        metadata=metadata,
+    )
+
+
+def import_brat_to_jsonl(
+    corpora_dir: Path,
+    name: str,
+    brat_source: Path,
+    *,
+    description: str = "",
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Convert a BRAT tree into a new JSONL dataset home.
+
+    Auto-detects flat BRAT (``*.txt``/``*.ann`` pairs) vs split corpus
+    (``train``/``valid``/… subdirs). Writes ``corpus.jsonl`` + ``dataset.json`` under
+    ``corpora_dir/name/``; the source BRAT files are *not* copied.
+    """
+    _validate_name(name)
+    _ensure_corpora_root(corpora_dir)
+    src = Path(brat_source).resolve()
+    if not src.is_dir():
+        raise ValueError(f"BRAT source must be a directory: {src}")
+
+    if _looks_like_brat_split_corpus(src):
+        docs = load_annotated_corpus(brat_corpus=src)
+        provenance_kind = "brat-corpus"
+    elif _has_brat_pairs(src):
+        docs = load_annotated_corpus(brat_dir=src)
+        provenance_kind = "brat-dir"
+    else:
+        raise ValueError(
+            f"No BRAT files found under {src} "
+            "(expected *.txt/*.ann pairs or train/valid/test subdirs)."
+        )
+
+    if not docs:
+        raise ValueError(f"No documents loaded from BRAT source {src}")
+
+    home = dataset_home(corpora_dir, name)
+    if home.exists():
+        raise FileExistsError(
+            f"Dataset directory already exists: {home}. "
+            "Choose another name or remove the existing dataset."
+        )
+    home.mkdir(parents=True)
+    try:
+        write_annotated_corpus(docs, jsonl=home / CORPUS_JSONL_NAME)
+        summary = _compute_summary(docs)
+        merged_metadata = dict(metadata or {})
+        provenance = {
+            "imported_from": str(src),
+            "source_kind": provenance_kind,
+        }
+        merged_metadata.setdefault("provenance", provenance)
+        manifest = _build_manifest(
+            name,
+            description=description,
+            metadata=merged_metadata,
             summary=summary,
         )
         save_dataset_manifest(corpora_dir, name, manifest)
@@ -361,67 +485,158 @@ def register_dataset(
 def commit_colocated_dataset(
     corpora_dir: Path,
     name: str,
-    fmt: DatasetFormat,
+    fmt: DatasetFormat = "jsonl",
     *,
     description: str = "",
     metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Write ``dataset.json`` for a home that already contains corpus files."""
+    """Write ``dataset.json`` for a home that already contains ``corpus.jsonl``.
+
+    If a manifest already exists, its description/metadata/created_at are preserved
+    (only analytics are recomputed) unless the caller passes overrides explicitly.
+    """
     _validate_name(name)
+    if fmt != "jsonl":
+        raise ValueError(f"commit_colocated_dataset only supports 'jsonl' (got {fmt!r})")
     home = dataset_home(corpora_dir, name)
     if not home.is_dir():
         raise FileNotFoundError(f"Dataset home not found: {home}")
-    rel = corpus_data_path(home, fmt)
-    if fmt == "jsonl" and not rel.is_file():
+    if not (home / CORPUS_JSONL_NAME).is_file():
         raise ValueError(f"Missing {CORPUS_JSONL_NAME} in {home}")
-    docs = _load_documents(str(rel.resolve()), fmt)
+    docs = _load_documents(home)
     if not docs:
-        raise ValueError(f"No documents found in {home} (format={fmt})")
+        raise ValueError(f"No documents found in {home}")
+
+    existing: dict[str, Any] = {}
+    mp = home / DATASET_MANIFEST_NAME
+    if mp.is_file():
+        try:
+            existing = json.loads(mp.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            existing = {}
+
+    desc = description if description else existing.get("description", "")
+    meta = metadata if metadata is not None else existing.get("metadata", {})
+    created_at = existing.get("created_at")
+
     summary = _compute_summary(docs)
     manifest = _build_manifest(
         name,
-        fmt,
-        description=description,
-        metadata=metadata or {},
+        description=desc,
+        metadata=meta or {},
         summary=summary,
+        created_at=created_at,
     )
     save_dataset_manifest(corpora_dir, name, manifest)
     return manifest
 
 
 def refresh_analytics(corpora_dir: Path, name: str) -> dict[str, Any]:
-    """Reload corpus from disk and update manifest analytics."""
-    manifest = load_dataset_manifest(corpora_dir, name)
-    fmt = manifest["format"]
+    """Reload corpus from disk and update manifest analytics (preserving metadata)."""
     home = dataset_home(corpora_dir, name)
-    rel = corpus_data_path(home, fmt)
-    docs = _load_documents(str(rel.resolve()), fmt)
+    if not (home / CORPUS_JSONL_NAME).is_file():
+        raise FileNotFoundError(f"Dataset {name!r} not found under {corpora_dir}")
+    manifest = load_dataset_manifest(corpora_dir, name)
+    docs = _load_documents(home)
     summary = _compute_summary(docs)
     manifest.update(
         {
+            "format": "jsonl",
             "document_count": summary["document_count"],
             "total_spans": summary["total_spans"],
             "labels": summary["labels"],
             "analytics": summary["analytics"],
+            "split_document_counts": summary["split_document_counts"],
+            "has_split_metadata": summary["has_split_metadata"],
         }
     )
     save_dataset_manifest(corpora_dir, name, manifest)
     return manifest
 
 
+#: Public verb alias; ``refresh_analytics`` is retained for existing call sites.
+refresh_dataset = refresh_analytics
+
+
+def refresh_all_datasets(corpora_dir: Path) -> list[RefreshResult]:
+    """Refresh analytics for every discovered dataset, catching per-home errors."""
+    results: list[RefreshResult] = []
+    for info in list_datasets(corpora_dir):
+        try:
+            refresh_analytics(corpora_dir, info.name)
+            results.append(RefreshResult(name=info.name, status="ok"))
+        except Exception as exc:
+            logger.warning("Refresh failed for %s: %s", info.name, exc)
+            results.append(RefreshResult(name=info.name, status="error", error=str(exc)))
+    return results
+
+
 def load_dataset_documents(corpora_dir: Path, name: str) -> list[AnnotatedDocument]:
-    manifest = load_dataset_manifest(corpora_dir, name)
-    fmt = manifest["format"]
     home = dataset_home(corpora_dir, name)
-    rel = corpus_data_path(home, fmt)
-    return _load_documents(str(rel.resolve()), fmt)
+    if not (home / CORPUS_JSONL_NAME).is_file():
+        raise FileNotFoundError(f"Dataset {name!r} not found under {corpora_dir}")
+    return _load_documents(home)
 
 
-def public_data_path(corpora_dir: Path, name: str, manifest: dict[str, Any]) -> str:
+def update_document(
+    corpora_dir: Path,
+    name: str,
+    doc_id: str,
+    *,
+    spans: list[Any],
+    text: str | None = None,
+) -> AnnotatedDocument:
+    """Replace ``spans`` (and optionally ``text``) on a document; atomic rewrite.
+
+    Validates every span's offsets against the final text. Raises ``KeyError`` if
+    the document id is not present, or ``ValueError`` if any span is out of range.
+    Recomputes analytics after the rewrite.
+    """
+    from clinical_deid.domain import PHISpan
+
+    home = dataset_home(corpora_dir, name)
+    corpus_path = home / CORPUS_JSONL_NAME
+    if not corpus_path.is_file():
+        raise FileNotFoundError(f"Dataset {name!r} not found under {corpora_dir}")
+
+    validated_spans: list[PHISpan] = []
+    for s in spans:
+        validated_spans.append(s if isinstance(s, PHISpan) else PHISpan.model_validate(s))
+
+    docs = _load_documents(home)
+    updated: AnnotatedDocument | None = None
+    new_docs: list[AnnotatedDocument] = []
+    for d in docs:
+        if d.document.id == doc_id:
+            new_text = text if text is not None else d.document.text
+            for sp in validated_spans:
+                if sp.start < 0 or sp.end > len(new_text) or sp.start >= sp.end:
+                    raise ValueError(
+                        f"Span [{sp.start}:{sp.end}] out of range for text of length {len(new_text)}"
+                    )
+            new_document = d.document.model_copy(update={"text": new_text}) if text is not None else d.document
+            updated = AnnotatedDocument(document=new_document, spans=validated_spans)
+            new_docs.append(updated)
+        else:
+            new_docs.append(d)
+
+    if updated is None:
+        raise KeyError(f"Document {doc_id!r} not found in dataset {name!r}")
+
+    tmp_path = corpus_path.with_suffix(corpus_path.suffix + ".tmp")
+    with tmp_path.open("w", encoding="utf-8") as fh:
+        for d in new_docs:
+            fh.write(d.model_dump_json() + "\n")
+    tmp_path.replace(corpus_path)
+
+    refresh_analytics(corpora_dir, name)
+    return updated
+
+
+def public_data_path(corpora_dir: Path, name: str, manifest: dict[str, Any] | None = None) -> str:
     """Resolved corpus path for API responses (``data_path`` field)."""
-    fmt = manifest["format"]
     home = dataset_home(corpora_dir, name)
-    return str(corpus_data_path(home, fmt).resolve())
+    return str((home / CORPUS_JSONL_NAME).resolve())
 
 
 # ---------------------------------------------------------------------------
@@ -432,16 +647,15 @@ def public_data_path(corpora_dir: Path, name: str, manifest: dict[str, Any]) -> 
 def _manifest_to_info(
     corpora_dir: Path, name: str, path: Path, data: dict[str, Any]
 ) -> DatasetInfo:
-    if data.get("name") != name:
+    if data.get("name") and data["name"] != name:
         raise ValueError(f"Manifest name mismatch: dir {name!r} vs manifest {data.get('name')!r}")
-    fmt = data["format"]
     home = dataset_home(corpora_dir, name)
     return DatasetInfo(
         name=name,
         path=path,
         description=data.get("description", ""),
-        data_path=str(corpus_data_path(home, fmt).resolve()),
-        format=fmt,
+        data_path=str((home / CORPUS_JSONL_NAME).resolve()),
+        format="jsonl",
         document_count=data.get("document_count", 0),
         total_spans=data.get("total_spans", 0),
         labels=data.get("labels", []),

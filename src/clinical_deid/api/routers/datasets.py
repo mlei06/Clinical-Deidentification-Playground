@@ -5,10 +5,15 @@ from __future__ import annotations
 import logging
 from typing import Any, Literal
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Response
 from pydantic import BaseModel, Field
 
+from clinical_deid.analytics.stats import DatasetAnalytics, compute_dataset_analytics
 from clinical_deid.api.auth import require_admin
+from clinical_deid.api.schemas import (
+    IngestFromPipelineRequest,
+    IngestFromPipelineResponse,
+)
 from clinical_deid.config import get_settings
 from clinical_deid.dataset_store import (
     CORPUS_JSONL_NAME,
@@ -16,13 +21,16 @@ from clinical_deid.dataset_store import (
     DatasetInfo,
     commit_colocated_dataset,
     delete_dataset,
+    import_brat_to_jsonl,
+    import_jsonl_dataset,
+    list_brat_import_candidates,
     list_datasets,
     list_import_candidates,
     load_dataset_documents,
     load_dataset_manifest,
     public_data_path,
+    refresh_all_datasets,
     refresh_analytics,
-    register_dataset,
     save_dataset_manifest,
 )
 
@@ -50,6 +58,11 @@ class DatasetSummary(BaseModel):
 class DatasetDetail(DatasetSummary):
     analytics: dict[str, Any]
     metadata: dict[str, Any]
+    split_document_counts: dict[str, int] = Field(
+        default_factory=dict,
+        description="Documents per metadata['split']; missing/invalid → '(none)'.",
+    )
+    has_split_metadata: bool = False
 
 
 class RegisterDatasetRequest(BaseModel):
@@ -60,8 +73,15 @@ class RegisterDatasetRequest(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class ImportBratRequest(BaseModel):
+    name: str
+    brat_path: str
+    description: str = ""
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
 class ImportSourceCandidate(BaseModel):
-    """A filesystem entry under the corpora root that can be imported via ``POST /datasets``."""
+    """A JSONL file or JSONL-in-folder that can be imported via ``POST /datasets``."""
 
     label: str
     data_path: str
@@ -71,6 +91,25 @@ class ImportSourceCandidate(BaseModel):
 class ImportSourcesResponse(BaseModel):
     corpora_root: str
     candidates: list[ImportSourceCandidate]
+
+
+class BratImportCandidate(BaseModel):
+    """A directory under the corpora root that looks like a BRAT tree."""
+
+    label: str
+    data_path: str
+    kind: Literal["brat-dir", "brat-corpus"]
+
+
+class BratImportSourcesResponse(BaseModel):
+    corpora_root: str
+    candidates: list[BratImportCandidate]
+
+
+class RefreshResultResponse(BaseModel):
+    name: str
+    status: Literal["ok", "error"]
+    error: str | None = None
 
 
 class UpdateDatasetRequest(BaseModel):
@@ -83,6 +122,12 @@ class DocumentPreview(BaseModel):
     text_preview: str
     span_count: int
     labels: list[str]
+    split: str | None = None
+
+
+class DatasetPreviewResponse(BaseModel):
+    items: list[DocumentPreview]
+    total: int
 
 
 class ComposeRequest(BaseModel):
@@ -106,7 +151,9 @@ class TransformRequest(BaseModel):
     """
 
     source_dataset: str
-    output_name: str
+    output_name: str = ""
+    #: When True, overwrite the source dataset (``source_dataset``) in place. ``output_name`` is ignored.
+    in_place: bool = False
     #: If set, only documents with ``metadata["split"]`` in this list are transformed.
     source_splits: list[str] | None = None
     drop_labels: list[str] | None = None
@@ -119,6 +166,11 @@ class TransformRequest(BaseModel):
     strip_splits: bool = False
     seed: int = 42
     description: str = ""
+    transform_mode: Literal["full", "schema", "sampling", "partitioning"] = "full"
+    #: If False, :func:`reassign_splits` uses stable document id order (no shuffle) before assignment.
+    resplit_shuffle: bool = True
+    #: Strip ``metadata['split']`` on targeted documents before re-partitioning (partitioning / full with resplit).
+    flatten_target_splits: bool = False
 
 
 class TransformPreviewRequest(BaseModel):
@@ -135,6 +187,9 @@ class TransformPreviewRequest(BaseModel):
     resplit: dict[str, float] | None = None
     strip_splits: bool = False
     seed: int = 42
+    transform_mode: Literal["full", "schema", "sampling", "partitioning"] = "full"
+    resplit_shuffle: bool = True
+    flatten_target_splits: bool = False
 
 
 class DatasetLabelFrequency(BaseModel):
@@ -162,6 +217,8 @@ class TransformPreviewResponse(BaseModel):
     projected_document_count: int
     projected_span_count: int
     split_document_counts: dict[str, int] | None = None
+    #: Documents not in ``source_splits`` (when that filter is set), left unchanged in the real transform.
+    untouched_document_count: int = 0
     conflicts: list[str] = Field(default_factory=list)
 
 
@@ -209,6 +266,8 @@ def _manifest_to_detail(m: dict[str, Any]) -> DatasetDetail:
         created_at=m.get("created_at", ""),
         analytics=m.get("analytics", {}),
         metadata=m.get("metadata", {}),
+        split_document_counts=m.get("split_document_counts", {}),
+        has_split_metadata=m.get("has_split_metadata", False),
     )
 
 
@@ -216,18 +275,10 @@ def _corpora_dir():
     return get_settings().corpora_dir
 
 
-def _apply_source_splits_or_422(
-    docs: list[Any],
-    source_splits: list[str] | None,
-    *,
-    empty_detail: str,
-) -> list[Any]:
-    from clinical_deid.transform.ops import filter_documents_by_splits
-
-    filtered = filter_documents_by_splits(docs, source_splits)
-    if source_splits and any(str(s).strip() for s in source_splits) and not filtered:
-        raise HTTPException(status_code=422, detail=empty_detail)
-    return filtered
+def _parse_splits_query(splits: str | None) -> list[str] | None:
+    if not splits or not str(splits).strip():
+        return None
+    return [p.strip() for p in str(splits).split(",") if p.strip()]
 
 
 # ---------------------------------------------------------------------------
@@ -248,7 +299,7 @@ def list_all_datasets(
 
 @router.get("/import-sources", response_model=ImportSourcesResponse)
 def list_dataset_import_sources() -> ImportSourcesResponse:
-    """List JSONL files and unregistered corpus directories under the configured corpora root."""
+    """List JSONL files under the configured corpora root (BRAT candidates are separate)."""
     root = _corpora_dir().resolve()
     raw = list_import_candidates(root)
     return ImportSourcesResponse(
@@ -257,22 +308,38 @@ def list_dataset_import_sources() -> ImportSourcesResponse:
     )
 
 
-@router.post("", response_model=DatasetDetail, status_code=201)
-def register_new_dataset(body: RegisterDatasetRequest) -> DatasetDetail:
-    """Register a dataset from a local path — validates data, computes analytics."""
+@router.get("/import-sources/brat", response_model=BratImportSourcesResponse)
+def list_brat_dataset_import_sources() -> BratImportSourcesResponse:
+    """List BRAT directories under the corpora root (candidates for ``POST /datasets/import/brat``)."""
+    root = _corpora_dir().resolve()
+    raw = list_brat_import_candidates(root)
+    return BratImportSourcesResponse(
+        corpora_root=str(root),
+        candidates=[BratImportCandidate.model_validate(x) for x in raw],
+    )
+
+
+def _register_jsonl(body: RegisterDatasetRequest) -> DatasetDetail:
     ds_dir = _corpora_dir()
 
-    # Check name not taken
+    if body.format != "jsonl":
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "Only format='jsonl' is supported via POST /datasets. "
+                "Use POST /datasets/import/brat to convert a BRAT tree into a JSONL dataset."
+            ),
+        )
+
     existing = [d.name for d in list_datasets(ds_dir)]
     if body.name in existing:
         raise HTTPException(status_code=409, detail=f"Dataset {body.name!r} already exists")
 
     try:
-        manifest = register_dataset(
+        manifest = import_jsonl_dataset(
             ds_dir,
             body.name,
             body.data_path,
-            body.format,
             description=body.description,
             metadata=body.metadata,
         )
@@ -289,6 +356,176 @@ def register_new_dataset(body: RegisterDatasetRequest) -> DatasetDetail:
     return _manifest_to_detail(manifest)
 
 
+@router.post("", response_model=DatasetDetail, status_code=201)
+def register_new_dataset(body: RegisterDatasetRequest) -> DatasetDetail:
+    """Import a JSONL corpus into a new dataset home and compute analytics."""
+    return _register_jsonl(body)
+
+
+@router.post("/import/jsonl", response_model=DatasetDetail, status_code=201)
+def import_jsonl_dataset_route(body: RegisterDatasetRequest) -> DatasetDetail:
+    """Alias of ``POST /datasets`` — explicit name for the JSONL import path."""
+    return _register_jsonl(body)
+
+
+@router.post("/import/brat", response_model=DatasetDetail, status_code=201)
+def import_brat_dataset_route(body: ImportBratRequest) -> DatasetDetail:
+    """Convert a BRAT tree (flat or split) into a new JSONL dataset home."""
+    from pathlib import Path
+
+    ds_dir = _corpora_dir()
+
+    existing = [d.name for d in list_datasets(ds_dir)]
+    if body.name in existing:
+        raise HTTPException(status_code=409, detail=f"Dataset {body.name!r} already exists")
+
+    try:
+        manifest = import_brat_to_jsonl(
+            ds_dir,
+            body.name,
+            Path(body.brat_path),
+            description=body.description,
+            metadata=body.metadata,
+        )
+    except FileExistsError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to import BRAT: {exc}") from exc
+
+    return _manifest_to_detail(manifest)
+
+
+@router.post("/refresh-all", response_model=list[RefreshResultResponse])
+def refresh_all_datasets_route() -> list[RefreshResultResponse]:
+    """Refresh analytics for every discovered dataset; per-home errors are surfaced inline."""
+    results = refresh_all_datasets(_corpora_dir())
+    return [
+        RefreshResultResponse(name=r.name, status=r.status, error=r.error) for r in results
+    ]
+
+
+def _resolve_source_under_corpora(raw: str) -> "Path":
+    """Resolve a user-supplied source path, rejecting anything outside CORPORA_DIR."""
+    from pathlib import Path
+
+    corpora_root = _corpora_dir().resolve()
+    candidate = Path(raw)
+    if candidate.is_absolute():
+        resolved = candidate.resolve()
+    else:
+        resolved = (corpora_root / candidate).resolve()
+    try:
+        resolved.relative_to(corpora_root)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"source_path must stay under the corpora root ({corpora_root}); "
+                f"got {raw!r}."
+            ),
+        ) from exc
+    if not resolved.exists():
+        raise HTTPException(status_code=404, detail=f"source_path not found: {raw!r}")
+    return resolved
+
+
+@router.post(
+    "/ingest-from-pipeline",
+    response_model=IngestFromPipelineResponse,
+    status_code=201,
+)
+def ingest_from_pipeline(body: IngestFromPipelineRequest) -> IngestFromPipelineResponse:
+    """Run a saved pipeline over raw text under the corpora root and register the result."""
+    from clinical_deid.audit import log_run
+    from clinical_deid.ingest.from_batch import ingest_paths_with_pipeline
+    from clinical_deid.ingest.sink import write_annotated_corpus
+    import time as _time
+
+    ds_dir = _corpora_dir()
+
+    existing = [d.name for d in list_datasets(ds_dir)]
+    if body.output_name in existing:
+        raise HTTPException(
+            status_code=409, detail=f"Dataset {body.output_name!r} already exists"
+        )
+
+    resolved = _resolve_source_under_corpora(body.source_path)
+
+    t0 = _time.perf_counter()
+    docs: list[Any] = []
+    try:
+        for doc in ingest_paths_with_pipeline(
+            [resolved], pipeline_name=body.pipeline_name
+        ):
+            docs.append(doc)
+            if len(docs) > body.max_documents:
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        f"source_path produced more than max_documents={body.max_documents} "
+                        "documents; narrow the source or raise the cap."
+                    ),
+                )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    duration = _time.perf_counter() - t0
+
+    if not docs:
+        raise HTTPException(
+            status_code=422,
+            detail=f"No documents produced from {body.source_path!r}",
+        )
+
+    home = ds_dir / body.output_name
+    home.mkdir(parents=True)
+    try:
+        write_annotated_corpus(docs, jsonl=home / CORPUS_JSONL_NAME)
+        manifest = commit_colocated_dataset(
+            ds_dir,
+            body.output_name,
+            "jsonl",
+            description=body.description or f"Ingested via pipeline {body.pipeline_name!r}",
+            metadata={
+                "provenance": {
+                    "ingested_from": str(resolved),
+                    "pipeline_name": body.pipeline_name,
+                }
+            },
+        )
+    except Exception:
+        import shutil
+        if home.is_dir():
+            shutil.rmtree(home)
+        raise
+
+    total_spans = sum(len(d.spans) for d in docs)
+    try:
+        log_run(
+            command="dataset_ingest",
+            pipeline_name=body.pipeline_name,
+            dataset_source=str(resolved),
+            doc_count=len(docs),
+            error_count=0,
+            span_count=total_spans,
+            duration_seconds=duration,
+            source="api-admin",
+        )
+    except Exception:
+        logger.warning("Failed to write audit record", exc_info=True)
+
+    return IngestFromPipelineResponse(
+        name=manifest["name"],
+        document_count=int(manifest.get("document_count", len(docs))),
+        total_spans=int(manifest.get("total_spans", total_spans)),
+    )
+
+
 @router.get("/{name}", response_model=DatasetDetail)
 def get_dataset(name: str) -> DatasetDetail:
     """Get full dataset metadata and analytics."""
@@ -296,6 +533,14 @@ def get_dataset(name: str) -> DatasetDetail:
         manifest = load_dataset_manifest(_corpora_dir(), name)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if manifest.get("format") != "jsonl":
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                f"Dataset {name!r} uses a legacy on-disk format. "
+                "Re-import as JSONL (e.g. POST /datasets/import/brat) or remove the directory."
+            ),
+        )
     return _manifest_to_detail(manifest)
 
 
@@ -338,8 +583,6 @@ def get_dataset_schema(name: str) -> DatasetSchemaResponse:
     Uses cached manifest analytics when available; otherwise loads documents once
     to compute ``label_counts``.
     """
-    from clinical_deid.analytics.stats import compute_dataset_analytics
-
     ds_dir = _corpora_dir()
     try:
         manifest = load_dataset_manifest(ds_dir, name)
@@ -380,13 +623,39 @@ def refresh_dataset_analytics(name: str) -> DatasetDetail:
     return _manifest_to_detail(manifest)
 
 
-@router.get("/{name}/preview", response_model=list[DocumentPreview])
+@router.get("/{name}/analytics", response_model=DatasetAnalytics)
+def get_dataset_subset_analytics(
+    name: str,
+    split: str | None = Query(
+        default=None,
+        description="Omit for whole-corpus stats. A split name, or (none) for documents without split.",
+    ),
+) -> DatasetAnalytics:
+    """Recompute dataset-level analytics for the whole corpus or one split bucket."""
+    from clinical_deid.transform.ops import filter_documents_by_split_query
+
+    try:
+        docs = load_dataset_documents(_corpora_dir(), name)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if split is not None and str(split).strip() != "":
+        docs = filter_documents_by_split_query(docs, [str(split).strip()])
+    return compute_dataset_analytics(docs)
+
+
+@router.get("/{name}/preview", response_model=DatasetPreviewResponse)
 def preview_dataset(
     name: str,
     limit: int = Query(default=10, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
-) -> list[DocumentPreview]:
-    """Preview documents from a dataset (paginated)."""
+    splits: str | None = Query(
+        default=None,
+        description="Comma-separated split names; omit for all. Use (none) for documents without split.",
+    ),
+) -> DatasetPreviewResponse:
+    """Preview documents from a dataset (paginated, optional split filter)."""
+    from clinical_deid.transform.ops import filter_documents_by_split_query
+
     try:
         docs = load_dataset_documents(_corpora_dir(), name)
     except FileNotFoundError as exc:
@@ -394,17 +663,25 @@ def preview_dataset(
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to load dataset: {exc}") from exc
 
-    page = docs[offset : offset + limit]
+    wanted = _parse_splits_query(splits)
+    filtered = filter_documents_by_split_query(docs, wanted)
+    total = len(filtered)
+    page = filtered[offset : offset + limit]
     max_text = 500
-    return [
-        DocumentPreview(
-            document_id=d.document.id,
-            text_preview=d.document.text[:max_text] + ("..." if len(d.document.text) > max_text else ""),
-            span_count=len(d.spans),
-            labels=sorted(set(s.label for s in d.spans)),
+    items: list[DocumentPreview] = []
+    for d in page:
+        sp = d.document.metadata.get("split")
+        split_out = sp.strip() if isinstance(sp, str) and sp.strip() else None
+        items.append(
+            DocumentPreview(
+                document_id=d.document.id,
+                text_preview=d.document.text[:max_text] + ("..." if len(d.document.text) > max_text else ""),
+                span_count=len(d.spans),
+                labels=sorted(set(s.label for s in d.spans)),
+                split=split_out,
+            )
         )
-        for d in page
-    ]
+    return DatasetPreviewResponse(items=items, total=total)
 
 
 @router.get("/{name}/documents/{doc_id}")
@@ -426,14 +703,77 @@ def get_document(name: str, doc_id: str) -> dict[str, Any]:
     raise HTTPException(status_code=404, detail=f"Document {doc_id!r} not found in dataset {name!r}")
 
 
+class UpdateDocumentRequest(BaseModel):
+    """Replace a document's spans (and optionally its text).
+
+    Concurrency: v1 is last-write-wins; two concurrent ``PUT``s for the same
+    ``doc_id`` can race. Add an ETag / revision field if stricter semantics become
+    necessary.
+    """
+
+    spans: list[dict[str, Any]] = Field(default_factory=list)
+    text: str | None = None
+
+
+class UpdateDocumentResponse(BaseModel):
+    document_id: str
+    text: str
+    metadata: dict[str, Any]
+    spans: list[dict[str, Any]]
+
+
+@router.put(
+    "/{name}/documents/{doc_id}",
+    response_model=UpdateDocumentResponse,
+)
+def update_document_route(
+    name: str, doc_id: str, body: UpdateDocumentRequest
+) -> UpdateDocumentResponse:
+    """Replace a document's spans (and optionally text). Rewrites ``corpus.jsonl`` atomically."""
+    from clinical_deid.dataset_store import update_document as store_update_document
+
+    try:
+        updated = store_update_document(
+            _corpora_dir(),
+            name,
+            doc_id,
+            spans=body.spans,
+            text=body.text,
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except KeyError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Document {doc_id!r} not found in dataset {name!r}",
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    return UpdateDocumentResponse(
+        document_id=updated.document.id,
+        text=updated.document.text,
+        metadata=updated.document.metadata,
+        spans=[s.model_dump() for s in updated.spans],
+    )
+
+
 # ---------------------------------------------------------------------------
 # Export endpoint
 # ---------------------------------------------------------------------------
 
 
 class ExportTrainingRequest(BaseModel):
-    format: Literal["conll", "spacy", "huggingface", "brat"] = "conll"
+    format: Literal["conll", "spacy", "huggingface", "brat", "jsonl"] = "conll"
     filename: str | None = None
+    target_text: Literal["original", "surrogate"] = Field(
+        default="original",
+        description=(
+            "When 'surrogate', run surrogate alignment on each doc before exporting "
+            "(text and spans both point at the surrogate)."
+        ),
+    )
+    surrogate_seed: int | None = None
 
 
 class ExportTrainingResponse(BaseModel):
@@ -441,16 +781,62 @@ class ExportTrainingResponse(BaseModel):
     format: str
     document_count: int
     total_spans: int
+    target_text: Literal["original", "surrogate"] = "original"
+
+
+def _surrogate_project_docs(
+    docs: list[Any], *, seed: int | None
+) -> list[Any]:
+    """Return a new list of ``AnnotatedDocument`` with surrogate text + aligned spans."""
+    from clinical_deid.domain import AnnotatedDocument
+    try:
+        from clinical_deid.pipes.surrogate.align import surrogate_text_with_spans
+    except ImportError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Surrogate export requires faker: {exc}",
+        ) from exc
+
+    offenders: list[str] = []
+    projected: list[AnnotatedDocument] = []
+    for d in docs:
+        try:
+            new_text, new_spans = surrogate_text_with_spans(
+                d.document.text, list(d.spans), seed=seed
+            )
+        except ValueError:
+            offenders.append(d.document.id)
+            continue
+        projected.append(
+            AnnotatedDocument(
+                document=d.document.model_copy(update={"text": new_text}),
+                spans=new_spans,
+            )
+        )
+    if offenders:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "Overlapping spans prevent surrogate alignment for "
+                f"{len(offenders)} document(s): {offenders[:10]}"
+                + ("…" if len(offenders) > 10 else "")
+            ),
+        )
+    return projected
 
 
 @router.post("/{name}/export", response_model=ExportTrainingResponse, status_code=200)
 def export_dataset(name: str, body: ExportTrainingRequest) -> ExportTrainingResponse:
     """Export a registered dataset to a downstream format.
 
-    - ``conll`` / ``spacy`` / ``huggingface``: training formats
+    - ``conll`` / ``spacy`` / ``huggingface`` / ``jsonl``: training / annotated formats
     - ``brat``: flat BRAT folder of ``.txt`` / ``.ann`` pairs (for external tools)
 
-    Output goes under ``$CORPORA_DIR/{name}_export/``.
+    Output goes under ``$EXPORTS_DIR/{name}/`` — kept out of ``$CORPORA_DIR`` so the
+    corpora root stays canonical (JSONL only).
+
+    Pass ``target_text="surrogate"`` to write surrogate-aligned text/spans instead
+    of the original corpus text. Set ``surrogate_seed`` for determinism.
     """
     from clinical_deid.ingest.sink import write_annotated_corpus
     from clinical_deid.training_export import export_training_data
@@ -464,7 +850,11 @@ def export_dataset(name: str, body: ExportTrainingRequest) -> ExportTrainingResp
     if not docs:
         raise HTTPException(status_code=422, detail=f"Dataset {name!r} has no documents")
 
-    output_dir = get_settings().corpora_dir / f"{name}_export"
+    if body.target_text == "surrogate":
+        docs = _surrogate_project_docs(docs, seed=body.surrogate_seed)
+
+    output_dir = get_settings().exports_dir / name
+    output_dir.mkdir(parents=True, exist_ok=True)
     try:
         if body.format == "brat":
             write_annotated_corpus(docs, brat_dir=output_dir)
@@ -480,6 +870,7 @@ def export_dataset(name: str, body: ExportTrainingRequest) -> ExportTrainingResp
         format=body.format,
         document_count=len(docs),
         total_spans=total_spans,
+        target_text=body.target_text,
     )
 
 
@@ -571,34 +962,35 @@ def compose_datasets(body: ComposeRequest) -> DatasetDetail:
 @router.post("/transform/preview", response_model=TransformPreviewResponse)
 def preview_transform_dataset(body: TransformPreviewRequest) -> TransformPreviewResponse:
     """Dry-run transform: span keep/drop/rename counts and projected corpus size."""
-    from clinical_deid.transform.ops import compute_transform_preview
+    from clinical_deid.transform.ops import compute_transform_preview, get_work_and_rest
 
     corp = _corpora_dir()
     try:
-        docs = load_dataset_documents(corp, body.source_dataset)
+        all_docs = load_dataset_documents(corp, body.source_dataset)
     except FileNotFoundError:
         raise HTTPException(
             status_code=404,
             detail=f"Source dataset {body.source_dataset!r} not found",
         ) from None
-    if not docs:
+    if not all_docs:
         raise HTTPException(
             status_code=422,
             detail=f"Source dataset {body.source_dataset!r} is empty",
         )
 
-    docs = _apply_source_splits_or_422(
-        docs,
-        body.source_splits,
-        empty_detail=(
-            f"No documents match source_splits for dataset {body.source_dataset!r}; "
-            "set metadata['split'] on documents or adjust the filter."
-        ),
-    )
+    work, rest = get_work_and_rest(all_docs, body.source_splits)
+    if body.source_splits and any(str(s).strip() for s in body.source_splits) and not work:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"No documents match source_splits for dataset {body.source_dataset!r}; "
+                "set metadata['split'] on documents or adjust the filter."
+            ),
+        )
 
     try:
         raw = compute_transform_preview(
-            docs,
+            work,
             drop_labels=body.drop_labels,
             keep_labels=body.keep_labels,
             label_mapping=body.label_mapping,
@@ -608,16 +1000,24 @@ def preview_transform_dataset(body: TransformPreviewRequest) -> TransformPreview
             resplit=body.resplit,
             strip_splits=body.strip_splits,
             seed=body.seed,
+            transform_mode=body.transform_mode,
+            resplit_shuffle=body.resplit_shuffle,
+            flatten_before_resplit=body.flatten_target_splits,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
+    n_rest = len(rest)
+    raw["untouched_document_count"] = n_rest
+    raw["projected_document_count"] = int(raw["projected_document_count"]) + n_rest
     return TransformPreviewResponse(**raw)
 
 
 @router.post("/transform", response_model=DatasetDetail, status_code=201)
-def transform_dataset(body: TransformRequest) -> DatasetDetail:
-    """Apply transforms to a dataset and register the result.
+def transform_dataset(
+    body: TransformRequest, response: Response
+) -> DatasetDetail:
+    """Apply transforms to a dataset and register the result (new dataset) or update in place.
 
     Available transforms (applied in order):
     1. **drop_labels** / **keep_labels** — filter spans by label
@@ -626,59 +1026,86 @@ def transform_dataset(body: TransformRequest) -> DatasetDetail:
     4. **boost_label** + **boost_extra_copies** — oversample docs with a rare label
     5. **resplit** — reassign train/valid/test splits (e.g. ``{"train": 0.7, "valid": 0.15, "test": 0.15}``)
     6. **strip_splits** — remove split metadata for flat corpus
+
+    Set **in_place** to true to write back to the source dataset (same name and path); new datasets require a unique
+    **output_name** when in_place is false.
     """
     from clinical_deid.ingest.sink import write_annotated_corpus
-    from clinical_deid.transform.ops import run_transform_pipeline
+    from clinical_deid.transform.ops import get_work_and_rest, merge_rest_work, run_transform_by_mode
 
     corp = _corpora_dir()
 
-    # Check output name not taken
+    if not body.in_place and not (body.output_name and str(body.output_name).strip()):
+        raise HTTPException(
+            status_code=422,
+            detail="output_name is required when not transforming in place",
+        )
+    out_name = body.source_dataset if body.in_place else str(body.output_name).strip()
+    if not out_name and body.in_place:
+        raise HTTPException(status_code=422, detail="source_dataset is required for in-place transform")
+
+    # Check output name not taken (new dataset only)
     existing = [d.name for d in list_datasets(corp)]
-    if body.output_name in existing:
-        raise HTTPException(status_code=409, detail=f"Dataset {body.output_name!r} already exists")
+    if not body.in_place and out_name in existing:
+        raise HTTPException(status_code=409, detail=f"Dataset {out_name!r} already exists")
 
     # Load source
     try:
-        docs = load_dataset_documents(corp, body.source_dataset)
+        all_docs = load_dataset_documents(corp, body.source_dataset)
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail=f"Source dataset {body.source_dataset!r} not found")
 
-    if not docs:
+    if not all_docs:
         raise HTTPException(status_code=422, detail=f"Source dataset {body.source_dataset!r} is empty")
 
-    docs = _apply_source_splits_or_422(
-        docs,
-        body.source_splits,
-        empty_detail=(
-            f"No documents match source_splits for dataset {body.source_dataset!r}; "
-            "set metadata['split'] on documents or adjust the filter."
-        ),
-    )
+    work, rest = get_work_and_rest(all_docs, body.source_splits)
+    if body.source_splits and any(str(s).strip() for s in body.source_splits) and not work:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"No documents match source_splits for dataset {body.source_dataset!r}; "
+                "set metadata['split'] on documents or adjust the filter."
+            ),
+        )
 
-    # Apply transforms
-    transformed = run_transform_pipeline(
-        docs,
-        drop_labels=body.drop_labels,
-        keep_labels=body.keep_labels,
-        label_mapping=body.label_mapping,
-        target_documents=body.target_documents,
-        boost_label=body.boost_label,
-        boost_extra_copies=body.boost_extra_copies,
-        resplit=body.resplit,
-        strip_splits=body.strip_splits,
-        seed=body.seed,
-    )
+    try:
+        work_out = run_transform_by_mode(
+            work,
+            body.transform_mode,
+            drop_labels=body.drop_labels,
+            keep_labels=body.keep_labels,
+            label_mapping=body.label_mapping,
+            target_documents=body.target_documents,
+            boost_label=body.boost_label,
+            boost_extra_copies=body.boost_extra_copies,
+            resplit=body.resplit,
+            strip_splits=body.strip_splits,
+            seed=body.seed,
+            resplit_shuffle=body.resplit_shuffle,
+            flatten_before_resplit=body.flatten_target_splits,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    transformed = merge_rest_work(rest, work_out)
 
     if not transformed:
         raise HTTPException(status_code=422, detail="Transform produced no documents")
 
     settings = get_settings()
-    home = settings.corpora_dir / body.output_name
-    home.mkdir(parents=True)
+    home = settings.corpora_dir / out_name
+    if not body.in_place:
+        home.mkdir(parents=True)
+    else:
+        if not home.is_dir() or not (home / CORPUS_JSONL_NAME).is_file():
+            raise HTTPException(
+                status_code=404,
+                detail=f"Cannot transform in place: dataset {out_name!r} has no corpus on disk",
+            )
     output_path = home / CORPUS_JSONL_NAME
     write_annotated_corpus(transformed, jsonl=output_path)
 
-    provenance: dict[str, Any] = {"transformed_from": body.source_dataset}
+    transform_provenance: dict[str, Any] = {"transformed_from": body.source_dataset}
     for field in (
         "source_splits",
         "drop_labels", "keep_labels", "label_mapping", "target_documents",
@@ -686,15 +1113,51 @@ def transform_dataset(body: TransformRequest) -> DatasetDetail:
     ):
         val = getattr(body, field)
         if val and val != 0:
-            provenance[field] = val
+            transform_provenance[field] = val
+    if body.transform_mode != "full":
+        transform_provenance["transform_mode"] = body.transform_mode
+    if not body.resplit_shuffle:
+        transform_provenance["resplit_shuffle"] = False
+    if body.flatten_target_splits:
+        transform_provenance["flatten_target_splits"] = True
+    transform_provenance["in_place"] = body.in_place
 
-    manifest = commit_colocated_dataset(
-        settings.corpora_dir,
-        body.output_name,
-        "jsonl",
-        description=body.description or f"Transformed from: {body.source_dataset}",
-        metadata={"provenance": provenance},
-    )
+    if body.in_place:
+        existing = load_dataset_manifest(corp, out_name)
+        old_desc = (existing.get("description") or "") if isinstance(existing, dict) else ""
+        if body.description and str(body.description).strip():
+            desc = str(body.description).strip()
+        else:
+            desc = old_desc
+        old_meta: dict[str, Any] = {}
+        if isinstance(existing, dict) and existing.get("metadata") and isinstance(
+            existing.get("metadata"), dict
+        ):
+            old_meta = dict(existing["metadata"])
+        old_prov = old_meta.get("provenance")
+        if not isinstance(old_prov, dict):
+            old_prov = {}
+        new_meta: dict[str, Any] = {
+            **old_meta,
+            "provenance": {**old_prov, "last_transform": transform_provenance, "transformed_in_place": True},
+        }
+        manifest = commit_colocated_dataset(
+            settings.corpora_dir,
+            out_name,
+            "jsonl",
+            description=desc,
+            metadata=new_meta,
+        )
+        response.status_code = 200
+    else:
+        manifest = commit_colocated_dataset(
+            settings.corpora_dir,
+            out_name,
+            "jsonl",
+            description=body.description or f"Transformed from: {body.source_dataset}",
+            metadata={"provenance": transform_provenance},
+        )
+        response.status_code = 201
     return _manifest_to_detail(manifest)
 
 

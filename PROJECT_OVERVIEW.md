@@ -52,8 +52,7 @@ FastAPI backend with SQLite for audit only, React + TypeScript frontend. Python 
 | **LLM synthesis** | Few-shot clinical note generation via OpenAI-compatible API. Prompt templates, PHI extraction, span alignment. |
 | **Playground UI** | React + TypeScript (Vite, Tailwind). 7 views: pipeline builder, inference, eval dashboard, datasets, dictionaries, deploy config, audit log viewer. |
 | **Dataset API + CLI** | REST API: register, browse, compose, transform, LLM generate. CLI: `dataset list/register/show/delete`. |
-| **Deploy config** | Inference modes mapped to pipelines, pipeline allowlist, production API URL — managed via UI and `data/modes.json`. |
-| **Audit production proxy** | Playground UI can view remote production audit logs via `/audit/production/*` proxy endpoints. |
+| **Deploy config** | Inference modes mapped to pipelines and pipeline allowlist — managed via UI and `data/modes.json`. |
 | **Tests** | 27+ test files covering API, ingestion, analytics, transforms, synthesis, config, compose, pipeline execution, span resolution, datasets, eval. |
 
 ### Training and models
@@ -120,7 +119,7 @@ The `AuditLogRecord` table schema:
 | `span_count` | int | Total spans detected |
 | `duration_seconds` | float | Wall-clock time |
 | `metrics` | JSON | Eval metrics or span counts |
-| `source` | str | e.g. `cli`, `api`, `production-api` |
+| `source` | str | e.g. `cli`, `api-admin`, `api-inference` |
 | `client_id` | str | Hashed API key id when auth is used |
 | `output_mode` | str | `annotated` / `redacted` / `surrogate` when applicable |
 | `service_type` | str | e.g. `inference`, `batch`, `scrub`, `redact` |
@@ -228,9 +227,6 @@ Multiple detectors then consensus merge (no `parallel` pipe type — use a linea
 | `GET` | `/audit/logs` | Query audit trail (paginated, filtered) |
 | `GET` | `/audit/logs/{id}` | Audit log detail |
 | `GET` | `/audit/stats` | Aggregate stats |
-| `GET` | `/audit/production/logs` | Proxy production audit logs |
-| `GET` | `/audit/production/logs/{id}` | Proxy production log detail |
-| `GET` | `/audit/production/stats` | Proxy production stats |
 | `GET` | `/deploy` | Get deploy config (modes + allowlist) |
 | `PUT` | `/deploy` | Update deploy config |
 | `GET` | `/deploy/pipelines` | List deployable pipeline names |
@@ -291,7 +287,6 @@ src/clinical_deid/
       datasets.py            # Dataset register/browse/compose/transform/generate
       dictionaries.py        # Dictionary CRUD (upload, list, preview, delete)
       audit.py               # Audit log query + stats
-      audit_proxy.py         # Proxy production audit endpoints
       deploy.py              # Deploy config (modes, allowlist)
       models.py              # Model listing (filesystem-backed)
   eval/

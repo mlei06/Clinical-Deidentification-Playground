@@ -4,6 +4,8 @@ Supported formats:
 - **conll**: CoNLL-2003 style (token per line, BIO tags), widely used for NER evaluation
 - **spacy**: spaCy v3 DocBin binary, ready for ``spacy train``
 - **huggingface**: HuggingFace token-classification JSONL (tokens + ner_tags)
+- **jsonl**: Annotated JSONL — one ``AnnotatedDocument`` per line; round-trips
+  through ``POST /datasets`` for re-registration.
 
 All exporters accept ``list[AnnotatedDocument]`` and write to a directory.
 """
@@ -199,15 +201,39 @@ def write_huggingface(
 
 
 # ---------------------------------------------------------------------------
+# Annotated JSONL export (round-trips through POST /datasets)
+# ---------------------------------------------------------------------------
+
+
+def to_annotated_jsonl(docs: list[AnnotatedDocument]) -> str:
+    """Serialize documents as one ``AnnotatedDocument`` JSON object per line."""
+    return "\n".join(d.model_dump_json() for d in docs)
+
+
+def export_annotated_jsonl(
+    docs: list[AnnotatedDocument],
+    output_dir: Path,
+    *,
+    filename: str = "train.jsonl",
+) -> Path:
+    """Write documents to an annotated JSONL file in *output_dir*."""
+    output_dir.mkdir(parents=True, exist_ok=True)
+    path = output_dir / filename
+    path.write_text(to_annotated_jsonl(docs) + "\n", encoding="utf-8")
+    return path
+
+
+# ---------------------------------------------------------------------------
 # Unified export interface
 # ---------------------------------------------------------------------------
 
-FORMATS = ("conll", "spacy", "huggingface")
+FORMATS = ("conll", "spacy", "huggingface", "jsonl")
 
 _WRITERS = {
     "conll": write_conll,
     "spacy": write_spacy,
     "huggingface": write_huggingface,
+    "jsonl": export_annotated_jsonl,
 }
 
 

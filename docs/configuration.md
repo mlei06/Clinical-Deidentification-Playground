@@ -17,10 +17,17 @@ All mutable state defaults to `./data/` (one host volume in production) and mode
 | `CLINICAL_DEID_INFERENCE_RUNS_DIR` | `data/inference_runs` | Batch inference output directory |
 | `CLINICAL_DEID_DICTIONARIES_DIR` | `data/dictionaries` | Whitelist/blacklist term-list files |
 | `CLINICAL_DEID_MODELS_DIR` | `models` | Root directory for model registry |
-| `CLINICAL_DEID_CORPORA_DIR` | `data/corpora` | Dataset directories: ``<name>/dataset.json`` + ``corpus.jsonl`` or BRAT files; also `{name}_export/` for training exports |
+| `CLINICAL_DEID_CORPORA_DIR` | `data/corpora` | Dataset homes: ``<name>/corpus.jsonl`` (canonical) + ``dataset.json`` (cached stats). **JSONL-only**; BRAT is converted in, not stored as the on-disk layout |
+| `CLINICAL_DEID_EXPORTS_DIR` | `data/exports` | Default output for `POST /datasets/{name}/export` and for `clinical-deid dataset export --format brat` (kept outside `corpora/`) |
 | `CLINICAL_DEID_ENV_FILE` | _(auto-detected)_ | Explicit path to `.env` file |
 
 `CLINICAL_DEID_PROCESSED_DIR` is a deprecated alias for `CLINICAL_DEID_CORPORA_DIR` — still honored with a warning.
+
+**Ingest safety:** `POST /datasets/ingest-from-pipeline` requires `source_path`
+to resolve under `CLINICAL_DEID_CORPORA_DIR`. Absolute paths and paths
+traversing via `..` are rejected with 400; symlinks are resolved before the
+boundary check so a symlink inside the root pointing outside will also be
+rejected.
 
 ### HTTP / auth
 
@@ -53,7 +60,7 @@ List-valued variables must be JSON arrays, e.g. `CLINICAL_DEID_CORS_ORIGINS='["h
 
 The API has two scopes:
 
-- **`admin`** — full access: pipeline CRUD, dictionaries, deploy config (`GET`/`PUT` `/deploy`, `GET` `/deploy/pipelines`), datasets, evaluation, models, audit proxy, and all `/process/*` routes. Admin keys also satisfy `inference`-scoped checks.
+- **`admin`** — full access: pipeline CRUD, dictionaries, deploy config (`GET`/`PUT` `/deploy`, `GET` `/deploy/pipelines`), datasets, evaluation, models, and all `/process/*` routes. Admin keys also satisfy `inference`-scoped checks.
 - **`inference`** — least privilege for integrators and the Production UI:
   - `POST /process/*` (including `/process/redact`, `/process/scrub`), subject to the deploy allowlist in `data/modes.json` (admins bypass the allowlist).
   - `POST /pipelines/pipe-types/{name}/labels` (label-space compute; no filesystem writes).
@@ -162,7 +169,7 @@ CORS middleware allows requests from origins in `CLINICAL_DEID_CORS_ORIGINS` (de
 
 ## Deploy configuration
 
-Production deploy settings are stored in `data/modes.json`. This file is managed via the `/deploy` API endpoints and the Deploy tab in the UI. It maps inference mode names to pipelines, defines an optional pipeline allowlist, and stores the production API URL for audit log proxying.
+Production deploy settings are stored in `data/modes.json`. This file is managed via the `/deploy` API endpoints and the Deploy tab in the UI. It maps inference mode names to pipelines and defines an optional pipeline allowlist applied to inference-scoped `/process/*` calls.
 
 In Docker Compose, mount `./data` **writable** if operators use `PUT /deploy` from the Playground; a read-only mount blocks saving deploy changes.
 

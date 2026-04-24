@@ -32,7 +32,7 @@ class AuditLogRecord(SQLModel, table=True):
     span_count: int = 0
     duration_seconds: float = 0.0
     metrics: dict[str, Any] = Field(sa_column=Column(JSON), default_factory=dict)
-    source: str = "cli"  # "cli" or "api"
+    source: str = "cli"  # "cli", "api-admin", or "api-inference"
     client_id: str = ""  # identifying the calling service (X-Client-ID header)
     output_mode: str = ""  # "annotated", "redacted", "surrogate"
     service_type: str = ""  # "inference", "scrub", "batch", "redact", "assist"

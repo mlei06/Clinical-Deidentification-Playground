@@ -11,6 +11,17 @@ from typing import Any
 
 from clinical_deid.tables import AuditLogRecord
 
+# Common ``command`` values used across CLI and HTTP callers. Kept open: new
+# entry points may introduce new commands. Audit UIs must not assume a closed
+# allowlist — they should display unknown commands verbatim.
+COMMAND_RUN = "run"
+COMMAND_BATCH = "batch"
+COMMAND_EVAL = "eval"
+COMMAND_PROCESS = "process"
+COMMAND_PROCESS_BATCH = "process_batch"
+COMMAND_DATASET_INGEST = "dataset_ingest"
+COMMAND_DATASET_EXPORT_SURROGATE = "dataset_export_surrogate"
+
 
 def log_run(
     *,

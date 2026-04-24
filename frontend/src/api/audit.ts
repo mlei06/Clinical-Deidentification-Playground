@@ -1,8 +1,6 @@
 import { apiFetch } from './client';
 import type { AuditLogDetail, AuditLogSummary, AuditStats } from './types';
 
-export type AuditSource = 'local' | 'production';
-
 export interface AuditLogFilters {
   pipeline_name?: string;
   source?: string;
@@ -11,10 +9,6 @@ export interface AuditLogFilters {
   to_date?: string;
   limit?: number;
   offset?: number;
-}
-
-function basePath(src: AuditSource): string {
-  return src === 'production' ? '/audit/production' : '/audit';
 }
 
 function buildQs(params: Record<string, string | number | undefined>): string {
@@ -26,20 +20,16 @@ function buildQs(params: Record<string, string | number | undefined>): string {
   return s ? `?${s}` : '';
 }
 
-export function listAuditLogs(
-  filters: AuditLogFilters = {},
-  source: AuditSource = 'local',
-): Promise<AuditLogSummary[]> {
-  return apiFetch(`${basePath(source)}/logs${buildQs(filters as Record<string, string | number | undefined>)}`);
+export function listAuditLogs(filters: AuditLogFilters = {}): Promise<AuditLogSummary[]> {
+  return apiFetch(`/audit/logs${buildQs(filters as Record<string, string | number | undefined>)}`);
 }
 
-export function getAuditLog(id: string, source: AuditSource = 'local'): Promise<AuditLogDetail> {
-  return apiFetch(`${basePath(source)}/logs/${encodeURIComponent(id)}`);
+export function getAuditLog(id: string): Promise<AuditLogDetail> {
+  return apiFetch(`/audit/logs/${encodeURIComponent(id)}`);
 }
 
 export function getAuditStats(
   filters: { pipeline_name?: string; source?: string } = {},
-  source: AuditSource = 'local',
 ): Promise<AuditStats> {
-  return apiFetch(`${basePath(source)}/stats${buildQs(filters)}`);
+  return apiFetch(`/audit/stats${buildQs(filters)}`);
 }

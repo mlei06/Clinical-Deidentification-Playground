@@ -2,18 +2,23 @@ import { apiFetch } from './client';
 import type {
   DatasetSummary,
   DatasetDetail,
-  DocumentPreview,
   DocumentDetail,
   RegisterDatasetRequest,
+  ImportBratRequest,
   ImportSourcesResponse,
+  BratImportSourcesResponse,
+  RefreshResultEntry,
   ComposeRequest,
   TransformRequest,
   TransformPreviewRequest,
   TransformPreviewResponse,
   DatasetSchemaResponse,
+  DatasetPreviewResponse,
+  DatasetAnalytics,
   GenerateRequest,
   ExportTrainingRequest,
   ExportTrainingResponse,
+  UpdateDocumentRequest,
 } from './types';
 
 export function listDatasets(params?: {
@@ -39,8 +44,16 @@ export function registerDataset(req: RegisterDatasetRequest): Promise<DatasetDet
   return apiFetch('/datasets', { method: 'POST', body: JSON.stringify(req) });
 }
 
+export function importBrat(req: ImportBratRequest): Promise<DatasetDetail> {
+  return apiFetch('/datasets/import/brat', { method: 'POST', body: JSON.stringify(req) });
+}
+
 export function listImportSources(): Promise<ImportSourcesResponse> {
   return apiFetch('/datasets/import-sources');
+}
+
+export function listBratImportSources(): Promise<BratImportSourcesResponse> {
+  return apiFetch('/datasets/import-sources/brat');
 }
 
 export function updateDataset(
@@ -61,13 +74,32 @@ export function refreshDatasetAnalytics(name: string): Promise<DatasetDetail> {
   return apiFetch(`/datasets/${encodeURIComponent(name)}/refresh`, { method: 'POST' });
 }
 
+export function refreshAllDatasets(): Promise<RefreshResultEntry[]> {
+  return apiFetch('/datasets/refresh-all', { method: 'POST' });
+}
+
+export function getDatasetAnalytics(
+  name: string,
+  params?: { split?: string | null },
+): Promise<DatasetAnalytics> {
+  const qs = new URLSearchParams();
+  if (params?.split != null && params.split !== '') {
+    qs.set('split', params.split);
+  }
+  const q = qs.toString();
+  return apiFetch(`/datasets/${encodeURIComponent(name)}/analytics${q ? `?${q}` : ''}`);
+}
+
 export function previewDataset(
   name: string,
-  params?: { limit?: number; offset?: number },
-): Promise<DocumentPreview[]> {
+  params?: { limit?: number; offset?: number; splits?: string[] | null },
+): Promise<DatasetPreviewResponse> {
   const qs = new URLSearchParams();
   if (params?.limit) qs.set('limit', String(params.limit));
   if (params?.offset) qs.set('offset', String(params.offset));
+  if (params?.splits && params.splits.length > 0) {
+    qs.set('splits', params.splits.join(','));
+  }
   const q = qs.toString();
   return apiFetch(`/datasets/${encodeURIComponent(name)}/preview${q ? `?${q}` : ''}`);
 }
@@ -75,6 +107,17 @@ export function previewDataset(
 export function getDocument(name: string, docId: string): Promise<DocumentDetail> {
   return apiFetch(
     `/datasets/${encodeURIComponent(name)}/documents/${encodeURIComponent(docId)}`,
+  );
+}
+
+export function updateDocument(
+  name: string,
+  docId: string,
+  body: UpdateDocumentRequest,
+): Promise<DocumentDetail> {
+  return apiFetch(
+    `/datasets/${encodeURIComponent(name)}/documents/${encodeURIComponent(docId)}`,
+    { method: 'PUT', body: JSON.stringify(body) },
   );
 }
 

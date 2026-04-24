@@ -1,9 +1,7 @@
 import { useState } from 'react';
-import { Loader2, ChevronDown, ChevronRight, Activity, Clock, FileText, Hash, Globe, Monitor, AlertCircle } from 'lucide-react';
+import { Loader2, ChevronDown, ChevronRight, Activity, Clock, FileText, Hash } from 'lucide-react';
 import { clsx } from 'clsx';
 import { useAuditLogs, useAuditLog, useAuditStats } from '../../hooks/useAudit';
-import { useDeployConfig } from '../../hooks/useDeploy';
-import type { AuditSource } from '../../api/audit';
 import type { AuditLogSummary } from '../../api/types';
 
 function StatCard({
@@ -38,10 +36,6 @@ function formatTimestamp(ts: string): string {
 }
 
 export default function AuditView() {
-  const { data: deployConfig } = useDeployConfig();
-  const hasProductionUrl = !!deployConfig?.production_api_url;
-
-  const [auditSource, setAuditSource] = useState<AuditSource>('local');
   const [pipelineFilter, setPipelineFilter] = useState('');
   const [sourceFilter, setSourceFilter] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -55,86 +49,28 @@ export default function AuditView() {
     offset: page * pageSize,
   };
 
-  const { data: logs = [], isLoading: logsLoading, isError: logsError, error: logsErrorObj } = useAuditLogs(filters, auditSource);
-  const { data: stats } = useAuditStats(
-    { pipeline_name: pipelineFilter || undefined, source: sourceFilter || undefined },
-    auditSource,
-  );
-  const { data: detail, isLoading: detailLoading } = useAuditLog(selectedId, auditSource);
-
-  const resetFilters = () => {
-    setSelectedId(null);
-    setPage(0);
-  };
+  const { data: logs = [], isLoading: logsLoading } = useAuditLogs(filters);
+  const { data: stats } = useAuditStats({
+    pipeline_name: pipelineFilter || undefined,
+    source: sourceFilter || undefined,
+  });
+  const { data: detail, isLoading: detailLoading } = useAuditLog(selectedId);
 
   return (
     <div className="flex h-full">
       {/* Main content */}
       <div className="flex-1 overflow-y-auto">
         <div className="p-6 space-y-6">
-          {/* Header + source toggle */}
-          <div className="flex items-start justify-between">
-            <div>
-              <h1 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
-                <Activity size={20} />
-                Audit Log
-              </h1>
-              <p className="mt-1 text-sm text-gray-500">
-                Monitor pipeline usage, performance, and client activity.
-              </p>
-            </div>
-
-            {/* Source toggle — only show when production URL is configured */}
-            {hasProductionUrl && (
-              <div className="flex rounded-lg border border-gray-200 bg-white overflow-hidden">
-                <button
-                  onClick={() => { setAuditSource('local'); resetFilters(); }}
-                  className={clsx(
-                    'flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium transition-colors',
-                    auditSource === 'local'
-                      ? 'bg-gray-900 text-white'
-                      : 'text-gray-600 hover:bg-gray-50',
-                  )}
-                >
-                  <Monitor size={14} />
-                  Local
-                </button>
-                <button
-                  onClick={() => { setAuditSource('production'); resetFilters(); }}
-                  className={clsx(
-                    'flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium transition-colors',
-                    auditSource === 'production'
-                      ? 'bg-green-700 text-white'
-                      : 'text-gray-600 hover:bg-gray-50',
-                  )}
-                >
-                  <Globe size={14} />
-                  Production
-                </button>
-              </div>
-            )}
+          {/* Header */}
+          <div>
+            <h1 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+              <Activity size={20} />
+              Audit Log
+            </h1>
+            <p className="mt-1 text-sm text-gray-500">
+              Monitor pipeline usage, performance, and client activity.
+            </p>
           </div>
-
-          {/* Connection error banner */}
-          {logsError && auditSource === 'production' && (
-            <div className="flex items-start gap-2 rounded-md bg-red-50 border border-red-200 p-3 text-sm text-red-700">
-              <AlertCircle size={16} className="mt-0.5 shrink-0" />
-              <div>
-                <p className="font-medium">Cannot reach production API</p>
-                <p className="mt-0.5 text-xs text-red-600">
-                  {(logsErrorObj as Error)?.message ?? 'Connection failed'}. Check the production URL in the Deploy tab.
-                </p>
-              </div>
-            </div>
-          )}
-
-          {/* Source indicator for production */}
-          {auditSource === 'production' && !logsError && (
-            <div className="flex items-center gap-2 rounded-md bg-green-50 border border-green-200 px-3 py-2 text-sm text-green-700">
-              <Globe size={14} />
-              Showing logs from production: <span className="font-mono text-xs">{deployConfig?.production_api_url}</span>
-            </div>
-          )}
 
           {/* Stats */}
           {stats && (
@@ -227,8 +163,8 @@ export default function AuditView() {
                 className="mt-0.5 block rounded-md border border-gray-300 px-2 py-1.5 text-sm"
               >
                 <option value="">All sources</option>
-                <option value="api">api</option>
-                <option value="production-api">production-api</option>
+                <option value="api-admin">api-admin</option>
+                <option value="api-inference">api-inference</option>
                 <option value="cli">cli</option>
               </select>
             </label>
@@ -239,13 +175,11 @@ export default function AuditView() {
             <div className="flex justify-center py-8">
               <Loader2 className="animate-spin text-gray-400" size={20} />
             </div>
-          ) : logs.length === 0 && !logsError ? (
+          ) : logs.length === 0 ? (
             <div className="rounded-lg border border-dashed border-gray-300 bg-gray-50 px-4 py-8 text-center text-sm text-gray-400">
-              {auditSource === 'production'
-                ? 'No production audit logs found.'
-                : 'No audit logs found. Run some inference to generate records.'}
+              No audit logs found. Run some inference to generate records.
             </div>
-          ) : !logsError ? (
+          ) : (
             <div className="rounded-lg border border-gray-200 bg-white overflow-hidden">
               <table className="w-full text-sm">
                 <thead>
@@ -312,7 +246,7 @@ export default function AuditView() {
                 </button>
               </div>
             </div>
-          ) : null}
+          )}
         </div>
       </div>
 
@@ -393,9 +327,9 @@ function LogRow({
         <span
           className={clsx(
             'rounded px-1.5 py-0.5 text-xs font-medium',
-            log.source === 'production-api'
+            log.source === 'api-inference'
               ? 'bg-green-100 text-green-700'
-              : log.source === 'api'
+              : log.source === 'api-admin'
                 ? 'bg-blue-100 text-blue-700'
                 : 'bg-gray-100 text-gray-600',
           )}

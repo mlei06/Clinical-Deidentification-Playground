@@ -24,9 +24,14 @@ class Settings(BaseSettings):
     evaluations_dir: Path = Path("data/evaluations")
     inference_runs_dir: Path = Path("data/inference_runs")
     models_dir: Path = Path("models")
-    #: All corpus bytes and per-dataset dirs: ``{corpora_dir}/{name}/dataset.json`` plus
-    #: ``corpus.jsonl`` or BRAT files. API export dirs use ``{corpora_dir}/{name}_export/``.
+    #: Registered dataset homes. JSONL-only: each dataset is
+    #: ``{corpora_dir}/{name}/dataset.json`` plus ``corpus.jsonl``. BRAT is an ingest/export
+    #: format, not a storage layout — see ``exports_dir`` for materialized exports.
     corpora_dir: Path = Path("data/corpora")
+    #: Training / BRAT / sharing exports from ``POST /datasets/{name}/export`` land under
+    #: ``{exports_dir}/{name}/`` — kept separate from ``corpora_dir`` so the corpora root
+    #: stays canonical (JSONL only).
+    exports_dir: Path = Path("data/exports")
     dictionaries_dir: Path = Path("data/dictionaries")
     cors_origins: list[str] = Field(
         default=["http://localhost:3000", "http://127.0.0.1:3000"],

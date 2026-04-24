@@ -120,7 +120,6 @@ export interface EvalRunRequest {
   pipeline_name: string;
   dataset_path?: string;
   dataset_name?: string;
-  dataset_format?: 'jsonl' | 'brat-dir' | 'brat-corpus';
   /** Only documents with metadata.split in this list (optional). */
   dataset_splits?: string[];
 }
@@ -195,7 +194,6 @@ export interface DeployConfig {
   modes: Record<string, ModeEntry>;
   default_mode: string | null;
   allowed_pipelines: string[] | null;
-  production_api_url: string | null;
 }
 
 export interface ModeHealth {
@@ -275,11 +273,13 @@ export interface AuditStats {
 }
 
 // Datasets
+export type DatasetFormat = 'jsonl';
+
 export interface DatasetSummary {
   name: string;
   description: string;
   data_path: string;
-  format: 'jsonl' | 'brat-dir' | 'brat-corpus';
+  format: DatasetFormat;
   document_count: number;
   total_spans: number;
   labels: string[];
@@ -289,6 +289,9 @@ export interface DatasetSummary {
 export interface DatasetDetail extends DatasetSummary {
   analytics: DatasetAnalytics;
   metadata: Record<string, unknown>;
+  /** Documents per `metadata.split`; missing/invalid split → `"(none)"`. */
+  split_document_counts?: Record<string, number>;
+  has_split_metadata?: boolean;
 }
 
 export interface DatasetAnalytics {
@@ -319,6 +322,13 @@ export interface DocumentPreview {
   text_preview: string;
   span_count: number;
   labels: string[];
+  /** Present when the API includes it; may be omitted in older responses. */
+  split?: string | null;
+}
+
+export interface DatasetPreviewResponse {
+  items: DocumentPreview[];
+  total: number;
 }
 
 export interface DocumentDetail {
@@ -328,7 +338,12 @@ export interface DocumentDetail {
   spans: { start: number; end: number; label: string; confidence?: number | null; source?: string | null }[];
 }
 
-export type TrainingExportFormat = 'conll' | 'spacy' | 'huggingface' | 'brat';
+export type TrainingExportFormat = 'conll' | 'spacy' | 'huggingface' | 'brat' | 'jsonl';
+
+export interface UpdateDocumentRequest {
+  spans: { start: number; end: number; label: string; confidence?: number | null; source?: string | null }[];
+  text?: string | null;
+}
 
 export interface ExportTrainingRequest {
   format: TrainingExportFormat;
@@ -345,19 +360,44 @@ export interface ExportTrainingResponse {
 export interface RegisterDatasetRequest {
   name: string;
   data_path: string;
-  format: 'jsonl' | 'brat-dir' | 'brat-corpus';
+  format: DatasetFormat;
+  description?: string;
+}
+
+export interface ImportBratRequest {
+  name: string;
+  brat_path: string;
   description?: string;
 }
 
 export interface ImportSourceCandidate {
   label: string;
   data_path: string;
-  suggested_format: 'jsonl' | 'brat-dir' | 'brat-corpus';
+  suggested_format: DatasetFormat;
 }
 
 export interface ImportSourcesResponse {
   corpora_root: string;
   candidates: ImportSourceCandidate[];
+}
+
+export type BratImportKind = 'brat-dir' | 'brat-corpus';
+
+export interface BratImportCandidate {
+  label: string;
+  data_path: string;
+  kind: BratImportKind;
+}
+
+export interface BratImportSourcesResponse {
+  corpora_root: string;
+  candidates: BratImportCandidate[];
+}
+
+export interface RefreshResultEntry {
+  name: string;
+  status: 'ok' | 'error';
+  error: string | null;
 }
 
 export interface ComposeRequest {
@@ -371,9 +411,14 @@ export interface ComposeRequest {
   description?: string;
 }
 
+export type TransformMode = 'full' | 'schema' | 'sampling' | 'partitioning';
+
 export interface TransformRequest {
   source_dataset: string;
-  output_name: string;
+  /** Required when in_place is false. Ignored when in_place is true. */
+  output_name?: string;
+  /** When true, overwrite the source dataset; output_name is ignored. */
+  in_place?: boolean;
   /** Only include documents whose metadata.split is in this list. */
   source_splits?: string[];
   drop_labels?: string[];
@@ -386,6 +431,10 @@ export interface TransformRequest {
   strip_splits?: boolean;
   seed?: number;
   description?: string;
+  transform_mode?: TransformMode;
+  resplit_shuffle?: boolean;
+  /** Strip split metadata on targeted documents before re-partitioning. */
+  flatten_target_splits?: boolean;
 }
 
 export interface DatasetLabelFrequency {
@@ -412,6 +461,9 @@ export interface TransformPreviewRequest {
   resplit?: Record<string, number>;
   strip_splits?: boolean;
   seed?: number;
+  transform_mode?: TransformMode;
+  resplit_shuffle?: boolean;
+  flatten_target_splits?: boolean;
 }
 
 export interface TransformPreviewResponse {
@@ -423,6 +475,8 @@ export interface TransformPreviewResponse {
   projected_document_count: number;
   projected_span_count: number;
   split_document_counts: Record<string, number> | null;
+  /** Documents not selected by source_splits (if any), unchanged in a full transform. */
+  untouched_document_count?: number;
   conflicts: string[];
 }
 

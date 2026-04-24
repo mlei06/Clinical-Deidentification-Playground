@@ -14,6 +14,5 @@
     }
   },
   "default_mode": "balanced",
-  "allowed_pipelines": null,
-  "production_api_url": null
+  "allowed_pipelines": null
 }

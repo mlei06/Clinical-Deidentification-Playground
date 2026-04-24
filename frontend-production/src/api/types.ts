@@ -30,6 +30,10 @@ export interface ProcessResponse {
   pipeline_name: string;
   processing_time_ms: number;
   intermediary_trace: TraceFrame[] | null;
+  /** Present when the caller passes `include_surrogate_spans=true` with `output_mode=surrogate`. */
+  surrogate_text?: string | null;
+  /** Spans with offsets in `surrogate_text`. Same length / order as `spans`. */
+  surrogate_spans?: PHISpanResponse[] | null;
 }
 
 export interface BatchProcessItem {

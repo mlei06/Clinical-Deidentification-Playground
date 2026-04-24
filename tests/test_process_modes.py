@@ -148,3 +148,41 @@ def test_process_accepts_client_id_header(client) -> None:
         headers={"X-Client-Id": "my-service"},
     )
     assert r.status_code == 200
+
+
+def test_process_include_surrogate_spans(client) -> None:
+    """Surrogate mode with include_surrogate_spans populates aligned fields."""
+    import pytest
+    pytest.importorskip("faker", reason="surrogate replacement requires faker")
+
+    name = _create_pipeline(client, name="proc-surrogate-aligned")
+    r = client.post(
+        f"/process/{name}?output_mode=surrogate",
+        json={
+            "text": PHONE_TEXT,
+            "include_surrogate_spans": True,
+            "surrogate_seed": 42,
+        },
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["surrogate_text"] is not None
+    assert body["surrogate_spans"] is not None
+    assert len(body["surrogate_spans"]) == len(body["spans"])
+    # surrogate_text equals redacted_text in surrogate mode
+    assert body["surrogate_text"] == body["redacted_text"]
+    # Every surrogate span points at its replacement substring
+    for s in body["surrogate_spans"]:
+        assert body["surrogate_text"][s["start"]:s["end"]] == s["text"]
+
+
+def test_process_include_surrogate_spans_no_op_when_not_surrogate(client) -> None:
+    name = _create_pipeline(client, name="proc-surrogate-noop")
+    r = client.post(
+        f"/process/{name}?output_mode=redacted",
+        json={"text": PHONE_TEXT, "include_surrogate_spans": True},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["surrogate_text"] is None
+    assert body["surrogate_spans"] is None

@@ -6,7 +6,10 @@ from clinical_deid.transform.ops import (
     boost_docs_with_label,
     clone_annotated_document,
     filter_labels,
+    get_work_and_rest,
+    merge_rest_work,
     random_resize,
+    run_transform_by_mode,
     run_transform_pipeline,
 )
 
@@ -111,6 +114,44 @@ def test_run_transform_pipeline_order() -> None:
     )
     assert len(out) == 2
     assert all(s.label == "P" for d in out for s in d.spans)
+
+
+def test_get_work_and_rest_merge() -> None:
+    docs = [
+        AnnotatedDocument(
+            document=Document(id="a", text="x", metadata={"split": "train"}),
+            spans=[],
+        ),
+        AnnotatedDocument(
+            document=Document(id="b", text="x", metadata={"split": "test"}),
+            spans=[],
+        ),
+    ]
+    work, rest = get_work_and_rest(docs, ["test"])
+    assert [d.document.id for d in work] == ["b"]
+    assert [d.document.id for d in rest] == ["a"]
+    out = merge_rest_work(rest, work)
+    assert [d.document.id for d in out] == ["a", "b"]
+
+
+def test_run_transform_by_mode_schema_isolation() -> None:
+    docs = [
+        AnnotatedDocument(
+            document=Document(id="1", text="ab", metadata={}),
+            spans=[
+                PHISpan(start=0, end=1, label="X"),
+                PHISpan(start=1, end=2, label="Y"),
+            ],
+        ),
+    ]
+    out = run_transform_by_mode(
+        docs,
+        "schema",
+        drop_labels=["X"],
+    )
+    assert len(out) == 1
+    assert len(out[0].spans) == 1
+    assert out[0].spans[0].label == "Y"
 
 
 def test_run_transform_pipeline_drop_labels() -> None:

@@ -64,6 +64,21 @@ MAX_TEXT_LENGTH = 500_000  # ~500 KB of text
 class ProcessRequest(BaseModel):
     text: str = Field(..., max_length=MAX_TEXT_LENGTH)
     request_id: str | None = None
+    include_surrogate_spans: bool = Field(
+        default=False,
+        description=(
+            "When ``output_mode=surrogate``, populate ``surrogate_text`` / "
+            "``surrogate_spans`` on the response (spans aligned to the surrogate text). "
+            "No-op for other output modes."
+        ),
+    )
+    surrogate_seed: int | None = Field(
+        default=None, description="Seed for the surrogate generator (determinism)."
+    )
+    surrogate_consistency: bool = Field(
+        default=True,
+        description="When true, identical ``(label, original)`` pairs yield the same surrogate.",
+    )
 
 
 class PHISpanResponse(BaseModel):
@@ -85,6 +100,20 @@ class ProcessResponse(BaseModel):
     intermediary_trace: list[dict[str, Any]] | None = Field(
         default=None,
         description="Snapshots after each pipeline stage. Present when `?trace=true` query param is set.",
+    )
+    surrogate_text: str | None = Field(
+        default=None,
+        description=(
+            "Present when ``include_surrogate_spans=true`` and ``output_mode=surrogate``; "
+            "identical to ``redacted_text`` in that case but exposed explicitly for clarity."
+        ),
+    )
+    surrogate_spans: list[PHISpanResponse] | None = Field(
+        default=None,
+        description=(
+            "Spans aligned to ``surrogate_text`` (character offsets point into the surrogate). "
+            "Present only when ``include_surrogate_spans=true`` with ``output_mode=surrogate``."
+        ),
     )
 
 
@@ -299,3 +328,33 @@ class DictionaryTermsPageResponse(BaseModel):
 class DictionaryUploadResponse(BaseModel):
     info: DictionaryInfoResponse
     message: str
+
+
+# ---------------------------------------------------------------------------
+# Datasets: ingest via saved pipeline
+# ---------------------------------------------------------------------------
+
+
+class IngestFromPipelineRequest(BaseModel):
+    source_path: str = Field(
+        ...,
+        description=(
+            "Path relative to CORPORA_DIR. Points at a directory of .txt files, "
+            "a single .txt, or a .jsonl of {id, text} rows. Must not escape via '..'."
+        ),
+    )
+    pipeline_name: str = Field(..., description="Saved pipeline name (under PIPELINES_DIR).")
+    output_name: str = Field(..., description="New dataset name (placed under CORPORA_DIR/<name>/).")
+    description: str = ""
+    max_documents: int = Field(
+        default=10_000,
+        ge=1,
+        le=1_000_000,
+        description="Cap on documents ingested per call; exceeding returns 422.",
+    )
+
+
+class IngestFromPipelineResponse(BaseModel):
+    name: str
+    document_count: int
+    total_spans: int

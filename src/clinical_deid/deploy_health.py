@@ -1,7 +1,8 @@
 """Shared helpers for computing per-mode availability.
 
-Used by both the playground deploy router (``/deploy/health``) and the
-production API (``/modes``) so availability is computed identically.
+Used by the deploy router (``/deploy/health``) to report which configured
+modes can actually serve requests given current pipe installs and model
+availability.
 """
 
 from __future__ import annotations
@@ -9,7 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from clinical_deid.mode_config import ModeConfig
+from clinical_deid.mode_config import DeployConfig
 from clinical_deid.pipeline_store import load_pipeline_config
 from clinical_deid.pipes.registry import pipe_availability, pipe_dependencies
 
@@ -38,7 +39,7 @@ def pipeline_missing_deps(config: dict[str, Any]) -> list[str]:
 
 
 def mode_missing_deps(
-    cfg: ModeConfig,
+    cfg: DeployConfig,
     pipelines_dir: Path,
     mode_name: str,
 ) -> list[str]:

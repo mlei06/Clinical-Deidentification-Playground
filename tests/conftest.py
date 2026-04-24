@@ -12,11 +12,13 @@ def client(tmp_path, monkeypatch):
     evaluations_dir = data_dir / "evaluations"
     inference_runs_dir = data_dir / "inference_runs"
     corpora_dir = data_dir / "corpora"
+    exports_dir = data_dir / "exports"
     dictionaries_dir = data_dir / "dictionaries"
     pipelines_dir.mkdir(parents=True)
     evaluations_dir.mkdir()
     inference_runs_dir.mkdir()
     corpora_dir.mkdir()
+    exports_dir.mkdir()
     dictionaries_dir.mkdir()
 
     monkeypatch.setenv("CLINICAL_DEID_DATABASE_URL", f"sqlite:///{db_file.as_posix()}")
@@ -25,6 +27,7 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setenv("CLINICAL_DEID_EVALUATIONS_DIR", str(evaluations_dir))
     monkeypatch.setenv("CLINICAL_DEID_INFERENCE_RUNS_DIR", str(inference_runs_dir))
     monkeypatch.setenv("CLINICAL_DEID_CORPORA_DIR", str(corpora_dir))
+    monkeypatch.setenv("CLINICAL_DEID_EXPORTS_DIR", str(exports_dir))
     monkeypatch.setenv("CLINICAL_DEID_DICTIONARIES_DIR", str(dictionaries_dir))
 
     from clinical_deid.config import reset_settings
