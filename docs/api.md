@@ -128,6 +128,10 @@ Base path: `/eval` — `POST /eval/run`, list/detail/compare runs (admin when au
 
 Base path: `/datasets` — register, browse, compose, transform, generate, export (see inline routes in OpenAPI or source).
 
+### `POST /datasets/preview-labels`
+
+Body: `{"path": "relative/or/absolute/under/corpora/corpus.jsonl"}`. Resolves a gold JSONL the same way as `POST /eval/run` with `dataset_path` (must stay under `CLINICAL_DEID_CORPORA_DIR`); returns sorted unique span label strings, `document_count`, and `resolved_path`. Used by the Evaluate UI in “Path on server” mode (no full dataset registration required for the label alignment panel).
+
 ### `POST /datasets/ingest-from-pipeline`
 
 Run a saved pipeline over raw inputs under `CORPORA_DIR` and register the

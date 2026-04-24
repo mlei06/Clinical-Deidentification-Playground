@@ -79,6 +79,18 @@ def _load_documents(home: Path) -> list[AnnotatedDocument]:
     return load_annotated_corpus(jsonl=jsonl)
 
 
+def unique_labels_for_jsonl_corpus(corpus_path: Path) -> tuple[list[str], int]:
+    """Return sorted unique gold span label strings and document count for a JSONL file.
+
+    Used by ``POST /datasets/preview-labels`` and tests; loads the full file like eval.
+    """
+    docs = load_annotated_corpus(jsonl=corpus_path)
+    if not docs:
+        return [], 0
+    analytics = compute_dataset_analytics(docs)
+    return sorted(analytics.label_counts.keys()), len(docs)
+
+
 def _compute_summary(docs: list[AnnotatedDocument]) -> dict[str, Any]:
     analytics = compute_dataset_analytics(docs)
     split_document_counts = compute_split_document_counts(docs)

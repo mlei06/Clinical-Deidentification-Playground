@@ -301,6 +301,16 @@ export interface DatasetDetail extends DatasetSummary {
   has_split_metadata?: boolean;
 }
 
+export interface PreviewCorpusLabelsRequest {
+  path: string;
+}
+
+export interface PreviewCorpusLabelsResponse {
+  labels: string[];
+  document_count: number;
+  resolved_path: string;
+}
+
 export interface DatasetAnalytics {
   document_count: number;
   total_spans: number;

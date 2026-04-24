@@ -188,6 +188,7 @@ export default function EvalRunForm({ onResult }: EvalRunFormProps) {
       <EvalLabelAlignment
         sourceMode={sourceMode}
         datasetName={datasetName}
+        datasetPath={datasetPath}
         pipelineName={pipeline}
       />
     </div>

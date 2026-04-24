@@ -19,6 +19,8 @@ import type {
   ExportTrainingRequest,
   ExportTrainingResponse,
   UpdateDocumentRequest,
+  PreviewCorpusLabelsRequest,
+  PreviewCorpusLabelsResponse,
 } from './types';
 
 export function listDatasets(params?: {
@@ -34,6 +36,12 @@ export function listDatasets(params?: {
 
 export function getDataset(name: string): Promise<DatasetDetail> {
   return apiFetch(`/datasets/${encodeURIComponent(name)}`);
+}
+
+export function previewCorpusLabels(
+  req: PreviewCorpusLabelsRequest,
+): Promise<PreviewCorpusLabelsResponse> {
+  return apiFetch('/datasets/preview-labels', { method: 'POST', body: JSON.stringify(req) });
 }
 
 export function getDatasetSchema(name: string): Promise<DatasetSchemaResponse> {

@@ -10,14 +10,15 @@ Users **see raw** label sets — **dataset (gold) labels** vs **pipeline output 
 
 - [x] With a **registered dataset** + **saved pipeline** selected on the Evaluate screen, the UI shows **raw** `DatasetDetail.labels` vs **raw** `config.output_label_space` from the pipeline, plus a clear **set diff** (only in gold, only in pipeline output, intersection).
 - [x] If the sets differ, an **advisory** warning is shown; the user can still run eval. Copy explains: metrics use **exact string** equality on labels with gold — **fix alignment in the pipeline (or gold), not** via `CLINICAL_DEID_LABEL_SPACE_NAME` at eval time.
-- [x] **Path-on-server** gold mode: info callout (register dataset for this panel) — see Phase 2.
-- [x] No change to **eval math** in this plan (already raw); UI only.
+- [x] **Path-on-server** gold: **Phase 2B** — `POST /datasets/preview-labels` + Evaluate panel scans gold labels for a `.jsonl` under the corpora root (same scoping as eval `dataset_path`).
+- [x] No change to **eval math** in this plan; UI + one read-only API only.
 
 ## Current building blocks
 
 | Source | What exists |
 |--------|-------------|
 | Dataset | `GET /datasets/{name}` → `DatasetDetail.labels` (from stored analytics / `dataset.json`). |
+| Path gold | `POST /datasets/preview-labels` → `labels`, `document_count`, `resolved_path` (`dataset_store.unique_labels_for_jsonl_corpus`). |
 | Pipeline | `GET /pipelines/{name}` → `config.output_label_space` (from save/validate / `enrich_pipeline_config_with_label_space`). |
 | Eval | `evaluate_pipeline` — **raw** `gold_doc.spans` and `pred_doc.spans` (no `normalize_entity_spans`). |
 
@@ -25,57 +26,31 @@ Users **see raw** label sets — **dataset (gold) labels** vs **pipeline output 
 
 - Applying **`LabelSpace.normalize`** to eval labels (server or UI “preview normalizer”) — users own alignment via **pipeline** / **corpus**.
 - Automatic **suggested mapping** table.
-- Requiring a registered dataset for every eval (path mode stays supported; alignment panel may be limited).
 
 ---
 
-## Phase 1 — Evaluate UI: raw alignment panel (registered dataset) — [x]
+## Phase 1 — Evaluate UI: raw alignment panel — [x]
 
-**Where:** `frontend/src/components/evaluate/EvalLabelAlignment.tsx` + `EvalRunForm.tsx`.
+`frontend/src/components/evaluate/EvalLabelAlignment.tsx` + `EvalRunForm.tsx`.
 
-**Exit:** Done.
+## Phase 2 — Path-on-server — [x]
 
----
+- **A** — Help copy when path empty / not `.jsonl`.
+- **B** — `POST /datasets/preview-labels` in `api/routers/datasets/preview_labels.py`, debounced fetch in the alignment component.
 
-## Phase 2 — Path-on-server gold mode — [x]
+## Phase 3 — Inference disclaimer — [x]
 
-| Option | Work |
-|--------|------|
-| **A (minimal)** | Info callout: register dataset to compare — **done** in `EvalLabelAlignment` for `sourceMode === 'path'`. |
-| **B** | `POST /datasets/preview-labels` — not implemented; optional. |
+`GET /health` — `label_space_name`, `risk_profile_name`.
 
-**Exit:** Path mode is not confusing relative to the raw-alignment story.
+## Phase 4 — Deep links — [x]
 
----
-
-## Phase 3 — Show active `LabelSpace` for **inference** (disclaimer) — [x]
-
-`GET /health` includes **`label_space_name`** and **`risk_profile_name`** (read-only, from `get_settings()`) in `src/clinical_deid/api/schemas.py` and `app.py`. The Evaluate panel shows an inference footnote from `useHealth()`.
-
----
-
-## Phase 4 — Deep links and actions — [x]
-
-- **“Open pipeline in builder”** → `/create?load={name}` with auto-load in `PipelineBuilder` (`useSearchParams` + `usePipelines` / `usePipeTypes`).
-- Doc reference: `docs/pipes-and-pipelines.md` (copy in UI).
-
----
-
-## Suggested order
-
-| Order | Work | Status |
-|------:|------|--------|
-| 1 | Phase 1 | Done |
-| 2 | Phase 2 (A) | Done |
-| 3 | Phase 4 | Done |
-| 4 | Phase 3 | Done |
+`/create?load=` + PipelineBuilder auto-load.
 
 ## References
 
-- `clinical_deid.eval.runner.evaluate_pipeline` — raw gold vs pred labels.
-- `clinical_deid.api.services.inference.process_single` — `normalize_entity_spans` for **inference** only.
-- [configuration.md](../configuration.md) — label normalization (inference vs eval).
-- [`frontend/src/components/evaluate/EvalRunForm.tsx`](../../frontend/src/components/evaluate/EvalRunForm.tsx)
+- `docs/api.md` — `POST /datasets/preview-labels`
+- [configuration.md](../configuration.md) — label normalization (inference vs eval)
+- [EvalRunForm.tsx](../../frontend/src/components/evaluate/EvalRunForm.tsx)
 
 ## Related
 

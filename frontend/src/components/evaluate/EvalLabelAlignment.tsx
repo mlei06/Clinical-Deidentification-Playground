@@ -1,9 +1,13 @@
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { useQuery, type UseQueryResult } from '@tanstack/react-query';
 import { AlertTriangle, CheckCircle2, ExternalLink } from 'lucide-react';
 import { clsx } from 'clsx';
 import { useDataset } from '../../hooks/useDatasets';
 import { usePipeline } from '../../hooks/usePipelines';
 import { useHealth } from '../../hooks/useHealth';
+import { previewCorpusLabels } from '../../api/datasets';
+import type { HealthResponse, PipelineDetail } from '../../api/types';
 
 type SourceMode = 'registered' | 'path';
 
@@ -54,55 +58,28 @@ function setDiff(a: Set<string>, b: Set<string>) {
 interface EvalLabelAlignmentProps {
   sourceMode: SourceMode;
   datasetName: string;
+  /** Raw path string for "path on server" mode (not resolved client-side). */
+  datasetPath: string;
   pipelineName: string;
 }
 
-/**
- * Compare raw gold label set (dataset analytics) with symbolic pipeline
- * `output_label_space` before running eval. Eval uses raw string equality on labels.
- */
-export default function EvalLabelAlignment({ sourceMode, datasetName, pipelineName }: EvalLabelAlignmentProps) {
-  const { data: health } = useHealth();
-  const detailQuery = useDataset(sourceMode === 'registered' && datasetName.trim() ? datasetName.trim() : null);
-  const pipelineQuery = usePipeline(pipelineName.trim() ? pipelineName.trim() : null);
-
-  if (sourceMode === 'path') {
-    return (
-      <div className="rounded-md border border-amber-200/80 bg-amber-50/80 px-3 py-2 text-xs text-amber-950">
-        <p className="font-medium">Label alignment preview</p>
-        <p className="mt-1 text-amber-900/90">
-          Register this JSONL as a <strong>dataset</strong> to compare its gold label set with the
-          selected pipeline&apos;s <code className="rounded bg-amber-100/80 px-0.5">output_label_space</code>{' '}
-          here. Server path mode does not expose gold labels in this panel.
-        </p>
-        <p className="mt-1.5">
-          <Link
-            to="/datasets"
-            className="font-medium text-amber-950 underline decoration-amber-400 underline-offset-2 hover:text-amber-900"
-          >
-            Datasets
-          </Link>
-        </p>
-      </div>
-    );
-  }
-
-  if (!datasetName.trim() || !pipelineName.trim()) {
-    return null;
-  }
-
-  if (detailQuery.isLoading || pipelineQuery.isLoading) {
+function GoldPipelineDiff({
+  goldLabels,
+  goldSubtitle,
+  health,
+  pipelineName,
+  pipelineQuery,
+}: {
+  goldLabels: string[];
+  goldSubtitle?: string;
+  health: HealthResponse | undefined;
+  pipelineName: string;
+  pipelineQuery: UseQueryResult<PipelineDetail, Error>;
+}) {
+  if (pipelineQuery.isLoading) {
     return (
       <p className="text-xs text-gray-400" aria-live="polite">
-        Loading label alignment…
-      </p>
-    );
-  }
-
-  if (detailQuery.isError) {
-    return (
-      <p className="text-xs text-red-600">
-        Could not load dataset: {(detailQuery.error as Error).message}
+        Loading pipeline…
       </p>
     );
   }
@@ -113,12 +90,9 @@ export default function EvalLabelAlignment({ sourceMode, datasetName, pipelineNa
       </p>
     );
   }
-
-  const d = detailQuery.data;
   const p = pipelineQuery.data;
-  if (!d || !p) return null;
+  if (!p) return null;
 
-  const goldLabels = d.labels ?? [];
   const outSpace = p.config?.output_label_space;
   const pipelineLabels = Array.isArray(outSpace) ? outSpace : [];
 
@@ -146,6 +120,8 @@ export default function EvalLabelAlignment({ sourceMode, datasetName, pipelineNa
         )}
       </div>
 
+      {goldSubtitle && <p className="text-[11px] text-gray-500">{goldSubtitle}</p>}
+
       <p className="text-xs leading-relaxed text-gray-600">
         Evaluation uses <strong>exact</strong> string labels on gold vs predicted spans (and boundaries). It does
         <strong> not</strong> use <code className="rounded bg-gray-100 px-0.5">CLINICAL_DEID_LABEL_SPACE_NAME</code> at
@@ -172,7 +148,7 @@ export default function EvalLabelAlignment({ sourceMode, datasetName, pipelineNa
       )}
 
       <div className="grid gap-3 sm:grid-cols-2">
-        {labelChips('Only in gold dataset', onlyA, 'bg-rose-100/90 text-rose-900')}
+        {labelChips('Only in gold', onlyA, 'bg-rose-100/90 text-rose-900')}
         {labelChips('Only in pipeline output space', onlyB, 'bg-sky-100/80 text-sky-900')}
       </div>
       <div className="grid gap-3 sm:grid-cols-2">
@@ -199,5 +175,119 @@ export default function EvalLabelAlignment({ sourceMode, datasetName, pipelineNa
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * Compare raw gold label set with symbolic pipeline `output_label_space` before running eval.
+ */
+export default function EvalLabelAlignment({
+  sourceMode,
+  datasetName,
+  datasetPath,
+  pipelineName,
+}: EvalLabelAlignmentProps) {
+  const { data: health } = useHealth();
+  const [debouncedPath, setDebouncedPath] = useState('');
+
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedPath(datasetPath.trim()), 450);
+    return () => clearTimeout(t);
+  }, [datasetPath]);
+
+  const pathLooksJsonl = debouncedPath.toLowerCase().endsWith('.jsonl');
+  const previewQuery = useQuery({
+    queryKey: ['datasets', 'preview-labels', debouncedPath],
+    queryFn: () => previewCorpusLabels({ path: debouncedPath }),
+    enabled:
+      sourceMode === 'path' && pathLooksJsonl && debouncedPath.length > 0,
+    retry: false,
+  });
+
+  const detailQuery = useDataset(sourceMode === 'registered' && datasetName.trim() ? datasetName.trim() : null);
+  const pipelineQuery = usePipeline(pipelineName.trim() ? pipelineName.trim() : null);
+
+  if (sourceMode === 'path') {
+    if (!pipelineName.trim()) {
+      return null;
+    }
+    if (!datasetPath.trim()) {
+      return (
+        <p className="text-xs text-gray-500">
+          Enter a <code className="rounded bg-gray-100 px-0.5">.jsonl</code> path under the server corpora root to
+          preview gold labels, or switch to a registered dataset.
+        </p>
+      );
+    }
+    if (!pathLooksJsonl) {
+      return (
+        <p className="text-xs text-amber-800">
+          Path should end in <code className="rounded bg-amber-100 px-0.5">.jsonl</code> (same as eval). Example:{' '}
+          <code className="font-mono text-[10px]">my-dataset/corpus.jsonl</code> relative to corpora.
+        </p>
+      );
+    }
+    if (previewQuery.isLoading) {
+      return <p className="text-xs text-gray-400">Scanning gold labels from JSONL…</p>;
+    }
+    if (previewQuery.isError) {
+      return (
+        <div className="rounded-md border border-red-200 bg-red-50/80 px-3 py-2 text-xs text-red-800">
+          <p className="font-medium">Could not load labels for path</p>
+          <p className="mt-0.5">{(previewQuery.error as Error).message}</p>
+          <p className="mt-1.5 text-red-700/90">
+            Path must be under the corpora root.{' '}
+            <Link to="/datasets" className="font-medium underline">
+              Datasets
+            </Link>
+          </p>
+        </div>
+      );
+    }
+    if (!previewQuery.data) {
+      return null;
+    }
+    return (
+      <GoldPipelineDiff
+        goldLabels={previewQuery.data.labels}
+        goldSubtitle={
+          previewQuery.data.resolved_path
+            ? `Gold from POST /datasets/preview-labels — ${previewQuery.data.document_count} document(s) — ${previewQuery.data.resolved_path}`
+            : undefined
+        }
+        health={health}
+        pipelineName={pipelineName}
+        pipelineQuery={pipelineQuery}
+      />
+    );
+  }
+
+  if (!datasetName.trim() || !pipelineName.trim()) {
+    return null;
+  }
+
+  if (detailQuery.isLoading || pipelineQuery.isLoading) {
+    return (
+      <p className="text-xs text-gray-400" aria-live="polite">
+        Loading label alignment…
+      </p>
+    );
+  }
+
+  if (detailQuery.isError) {
+    return (
+      <p className="text-xs text-red-600">
+        Could not load dataset: {(detailQuery.error as Error).message}
+      </p>
+    );
+  }
+
+  return (
+    <GoldPipelineDiff
+      goldLabels={detailQuery.data?.labels ?? []}
+      health={health}
+      pipelineName={pipelineName}
+      pipelineQuery={pipelineQuery}
+    />
   );
 }

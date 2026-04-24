@@ -1309,3 +1309,34 @@ def test_ingest_from_pipeline_max_documents(client, tmp_path):
     )
     assert resp.status_code == 422, resp.text
     assert "max_documents" in resp.json()["detail"]
+
+
+def test_preview_corpus_labels(client, tmp_path):
+    corpora = tmp_path / "data" / "corpora"
+    rel = _write_sample_jsonl(corpora / "preview-test" / "corpus.jsonl")
+    rel_rel = rel.relative_to(corpora).as_posix()
+    r = client.post("/datasets/preview-labels", json={"path": rel_rel})
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert data["document_count"] == 5
+    assert set(data["labels"]) == {"DATE", "PERSON"}
+    assert rel.name in data["resolved_path"] or str(rel) in data["resolved_path"]
+
+
+def test_preview_corpus_labels_rejects_non_jsonl(client, tmp_path):
+    corpora = tmp_path / "data" / "corpora"
+    bad = corpora / "bad.txt"
+    bad.parent.mkdir(parents=True, exist_ok=True)
+    bad.write_text("x", encoding="utf-8")
+    r = client.post(
+        "/datasets/preview-labels",
+        json={"path": bad.relative_to(corpora).as_posix()},
+    )
+    assert r.status_code == 422, r.text
+
+
+def test_preview_corpus_labels_rejects_outside_corpora(client, tmp_path):
+    outside = tmp_path / "outside.jsonl"
+    outside.write_text("{}\n", encoding="utf-8")
+    r = client.post("/datasets/preview-labels", json={"path": str(outside)})
+    assert r.status_code == 400, r.text

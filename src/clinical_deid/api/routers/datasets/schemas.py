@@ -242,3 +242,20 @@ class ExportTrainingResponse(BaseModel):
     document_count: int
     total_spans: int
     target_text: Literal["original", "surrogate"] = "original"
+
+
+class PreviewCorpusLabelsRequest(BaseModel):
+    """Path to a gold ``.jsonl`` file under the corpora root (see ``resolve_source_under_corpora``)."""
+
+    path: str = Field(
+        ...,
+        description="Relative to corpora root or absolute, must stay under that root.",
+    )
+
+
+class PreviewCorpusLabelsResponse(BaseModel):
+    labels: list[str] = Field(description="Unique span label strings, sorted")
+    document_count: int
+    resolved_path: str = Field(
+        description="Server-normalized path (for display when debugging).",
+    )
