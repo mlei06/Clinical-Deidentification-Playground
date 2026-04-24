@@ -26,7 +26,7 @@ Do not expose the service to the public internet without TLS, auth, and rate lim
 
 Liveness. Always unauthenticated.
 
-**Response:** `{"status": "ok"}`
+**Response:** `status`, `label_space_name` (active `CLINICAL_DEID_LABEL_SPACE_NAME` — used for `POST /process` span label normalization), `risk_profile_name` (default for eval risk-weighted metrics when not overridden). Example: `{"status":"ok","label_space_name":"clinical_phi","risk_profile_name":"clinical_phi"}`.
 
 ---
 
