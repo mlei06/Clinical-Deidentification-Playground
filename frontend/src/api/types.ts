@@ -125,12 +125,57 @@ export interface MatchMetrics {
   fn: number;
 }
 
+export interface SaveSampleAsSpec {
+  dataset_name: string;
+  description?: string;
+}
+
 export interface EvalRunRequest {
   pipeline_name: string;
   dataset_path?: string;
   dataset_name?: string;
   /** Only documents with metadata.split in this list (optional). */
   dataset_splits?: string[];
+  /** Full (split-filtered) corpus vs random subset. Defaults to "full". */
+  eval_mode?: 'full' | 'sample';
+  /** Required when eval_mode === "sample". */
+  sample_size?: number;
+  /** Integer → deterministic; omit → server draws a fresh seed and returns it. */
+  sample_seed?: number;
+  /** If set with eval_mode === "sample", persist the sampled docs as a new dataset. */
+  save_sample_as?: SaveSampleAsSpec;
+  /** Adds `metrics.document_level` to the response only (not persisted). */
+  include_per_document?: boolean;
+  /** Implies `include_per_document`; also includes text + gold/pred spans per doc. */
+  include_per_document_spans?: boolean;
+}
+
+export interface EvalSpanLite {
+  start: number;
+  end: number;
+  label: string;
+}
+
+export interface EvalPerDocumentItem {
+  document_id: string;
+  metrics: Record<string, MatchMetrics>;
+  risk_weighted_recall: number;
+  false_positive_count: number;
+  false_negative_count: number;
+  text?: string;
+  gold_spans?: EvalSpanLite[];
+  pred_spans?: EvalSpanLite[];
+  false_positives?: EvalSpanLite[];
+  false_negatives?: EvalSpanLite[];
+}
+
+export interface EvalSampleInfo {
+  eval_mode: 'sample';
+  sample_size: number;
+  sample_seed_used: number;
+  sample_of_total: number;
+  /** Set when save_sample_as succeeded on this run. */
+  saved_dataset_name?: string;
 }
 
 export interface EvalRunSummary {
@@ -183,6 +228,12 @@ export interface EvalRunDetail extends EvalRunSummary {
     label_confusion: Record<string, Record<string, number>>;
     has_redaction?: boolean;
     redaction?: RedactionMetrics;
+    sample?: EvalSampleInfo;
+    /** Present only when the request enabled include_per_document[_spans]. */
+    document_level?: EvalPerDocumentItem[];
+    document_level_truncated?: boolean;
+    document_level_total?: number;
+    document_level_includes_spans?: boolean;
   };
 }
 

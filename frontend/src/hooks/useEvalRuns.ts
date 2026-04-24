@@ -21,7 +21,14 @@ export function useRunEvaluation() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (req: EvalRunRequest) => api.runEvaluation(req),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['eval-runs'] }),
+    onSuccess: (run) => {
+      qc.invalidateQueries({ queryKey: ['eval-runs'] });
+      // A sampled run with save_sample_as creates a brand-new registered dataset;
+      // refresh the datasets cache so the sidebar and selectors show it immediately.
+      if (run.metrics?.sample?.saved_dataset_name) {
+        qc.invalidateQueries({ queryKey: ['datasets'] });
+      }
+    },
   });
 }
 

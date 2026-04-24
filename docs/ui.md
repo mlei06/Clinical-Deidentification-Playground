@@ -54,6 +54,10 @@ Paste-and-try interface for running pipelines on ad-hoc text.
 Dashboard for measuring pipeline quality against gold-standard annotated data.
 
 - Select a pipeline and a gold corpus (registered dataset name, or a **`.jsonl` path** on the API host for ad-hoc files).
+- Optional **document splits** filter (comma-separated, matches `metadata.split`).
+- **Eval mode** toggle — run on the full (split-filtered) corpus or a **random sample** of *N* documents, with a fixed seed (reproducible) or a fresh seed per run (returned as `sample_seed_used`).
+- When sampling, an optional **Save sample as dataset** checkbox materializes the sampled docs as a new registered JSONL dataset (provenance captured in its `dataset.json`).
+- **Per-document inspection** toggles return (but do not persist) per-doc scores — optionally with gold/pred spans — so the dashboard can show a sortable worst-docs table and a gold-vs-pred highlight view. Persisted eval JSON stays free of raw document text; re-load from history re-runs without per-doc data.
 - Run evaluation and view: precision, recall, F1 across all matching modes (strict, partial, token-level, exact boundary).
 - Per-label breakdown table with sortable columns.
 - Confusion matrix showing label misclassification patterns.

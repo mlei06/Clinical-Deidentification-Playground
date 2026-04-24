@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+import random
+import secrets
+from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -50,6 +52,15 @@ class EvalMetricsResponse(BaseModel):
     risk_weighted_recall: float
 
 
+class SaveSampleAsSpec(BaseModel):
+    """Register the sampled document list as a new JSONL dataset under ``corpora_dir``."""
+
+    dataset_name: str = Field(
+        ..., description="Name for the new dataset; same rules as POST /datasets."
+    )
+    description: str | None = None
+
+
 class EvalRunRequest(BaseModel):
     pipeline_name: str
     dataset_path: str | None = None
@@ -64,6 +75,27 @@ class EvalRunRequest(BaseModel):
             "(CLINICAL_DEID_RISK_PROFILE_NAME, default clinical_phi)."
         ),
     )
+    #: Whether to run on the full (split-filtered) corpus or a random subset.
+    eval_mode: Literal["full", "sample"] = "full"
+    #: Required when ``eval_mode == "sample"``; must satisfy
+    #: ``1 <= sample_size <= len(documents_after_split)``.
+    sample_size: int | None = None
+    #: When ``eval_mode == "sample"``: integer ⇒ deterministic draw, ``None`` ⇒ server draws
+    #: a fresh seed and returns it on the response. Ignored when ``eval_mode == "full"``.
+    sample_seed: int | None = None
+    #: When provided together with ``eval_mode == "sample"``, persist the sampled
+    #: document list as a new registered dataset (see :class:`SaveSampleAsSpec`).
+    save_sample_as: SaveSampleAsSpec | None = None
+    #: When ``true``, the HTTP response (but not the persisted eval JSON) gains
+    #: ``metrics.document_level`` — per-document scores sorted worst-F1 first,
+    #: truncated at ``Settings.eval_per_document_limit`` (flagged via
+    #: ``metrics.document_level_truncated``).
+    include_per_document: bool = False
+    #: Implies ``include_per_document``; each item additionally carries ``text``,
+    #: ``gold_spans``, ``pred_spans``, ``false_positives``, ``false_negatives``.
+    #: Only enable for admin-controlled debugging — the payload contains raw
+    #: document text and is not redacted.
+    include_per_document_spans: bool = False
 
 
 class EvalRunSummary(BaseModel):
@@ -136,6 +168,42 @@ def _match_result_to_dict(mr) -> dict[str, Any]:
     }
 
 
+def _span_to_dict(span) -> dict[str, Any]:
+    return {"start": span.start, "end": span.end, "label": span.label}
+
+
+def _build_document_level(doc_results, *, include_spans: bool, limit: int) -> dict[str, Any]:
+    """Serialize per-document eval results for the HTTP response only.
+
+    ``doc_results`` is already sorted worst-F1 first by the runner, so truncating
+    at ``limit`` keeps the hardest cases.
+    """
+    truncated = len(doc_results) > limit
+    trimmed = doc_results[:limit] if truncated else doc_results
+    items: list[dict[str, Any]] = []
+    for dr in trimmed:
+        item: dict[str, Any] = {
+            "document_id": dr.document_id,
+            "metrics": _eval_metrics_to_dict(dr.metrics),
+            "risk_weighted_recall": dr.risk_weighted_recall,
+            "false_positive_count": len(dr.false_positives),
+            "false_negative_count": len(dr.false_negatives),
+        }
+        if include_spans:
+            item["text"] = dr.text
+            item["gold_spans"] = [_span_to_dict(s) for s in dr.gold_spans]
+            item["pred_spans"] = [_span_to_dict(s) for s in dr.pred_spans]
+            item["false_positives"] = [_span_to_dict(s) for s in dr.false_positives]
+            item["false_negatives"] = [_span_to_dict(s) for s in dr.false_negatives]
+        items.append(item)
+    return {
+        "document_level": items,
+        "document_level_truncated": truncated,
+        "document_level_total": len(doc_results),
+        "document_level_includes_spans": include_spans,
+    }
+
+
 def _eval_metrics_to_dict(em) -> dict[str, Any]:
     return {
         "strict": _match_result_to_dict(em.strict),
@@ -184,12 +252,39 @@ def run_evaluation(session: SessionDep, body: EvalRunRequest) -> EvalRunDetail:
     """Run a pipeline against a local dataset and store results."""
     from pathlib import Path
 
+    from clinical_deid.dataset_store import (
+        dataset_home,
+        save_document_subset,
+    )
     from clinical_deid.eval.runner import evaluate_pipeline
     from clinical_deid.ingest.sources import load_annotated_corpus
     from clinical_deid.risk import default_risk_profile, get_risk_profile
     from clinical_deid.transform.ops import filter_documents_by_split_query
 
     settings = get_settings()
+
+    # Early validation of save_sample_as (fail before running eval).
+    if body.save_sample_as is not None:
+        if body.eval_mode != "sample":
+            raise HTTPException(
+                status_code=422,
+                detail="save_sample_as requires eval_mode == 'sample'.",
+            )
+        target_name = body.save_sample_as.dataset_name.strip()
+        if not target_name:
+            raise HTTPException(
+                status_code=422,
+                detail="save_sample_as.dataset_name is required.",
+            )
+        try:
+            target_home = dataset_home(settings.corpora_dir, target_name)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        if target_home.exists():
+            raise HTTPException(
+                status_code=409,
+                detail=f"Dataset {target_name!r} already exists.",
+            )
 
     # Load pipeline from filesystem
     try:
@@ -277,6 +372,35 @@ def run_evaluation(session: SessionDep, body: EvalRunRequest) -> EvalRunDetail:
                 detail="No documents match dataset_splits; ensure metadata['split'] matches or adjust the filter.",
             )
 
+    sample_info: dict[str, Any] | None = None
+    if body.eval_mode == "sample":
+        total_after_split = len(documents)
+        if body.sample_size is None or body.sample_size < 1:
+            raise HTTPException(
+                status_code=422,
+                detail="sample_size must be a positive integer when eval_mode == 'sample'.",
+            )
+        if body.sample_size > total_after_split:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"sample_size ({body.sample_size}) exceeds documents after splits "
+                    f"({total_after_split})."
+                ),
+            )
+        # Stable ordering by document id so (seed, size, source) → same subset.
+        ordered = sorted(documents, key=lambda d: d.document.id)
+        # 32-bit seeds fit safely in JS Number; 64-bit values would lose precision on
+        # the client round-trip and silently break "copy-paste the seed to reproduce".
+        seed_used = body.sample_seed if body.sample_seed is not None else secrets.randbits(32)
+        documents = random.Random(seed_used).sample(ordered, body.sample_size)
+        sample_info = {
+            "eval_mode": "sample",
+            "sample_size": body.sample_size,
+            "sample_seed_used": seed_used,
+            "sample_of_total": total_after_split,
+        }
+
     # Run evaluation
     if body.risk_profile_name:
         try:
@@ -287,6 +411,32 @@ def run_evaluation(session: SessionDep, body: EvalRunRequest) -> EvalRunDetail:
         eval_risk_profile = default_risk_profile()
 
     result = evaluate_pipeline(pipe_chain, documents, risk_profile=eval_risk_profile)
+
+    # Optional: persist the sampled document list as a new registered dataset.
+    if body.save_sample_as is not None and sample_info is not None:
+        spec = body.save_sample_as
+        provenance: dict[str, Any] = {
+            "derived_from": body.dataset_name or body.dataset_path,
+            "sample_seed": sample_info["sample_seed_used"],
+            "sample_size": sample_info["sample_size"],
+            "sample_of_total": sample_info["sample_of_total"],
+            "source_eval_pipeline": body.pipeline_name,
+        }
+        if body.dataset_splits:
+            provenance["source_splits"] = list(body.dataset_splits)
+        try:
+            save_document_subset(
+                settings.corpora_dir,
+                spec.dataset_name.strip(),
+                documents,
+                description=spec.description or "",
+                metadata={"provenance": provenance},
+            )
+        except ValueError as exc:
+            # Race condition: name collided between the pre-check and the write, or
+            # something else rejected the subset. Surface as 409.
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        sample_info["saved_dataset_name"] = spec.dataset_name.strip()
 
     # Serialize metrics
     per_label_dict = {}
@@ -309,6 +459,9 @@ def run_evaluation(session: SessionDep, body: EvalRunRequest) -> EvalRunDetail:
 
     if result.redaction is not None:
         metrics["redaction"] = _redaction_metrics_to_dict(result.redaction)
+
+    if sample_info is not None:
+        metrics["sample"] = sample_info
 
     # Persist eval result to filesystem
     result_path = save_eval_result(
@@ -343,8 +496,18 @@ def run_evaluation(session: SessionDep, body: EvalRunRequest) -> EvalRunDetail:
     except Exception:
         logger.warning("Failed to write eval audit log", exc_info=True)
 
-    # Return result — read back the saved file for consistent id/created_at
+    # Return result — read back the saved file for consistent id/created_at.
+    # Per-document payload is attached **only to the response** (never persisted);
+    # the eval JSON on disk stays small and free of raw document text.
     saved = load_eval_result(settings.evaluations_dir, result_id)
+    if body.include_per_document or body.include_per_document_spans:
+        saved.setdefault("metrics", {}).update(
+            _build_document_level(
+                result.document_results,
+                include_spans=body.include_per_document_spans,
+                limit=settings.eval_per_document_limit,
+            )
+        )
     return _data_to_detail(saved)
 
 

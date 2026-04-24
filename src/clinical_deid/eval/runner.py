@@ -7,7 +7,7 @@ Pipelines only produce spans; redaction is applied separately at the API layer.
 from __future__ import annotations
 
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from clinical_deid.domain import AnnotatedDocument, EntitySpan
 from clinical_deid.eval.matching import (
@@ -39,6 +39,14 @@ class DocumentEvalResult:
     false_positives: list[EntitySpan]
     risk_weighted_recall: float
     redaction: RedactionMetrics | None = None
+    #: Gold document text, carried on the result so callers that want to render
+    #: per-document views (e.g. the Evaluate UI) don't need a separate lookup.
+    #: In-memory only; never serialized to the eval JSON file.
+    text: str = ""
+    #: Gold spans as seen by the runner (copy preserves ordering at eval time).
+    gold_spans: list[EntitySpan] = field(default_factory=list)
+    #: Predicted spans produced by the pipeline for this document.
+    pred_spans: list[EntitySpan] = field(default_factory=list)
 
 
 @dataclass
@@ -260,6 +268,9 @@ def evaluate_pipeline(
                 false_positives=fp,
                 risk_weighted_recall=rwr,
                 redaction=doc_redaction,
+                text=text,
+                gold_spans=gold_spans,
+                pred_spans=pred_spans,
             )
         )
 

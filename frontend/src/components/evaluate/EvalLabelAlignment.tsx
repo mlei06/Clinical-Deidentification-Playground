@@ -11,33 +11,75 @@ import type { HealthResponse, PipelineDetail } from '../../api/types';
 
 type SourceMode = 'registered' | 'path';
 
-function labelChips(
-  title: string,
-  labels: string[],
-  className: string,
-) {
-  if (labels.length === 0) {
-    return (
-      <div>
-        <div className="text-[10px] font-medium uppercase tracking-wide text-gray-400">{title}</div>
-        <p className="text-xs text-gray-400">—</p>
-      </div>
-    );
-  }
+function LabelChips({
+  title,
+  explainer,
+  labels,
+  className,
+}: {
+  title: string;
+  explainer?: string;
+  labels: string[];
+  className: string;
+}) {
+  const header = (
+    <div className="flex items-baseline gap-1.5">
+      <span className="text-[10px] font-medium uppercase tracking-wide text-gray-500">{title}</span>
+      <span className="text-[10px] font-mono text-gray-400">{labels.length}</span>
+    </div>
+  );
   return (
     <div>
-      <div className="text-[10px] font-medium uppercase tracking-wide text-gray-400">{title}</div>
-      <div className="mt-1 flex flex-wrap gap-1">
-        {labels.map((l) => (
-          <span
-            key={l}
-            className={clsx('rounded px-1.5 py-0.5 text-[11px] font-mono', className)}
-          >
-            {l}
-          </span>
-        ))}
-      </div>
+      {header}
+      {explainer && <p className="mt-0.5 text-[11px] text-gray-500">{explainer}</p>}
+      {labels.length === 0 ? (
+        <p className="mt-1 text-xs text-gray-400">—</p>
+      ) : (
+        <div className="mt-1 flex flex-wrap gap-1">
+          {labels.map((l) => (
+            <span
+              key={l}
+              className={clsx('rounded px-1.5 py-0.5 text-[11px] font-mono', className)}
+            >
+              {l}
+            </span>
+          ))}
+        </div>
+      )}
     </div>
+  );
+}
+
+function CollapsedLabelList({
+  title,
+  labels,
+  className,
+}: {
+  title: string;
+  labels: string[];
+  className: string;
+}) {
+  return (
+    <details className="group rounded border border-gray-100 bg-gray-50/60 px-2 py-1.5">
+      <summary className="cursor-pointer list-none text-[11px] font-medium text-gray-600 hover:text-gray-900">
+        <span className="mr-1 inline-block transition-transform group-open:rotate-90">▸</span>
+        {title} <span className="font-mono text-gray-400">({labels.length})</span>
+      </summary>
+      {labels.length === 0 ? (
+        <p className="mt-1 text-xs text-gray-400">—</p>
+      ) : (
+        <div className="mt-1.5 flex flex-wrap gap-1">
+          {labels.map((l) => (
+            <span
+              key={l}
+              className={clsx('rounded px-1.5 py-0.5 text-[11px] font-mono', className)}
+            >
+              {l}
+            </span>
+          ))}
+        </div>
+      )}
+    </details>
   );
 }
 
@@ -147,20 +189,37 @@ function GoldPipelineDiff({
         </p>
       )}
 
-      <div className="grid gap-3 sm:grid-cols-2">
-        {labelChips('Only in gold', onlyA, 'bg-rose-100/90 text-rose-900')}
-        {labelChips('Only in pipeline output space', onlyB, 'bg-sky-100/80 text-sky-900')}
+      <div className="grid gap-3 sm:grid-cols-3">
+        <LabelChips
+          title="Gold only"
+          explainer="In this gold, not in pipeline output."
+          labels={onlyA}
+          className="bg-rose-100/90 text-rose-900"
+        />
+        <LabelChips
+          title="In pipeline only"
+          explainer="Predicted by pipeline, not in this gold."
+          labels={onlyB}
+          className="bg-sky-100/80 text-sky-900"
+        />
+        <LabelChips
+          title="In both"
+          explainer="Compared on strict string match during eval."
+          labels={both}
+          className="bg-gray-100 text-gray-800"
+        />
       </div>
-      <div className="grid gap-3 sm:grid-cols-2">
-        {labelChips('In both', both, 'bg-gray-100 text-gray-800')}
-        {labelChips(
-          'All gold labels',
-          goldLabels.slice().sort((a, b) => a.localeCompare(b)),
-          'bg-white text-gray-700 ring-1 ring-gray-200',
-        )}
-      </div>
-      <div>
-        {labelChips('Pipeline output_label_space (symbolic)', pipelineLabels, 'bg-violet-50 text-violet-900 ring-1 ring-violet-100')}
+      <div className="grid gap-2 sm:grid-cols-2">
+        <CollapsedLabelList
+          title="All gold labels"
+          labels={goldLabels.slice().sort((a, b) => a.localeCompare(b))}
+          className="bg-white text-gray-700 ring-1 ring-gray-200"
+        />
+        <CollapsedLabelList
+          title="Full output_label_space (symbolic)"
+          labels={pipelineLabels}
+          className="bg-violet-50 text-violet-900 ring-1 ring-violet-100"
+        />
       </div>
 
       {(mismatch || missingOutput) && (

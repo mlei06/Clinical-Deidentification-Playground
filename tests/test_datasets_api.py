@@ -1070,6 +1070,358 @@ def test_eval_dataset_splits_no_match_422(client, tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# Eval sampling
+# ---------------------------------------------------------------------------
+
+
+def _setup_sample_eval(client, tmp_path, count: int, *, name: str) -> None:
+    jsonl = _write_sample_jsonl(tmp_path / "data" / f"{name}.jsonl", count=count)
+    client.post(
+        "/datasets",
+        json={"name": name, "data_path": str(jsonl), "format": "jsonl"},
+    )
+    client.post("/pipelines", json={"name": f"{name}-pipe", "config": {"pipes": []}})
+
+
+def test_eval_sample_with_fixed_seed_is_deterministic(client, tmp_path):
+    _setup_sample_eval(client, tmp_path, count=10, name="eval-sample-seed")
+
+    def run_once():
+        resp = client.post(
+            "/eval/run",
+            json={
+                "pipeline_name": "eval-sample-seed-pipe",
+                "dataset_name": "eval-sample-seed",
+                "eval_mode": "sample",
+                "sample_size": 4,
+                "sample_seed": 12345,
+            },
+        )
+        assert resp.status_code == 201, resp.text
+        body = resp.json()
+        assert body["document_count"] == 4
+        sample = body["metrics"]["sample"]
+        assert sample == {
+            "eval_mode": "sample",
+            "sample_size": 4,
+            "sample_seed_used": 12345,
+            "sample_of_total": 10,
+        }
+        return sample
+
+    s1 = run_once()
+    s2 = run_once()
+    assert s1 == s2
+
+
+def test_eval_sample_without_seed_returns_used_seed(client, tmp_path):
+    _setup_sample_eval(client, tmp_path, count=5, name="eval-sample-noseed")
+
+    resp = client.post(
+        "/eval/run",
+        json={
+            "pipeline_name": "eval-sample-noseed-pipe",
+            "dataset_name": "eval-sample-noseed",
+            "eval_mode": "sample",
+            "sample_size": 2,
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert body["document_count"] == 2
+    sample = body["metrics"]["sample"]
+    assert sample["sample_size"] == 2
+    assert sample["sample_of_total"] == 5
+    assert isinstance(sample["sample_seed_used"], int)
+    assert sample["sample_seed_used"] >= 0
+    # Seed must fit in JS Number.MAX_SAFE_INTEGER (2**53 - 1). A 64-bit seed would
+    # lose precision on the client round-trip and silently break reproducibility
+    # when a user pastes the returned seed back as a fixed seed.
+    assert sample["sample_seed_used"] <= (2**53 - 1)
+
+
+def test_eval_sample_applies_splits_before_sizing(client, tmp_path):
+    jsonl = _write_jsonl_with_doc_splits(
+        tmp_path / "data" / "gold_splits_sample.jsonl",
+        ["train", "train", "train", "valid"],
+    )
+    client.post(
+        "/datasets",
+        json={"name": "eval-splitsample", "data_path": str(jsonl), "format": "jsonl"},
+    )
+    client.post("/pipelines", json={"name": "noop-splitsample", "config": {"pipes": []}})
+
+    resp = client.post(
+        "/eval/run",
+        json={
+            "pipeline_name": "noop-splitsample",
+            "dataset_name": "eval-splitsample",
+            "dataset_splits": ["train"],
+            "eval_mode": "sample",
+            "sample_size": 2,
+            "sample_seed": 7,
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert body["document_count"] == 2
+    sample = body["metrics"]["sample"]
+    assert sample["sample_of_total"] == 3  # only train docs available after split
+    assert sample["sample_size"] == 2
+    assert sample["sample_seed_used"] == 7
+
+
+def test_eval_sample_size_too_large_is_422(client, tmp_path):
+    _setup_sample_eval(client, tmp_path, count=3, name="eval-sample-big")
+
+    resp = client.post(
+        "/eval/run",
+        json={
+            "pipeline_name": "eval-sample-big-pipe",
+            "dataset_name": "eval-sample-big",
+            "eval_mode": "sample",
+            "sample_size": 99,
+        },
+    )
+    assert resp.status_code == 422
+    assert "sample_size" in resp.json()["detail"]
+
+
+def test_eval_sample_requires_positive_size(client, tmp_path):
+    _setup_sample_eval(client, tmp_path, count=3, name="eval-sample-missing")
+
+    resp = client.post(
+        "/eval/run",
+        json={
+            "pipeline_name": "eval-sample-missing-pipe",
+            "dataset_name": "eval-sample-missing",
+            "eval_mode": "sample",
+        },
+    )
+    assert resp.status_code == 422
+    assert "sample_size" in resp.json()["detail"]
+
+
+def test_eval_full_mode_has_no_sample_metadata(client, tmp_path):
+    _setup_sample_eval(client, tmp_path, count=2, name="eval-full-mode")
+
+    resp = client.post(
+        "/eval/run",
+        json={
+            "pipeline_name": "eval-full-mode-pipe",
+            "dataset_name": "eval-full-mode",
+            "eval_mode": "full",
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    assert "sample" not in resp.json()["metrics"]
+
+
+def test_eval_save_sample_as_registers_new_dataset(client, tmp_path):
+    _setup_sample_eval(client, tmp_path, count=6, name="eval-save-src")
+
+    resp = client.post(
+        "/eval/run",
+        json={
+            "pipeline_name": "eval-save-src-pipe",
+            "dataset_name": "eval-save-src",
+            "eval_mode": "sample",
+            "sample_size": 3,
+            "sample_seed": 1234,
+            "save_sample_as": {
+                "dataset_name": "eval-save-dst",
+                "description": "sampled subset from eval",
+            },
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    sample = body["metrics"]["sample"]
+    assert sample["saved_dataset_name"] == "eval-save-dst"
+
+    # New dataset is listed and carries provenance metadata.
+    listed = client.get("/datasets").json()
+    assert any(d["name"] == "eval-save-dst" for d in listed)
+    detail = client.get("/datasets/eval-save-dst").json()
+    assert detail["document_count"] == 3
+    provenance = detail["metadata"]["provenance"]
+    assert provenance == {
+        "derived_from": "eval-save-src",
+        "sample_seed": 1234,
+        "sample_size": 3,
+        "sample_of_total": 6,
+        "source_eval_pipeline": "eval-save-src-pipe",
+    }
+
+
+def test_eval_save_sample_as_collision_is_409(client, tmp_path):
+    _setup_sample_eval(client, tmp_path, count=4, name="eval-save-collide-src")
+    _setup_sample_eval(client, tmp_path, count=2, name="eval-save-collide-dst")
+
+    resp = client.post(
+        "/eval/run",
+        json={
+            "pipeline_name": "eval-save-collide-src-pipe",
+            "dataset_name": "eval-save-collide-src",
+            "eval_mode": "sample",
+            "sample_size": 2,
+            "sample_seed": 1,
+            "save_sample_as": {"dataset_name": "eval-save-collide-dst"},
+        },
+    )
+    assert resp.status_code == 409
+    assert "already exists" in resp.json()["detail"]
+
+
+def test_eval_save_sample_as_requires_sample_mode(client, tmp_path):
+    _setup_sample_eval(client, tmp_path, count=3, name="eval-save-fullmode")
+
+    resp = client.post(
+        "/eval/run",
+        json={
+            "pipeline_name": "eval-save-fullmode-pipe",
+            "dataset_name": "eval-save-fullmode",
+            "save_sample_as": {"dataset_name": "wont-save"},
+        },
+    )
+    assert resp.status_code == 422
+    assert "eval_mode" in resp.json()["detail"]
+    # The target dataset must not exist.
+    assert client.get("/datasets/wont-save").status_code == 404
+
+
+def test_eval_include_per_document_returns_compact_payload(client, tmp_path):
+    _setup_sample_eval(client, tmp_path, count=4, name="eval-perdoc-compact")
+
+    resp = client.post(
+        "/eval/run",
+        json={
+            "pipeline_name": "eval-perdoc-compact-pipe",
+            "dataset_name": "eval-perdoc-compact",
+            "include_per_document": True,
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    metrics = resp.json()["metrics"]
+    assert metrics["document_level_includes_spans"] is False
+    assert metrics["document_level_truncated"] is False
+    assert metrics["document_level_total"] == 4
+    items = metrics["document_level"]
+    assert len(items) == 4
+    first = items[0]
+    assert set(first) == {
+        "document_id",
+        "metrics",
+        "risk_weighted_recall",
+        "false_positive_count",
+        "false_negative_count",
+    }
+    # Pipeline is a no-op, so every gold span is a false negative.
+    assert first["false_negative_count"] > 0
+    assert first["false_positive_count"] == 0
+
+
+def test_eval_include_per_document_spans_adds_text_and_spans(client, tmp_path):
+    _setup_sample_eval(client, tmp_path, count=2, name="eval-perdoc-spans")
+
+    resp = client.post(
+        "/eval/run",
+        json={
+            "pipeline_name": "eval-perdoc-spans-pipe",
+            "dataset_name": "eval-perdoc-spans",
+            "include_per_document_spans": True,
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    metrics = resp.json()["metrics"]
+    assert metrics["document_level_includes_spans"] is True
+    item = metrics["document_level"][0]
+    assert "text" in item and item["text"]
+    assert isinstance(item["gold_spans"], list) and item["gold_spans"]
+    assert isinstance(item["pred_spans"], list)
+    assert isinstance(item["false_positives"], list)
+    assert isinstance(item["false_negatives"], list)
+    gold = item["gold_spans"][0]
+    assert set(gold) == {"start", "end", "label"}
+
+
+def test_eval_per_document_never_persisted(client, tmp_path):
+    _setup_sample_eval(client, tmp_path, count=2, name="eval-perdoc-persist")
+
+    resp = client.post(
+        "/eval/run",
+        json={
+            "pipeline_name": "eval-perdoc-persist-pipe",
+            "dataset_name": "eval-perdoc-persist",
+            "include_per_document_spans": True,
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    run_id = resp.json()["id"]
+
+    # Fetch the saved run back and confirm it does NOT carry per-doc fields.
+    fetched = client.get(f"/eval/runs/{run_id}").json()
+    metrics = fetched["metrics"]
+    assert "document_level" not in metrics
+    assert "document_level_truncated" not in metrics
+    assert "document_level_includes_spans" not in metrics
+
+
+def test_eval_per_document_default_omits_payload(client, tmp_path):
+    _setup_sample_eval(client, tmp_path, count=2, name="eval-perdoc-default")
+
+    resp = client.post(
+        "/eval/run",
+        json={
+            "pipeline_name": "eval-perdoc-default-pipe",
+            "dataset_name": "eval-perdoc-default",
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    metrics = resp.json()["metrics"]
+    assert "document_level" not in metrics
+
+
+def test_eval_per_document_truncates_at_limit(client, tmp_path, monkeypatch):
+    _setup_sample_eval(client, tmp_path, count=6, name="eval-perdoc-cap")
+
+    from clinical_deid.config import get_settings
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "eval_per_document_limit", 2)
+
+    resp = client.post(
+        "/eval/run",
+        json={
+            "pipeline_name": "eval-perdoc-cap-pipe",
+            "dataset_name": "eval-perdoc-cap",
+            "include_per_document": True,
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    metrics = resp.json()["metrics"]
+    assert metrics["document_level_truncated"] is True
+    assert metrics["document_level_total"] == 6
+    assert len(metrics["document_level"]) == 2
+
+
+def test_eval_save_sample_as_rejects_invalid_name(client, tmp_path):
+    _setup_sample_eval(client, tmp_path, count=3, name="eval-save-badname")
+
+    resp = client.post(
+        "/eval/run",
+        json={
+            "pipeline_name": "eval-save-badname-pipe",
+            "dataset_name": "eval-save-badname",
+            "eval_mode": "sample",
+            "sample_size": 1,
+            "save_sample_as": {"dataset_name": "../escape"},
+        },
+    )
+    assert resp.status_code == 422
+
+
+# ---------------------------------------------------------------------------
 # Ingest via saved pipeline
 # ---------------------------------------------------------------------------
 

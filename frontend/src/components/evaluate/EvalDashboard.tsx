@@ -1,11 +1,19 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { clsx } from 'clsx';
-import { Search, Shield } from 'lucide-react';
+import { Search, Shield, Database } from 'lucide-react';
 import MetricsCards from './MetricsCards';
 import PerLabelTable from './PerLabelTable';
 import ConfusionMatrix from './ConfusionMatrix';
 import RedactionDashboard from './RedactionDashboard';
-import type { EvalRunDetail, LabelMetricsDetail, MatchMetrics, RedactionMetrics } from '../../api/types';
+import EvalPerDocumentPanel from './EvalPerDocumentPanel';
+import type {
+  EvalPerDocumentItem,
+  EvalRunDetail,
+  LabelMetricsDetail,
+  MatchMetrics,
+  RedactionMetrics,
+} from '../../api/types';
 
 interface EvalDashboardProps {
   run: EvalRunDetail;
@@ -35,6 +43,10 @@ export default function EvalDashboard({ run }: EvalDashboardProps) {
   const hasOverallMetrics = Object.keys(overall).length > 0;
   const hasRedaction = !!metrics.has_redaction && !!metrics.redaction;
   const redaction = metrics.redaction as RedactionMetrics | undefined;
+  const sample = metrics.sample;
+  const perDocItems = Array.isArray(metrics.document_level)
+    ? (metrics.document_level as EvalPerDocumentItem[])
+    : undefined;
 
   const [activeTab, setActiveTab] = useState<EvalTab>(hasRedaction ? 'redaction' : 'detection');
 
@@ -55,6 +67,33 @@ export default function EvalDashboard({ run }: EvalDashboardProps) {
           Created: <span className="font-medium text-gray-700">{new Date(run.created_at).toLocaleString()}</span>
         </span>
       </div>
+      {sample && (
+        <div className="flex flex-wrap items-center gap-2 rounded-md border border-indigo-100 bg-indigo-50/50 px-3 py-1.5 text-xs text-indigo-900">
+          <span className="rounded bg-indigo-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide">
+            Sampled
+          </span>
+          <span>
+            {sample.sample_size} of {sample.sample_of_total} documents
+          </span>
+          <span className="text-indigo-700/80">·</span>
+          <span>
+            seed <code className="rounded bg-white/80 px-1 font-mono">{sample.sample_seed_used}</code>
+          </span>
+          {sample.saved_dataset_name && (
+            <>
+              <span className="text-indigo-700/80">·</span>
+              <span className="text-indigo-800">saved as</span>
+              <Link
+                to="/datasets"
+                className="inline-flex items-center gap-1 rounded bg-white px-1.5 py-0.5 font-mono text-[11px] text-indigo-900 ring-1 ring-indigo-200 hover:bg-indigo-50"
+              >
+                <Database size={11} className="opacity-70" />
+                {sample.saved_dataset_name}
+              </Link>
+            </>
+          )}
+        </div>
+      )}
 
       {/* Tab toggle — only show when redaction metrics exist */}
       {hasRedaction && (
@@ -100,6 +139,14 @@ export default function EvalDashboard({ run }: EvalDashboardProps) {
           <PerLabelTable perLabel={perLabel} />
           {labelConfusion && Object.keys(labelConfusion).length > 0 && (
             <ConfusionMatrix confusion={labelConfusion} />
+          )}
+          {perDocItems && perDocItems.length > 0 && (
+            <EvalPerDocumentPanel
+              items={perDocItems}
+              truncated={!!metrics.document_level_truncated}
+              total={metrics.document_level_total ?? perDocItems.length}
+              includesSpans={!!metrics.document_level_includes_spans}
+            />
           )}
         </>
       )}

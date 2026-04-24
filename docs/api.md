@@ -126,6 +126,37 @@ Base path: `/inference`. Saved runs under `data/inference_runs/` — list, get, 
 
 Base path: `/eval` — `POST /eval/run`, list/detail/compare runs (admin when auth is on).
 
+### `POST /eval/run`
+
+Core body: `pipeline_name` + one of `dataset_name` / `dataset_path`, optional `dataset_splits`, `risk_profile_name`.
+
+Optional **sampling** (`eval_mode == "sample"`):
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `eval_mode` | `"full" \| "sample"` | Defaults to `"full"`. |
+| `sample_size` | `int` | Required when `sample`; `1 <= sample_size <= len(documents_after_split)` (422 otherwise). |
+| `sample_seed` | `int \| null` | Integer → deterministic (stable sort by `document.id`, then `Random(seed).sample`). `null`/omitted → server draws via `secrets.randbits(64)` and echoes it. |
+
+When sampled, the saved eval JSON and `GET /eval/runs/{id}` include `metrics.sample = { eval_mode, sample_size, sample_seed_used, sample_of_total }`. Sampling runs **after** the optional split filter; `sample_of_total` is the split-filtered size.
+
+**Save the sample as a registered dataset** (requires `eval_mode == "sample"`):
+
+```json
+{"save_sample_as": {"dataset_name": "train_valid_sample_500", "description": "Optional"}}
+```
+
+On success, the new dataset is materialized under `CLINICAL_DEID_CORPORA_DIR/<name>/` with `metadata.provenance` recording `derived_from` (parent dataset name or path), `sample_seed`, `sample_size`, `sample_of_total`, `source_eval_pipeline`, and `source_splits`. The response's `metrics.sample.saved_dataset_name` echoes the new name. Collisions with an existing dataset return **409**; using `save_sample_as` with `eval_mode == "full"` returns **422**.
+
+**Per-document inspection** (response-only — never persisted to the eval JSON):
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `include_per_document` | `bool` | Default `false`. Adds `metrics.document_level` to the HTTP response with one item per document (`document_id`, full `metrics`, `risk_weighted_recall`, `false_positive_count`, `false_negative_count`), sorted worst strict-F1 first. |
+| `include_per_document_spans` | `bool` | Default `false`. Implies `include_per_document`; each item additionally carries `text`, `gold_spans`, `pred_spans`, `false_positives`, `false_negatives` — useful for side-by-side review in the UI, but the payload includes raw document text (admin only). |
+
+The payload is capped at `Settings.eval_per_document_limit` (default **500**, env var `CLINICAL_DEID_EVAL_PER_DOCUMENT_LIMIT`); overflow is flagged via `metrics.document_level_truncated`. Fetching a run via `GET /eval/runs/{id}` will **not** return per-document data — re-run with the flag to inspect again.
+
 ---
 
 ## Datasets (admin)

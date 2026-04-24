@@ -52,6 +52,7 @@ Regex pattern packs (`clinical_phi`, `generic_pii`) and surrogate strategy packs
 | `CLINICAL_DEID_ADMIN_API_KEYS` | `[]` | Admin-scope API keys (JSON array) |
 | `CLINICAL_DEID_INFERENCE_API_KEYS` | `[]` | Inference-scope API keys (JSON array) |
 | `CLINICAL_DEID_MAX_BODY_BYTES` | `10485760` | Reject requests with `Content-Length` above this (10 MiB) |
+| `CLINICAL_DEID_EVAL_PER_DOCUMENT_LIMIT` | `500` | Cap on `metrics.document_level` items when `POST /eval/run` is called with `include_per_document[_spans]` (overflow flagged as `document_level_truncated`). |
 
 List-valued variables must be JSON arrays, e.g. `CLINICAL_DEID_CORS_ORIGINS='["https://app.example.com"]'`.
 

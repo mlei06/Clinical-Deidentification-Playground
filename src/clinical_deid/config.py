@@ -85,6 +85,16 @@ class Settings(BaseSettings):
         ),
     )
 
+    eval_per_document_limit: int = Field(
+        default=500,
+        description=(
+            "Cap on the number of per-document items returned when POST /eval/run is "
+            "called with include_per_document=true. Items are sorted worst-F1 first, so "
+            "the cap keeps the hardest cases. Responses flag a truncated payload via "
+            "metrics.document_level_truncated."
+        ),
+    )
+
     #: For :class:`~clinical_deid.synthesis.client.OpenAICompatibleChatClient`. Loaded from ``.env`` or the environment. Either ``OPENAI_API_KEY`` or ``CLINICAL_DEID_OPENAI_API_KEY`` may be set.
     openai_api_key: str | None = Field(
         default=None,

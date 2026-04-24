@@ -401,6 +401,48 @@ def import_jsonl_dataset(
     return manifest
 
 
+def save_document_subset(
+    corpora_dir: Path,
+    name: str,
+    documents: list[AnnotatedDocument],
+    *,
+    description: str = "",
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Write an in-memory :class:`AnnotatedDocument` list as a new registered dataset.
+
+    Used by ``/eval/run`` with ``save_sample_as`` so a sampled subset becomes a named
+    dataset without a round-trip through disk. Errors (name collision, empty list)
+    propagate as :class:`ValueError`; the home directory is cleaned up on failure.
+    """
+    _validate_name(name)
+    _ensure_corpora_root(corpora_dir)
+    if not documents:
+        raise ValueError("Cannot save an empty document subset")
+    home = dataset_home(corpora_dir, name)
+    if home.exists():
+        raise ValueError(
+            f"Dataset directory already exists: {home}. "
+            "Choose another name or remove the existing dataset."
+        )
+    home.mkdir(parents=True)
+    try:
+        write_annotated_corpus(documents, jsonl=home / CORPUS_JSONL_NAME)
+        summary = _compute_summary(documents)
+        manifest = _build_manifest(
+            name,
+            description=description,
+            metadata=metadata or {},
+            summary=summary,
+        )
+        save_dataset_manifest(corpora_dir, name, manifest)
+    except Exception:
+        if home.is_dir():
+            shutil.rmtree(home, ignore_errors=True)
+        raise
+    return manifest
+
+
 def register_dataset(
     corpora_dir: Path,
     name: str,

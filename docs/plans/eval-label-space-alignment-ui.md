@@ -32,7 +32,7 @@ Users see **raw** gold label set *A* vs pipeline symbolic `config.output_label_s
 
 `/create?load=` + PipelineBuilder auto-load from alignment CTA.
 
-### Phase 5 — Alignment panel UX refresh (clarity & de-duplication) — [ ]
+### Phase 5 — Alignment panel UX refresh (clarity & de-duplication) — [x]
 
 **Problem:** Full pipeline list (*B*) is confused with *B* \\ *A* (“only in pipeline”); the violet block duplicates information already implied by *B* ∩ *A* and *B* \\ *A*.
 
@@ -44,13 +44,13 @@ Users see **raw** gold label set *A* vs pipeline symbolic `config.output_label_s
 
 **Definition of done (Phase 5):**
 
-- [ ] Titles and explainer remove the “two pipeline spaces” confusion.
-- [ ] Counts on each partition; full *B* list collapsed by default.
-- [ ] `npm run build` (frontend) passes.
+- [x] Titles and explainer remove the “two pipeline spaces” confusion.
+- [x] Counts on each partition; full *B* list collapsed by default.
+- [x] `npm run build` (frontend) passes.
 
 ---
 
-## Part B — Sampled evaluation (corpus mode + seed)
+## Part B — Sampled evaluation (corpus mode + seed) — [x]
 
 ### User stories
 
@@ -112,7 +112,7 @@ Extend `EvalRunDetail` / stored JSON (and TS types) with **optional** metadata (
 
 ---
 
-## Part C — Save sample as a new registered dataset (optional)
+## Part C — Save sample as a new registered dataset (optional) — [x]
 
 ### User story
 
@@ -138,7 +138,7 @@ After configuring a **sample** (or even after a run — usually **before/after r
 
 ---
 
-## Part D — Per-document inspection (gold vs predicted spans, paging)
+## Part D — Per-document inspection (gold vs predicted spans, paging) — [x]
 
 ### Current state
 
