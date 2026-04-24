@@ -159,6 +159,7 @@ export default function TransformForm({ sourceDataset, onCreated }: TransformFor
   }, [subsetDocCount]);
 
   const stripSplitsPartitioning = !resplitEnabled && ignoreExistingSplits;
+  const inPlace = destinationMode === 'in_place';
 
   const previewRequest: TransformPreviewRequest | null = useMemo(() => {
     if (!source) return null;
@@ -168,6 +169,7 @@ export default function TransformForm({ sourceDataset, onCreated }: TransformFor
       const keep = filterMode === 'keep' && keepLabels.length ? [...keepLabels] : undefined;
       return {
         source_dataset: source,
+        in_place: inPlace,
         ...toSourceSplitsParam(targetSplits),
         transform_mode: 'schema',
         drop_labels: drop,
@@ -179,6 +181,7 @@ export default function TransformForm({ sourceDataset, onCreated }: TransformFor
     if (subStep === 'sampling') {
       return {
         source_dataset: source,
+        in_place: inPlace,
         ...toSourceSplitsParam(targetSplits),
         transform_mode: 'sampling',
         target_documents: targetDocumentsForApi,
@@ -189,6 +192,7 @@ export default function TransformForm({ sourceDataset, onCreated }: TransformFor
     }
     return {
       source_dataset: source,
+      in_place: inPlace,
       ...toSourceSplitsParam(targetSplits),
       transform_mode: 'partitioning',
       resplit: resplitEnabled ? rowsToResplitPayload(partRows) : undefined,
@@ -199,6 +203,7 @@ export default function TransformForm({ sourceDataset, onCreated }: TransformFor
     };
   }, [
     source,
+    inPlace,
     subStep,
     targetSplits,
     filterMode,
@@ -247,8 +252,6 @@ export default function TransformForm({ sourceDataset, onCreated }: TransformFor
     }
     return true;
   }, [subStep, dropMappingConflict, resplitEnabled, partRows]);
-
-  const inPlace = destinationMode === 'in_place';
 
   const handleExecute = useCallback(() => {
     if (!source || !previewRequest || !canSubmit) return;

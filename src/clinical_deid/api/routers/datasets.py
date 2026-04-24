@@ -177,6 +177,9 @@ class TransformPreviewRequest(BaseModel):
     """Dry-run the same transforms as ``TransformRequest`` (no write)."""
 
     source_dataset: str
+    #: When true, match :func:`transform_dataset` merge semantics (rest + transformed work). When
+    #: false and ``source_splits`` is set, the projected output is the work subset only.
+    in_place: bool = False
     source_splits: list[str] | None = None
     drop_labels: list[str] | None = None
     keep_labels: list[str] | None = None
@@ -217,7 +220,8 @@ class TransformPreviewResponse(BaseModel):
     projected_document_count: int
     projected_span_count: int
     split_document_counts: dict[str, int] | None = None
-    #: Documents not in ``source_splits`` (when that filter is set), left unchanged in the real transform.
+    #: Count of documents outside ``source_splits`` (when the filter is set). Omitted from the
+    #: output of a *new* transform; left unchanged in the corpus for an *in-place* transform.
     untouched_document_count: int = 0
     conflicts: list[str] = Field(default_factory=list)
 
@@ -1009,7 +1013,13 @@ def preview_transform_dataset(body: TransformPreviewRequest) -> TransformPreview
 
     n_rest = len(rest)
     raw["untouched_document_count"] = n_rest
-    raw["projected_document_count"] = int(raw["projected_document_count"]) + n_rest
+    # In-place: output corpus includes untouched splits (merge). New dataset with source_splits:
+    # output is the filtered work set only.
+    has_split_filter = body.source_splits and any(
+        str(s).strip() for s in (body.source_splits or [])
+    )
+    if body.in_place or not has_split_filter:
+        raw["projected_document_count"] = int(raw["projected_document_count"]) + n_rest
     return TransformPreviewResponse(**raw)
 
 
@@ -1087,7 +1097,15 @@ def transform_dataset(
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-    transformed = merge_rest_work(rest, work_out)
+    has_split_filter = body.source_splits and any(
+        str(s).strip() for s in (body.source_splits or [])
+    )
+    if not body.in_place and has_split_filter:
+        # New dataset: source_splits limits which documents appear in the output (sub-corpus).
+        transformed = work_out
+    else:
+        # In-place, or no split filter: full corpus; non-work docs pass through unchanged.
+        transformed = merge_rest_work(rest, work_out)
 
     if not transformed:
         raise HTTPException(status_code=422, detail="Transform produced no documents")

@@ -451,6 +451,8 @@ export interface DatasetSchemaResponse {
 
 export interface TransformPreviewRequest {
   source_dataset: string;
+  /** New dataset (default) vs in-place; must match the transform you will run. */
+  in_place?: boolean;
   source_splits?: string[];
   drop_labels?: string[];
   keep_labels?: string[];

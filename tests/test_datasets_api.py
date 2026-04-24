@@ -721,6 +721,44 @@ def test_transform_preview_endpoint(client, tmp_path):
     assert len(clash.json()["conflicts"]) >= 1
 
 
+def test_transform_preview_source_splits_in_place_merges_counts(client, tmp_path):
+    """New dataset: work subset only. In-place: full corpus (rest + transformed work)."""
+    jsonl = _write_jsonl_with_doc_splits(
+        tmp_path / "data" / "psplit.jsonl",
+        ["train", "train", "valid", "test", "test"],
+    )
+    client.post(
+        "/datasets",
+        json={"name": "psplit-src", "data_path": str(jsonl), "format": "jsonl"},
+    )
+    p_new = client.post(
+        "/datasets/transform/preview",
+        json={
+            "source_dataset": "psplit-src",
+            "in_place": False,
+            "source_splits": ["train"],
+            "transform_mode": "schema",
+        },
+    )
+    assert p_new.status_code == 200, p_new.text
+    b = p_new.json()
+    assert b["source_document_count"] == 2
+    assert b["untouched_document_count"] == 3
+    assert b["projected_document_count"] == 2
+
+    p_ip = client.post(
+        "/datasets/transform/preview",
+        json={
+            "source_dataset": "psplit-src",
+            "in_place": True,
+            "source_splits": ["train"],
+            "transform_mode": "schema",
+        },
+    )
+    assert p_ip.status_code == 200, p_ip.text
+    assert p_ip.json()["projected_document_count"] == 5
+
+
 def test_transform_preview_rejects_drop_and_keep(client, tmp_path):
     jsonl = _write_sample_jsonl(tmp_path / "data" / "sample.jsonl", count=2)
     client.post(
