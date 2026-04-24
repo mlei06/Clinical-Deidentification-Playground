@@ -47,7 +47,7 @@ export default function TransformForm({ sourceDataset, onCreated }: TransformFor
   const [keepLabels, setKeepLabels] = useState<string[]>([]);
   const [dropLabels, setDropLabels] = useState<string[]>([]);
   const [mappingRows, setMappingRows] = useState<MappingRow[]>(initialMappingRows);
-  /** Empty = full pool. Otherwise exact target_documents (downsample/upsample). */
+  /** Empty = no resize (keep all documents in the selected split scope). Otherwise exact target_documents. */
   const [subsetDocCount, setSubsetDocCount] = useState('');
   const [boostLabel, setBoostLabel] = useState('');
   const [boostExtraCopies, setBoostExtraCopies] = useState(0);
@@ -291,8 +291,43 @@ export default function TransformForm({ sourceDataset, onCreated }: TransformFor
   }, [source, outputName, previewRequest, canSubmit, description, mutation, onCreated, inPlace, subStep, boostLabel, boostExtraCopies]);
 
   const dropFieldInvalid = dropMappingConflict.length > 0;
-  const partitionDocHint = previewResult?.source_document_count ?? sourceDocCount;
-  const samplingPoolDocCount = previewResult?.source_document_count ?? sourceDocCount;
+
+  /** Document count in scope for the header’s target splits (from `split_document_counts`), or full corpus when no split filter. */
+  const workSetDocumentCountFromHeader = useMemo(() => {
+    if (targetSplits.length === 0) {
+      return sourceDocCount;
+    }
+    if (targetSplitOptions.length === 0) {
+      return null;
+    }
+    return targetSplits.reduce((acc, key) => {
+      const o = targetSplitOptions.find((x) => x.key === key);
+      return acc + (o?.count ?? 0);
+    }, 0);
+  }, [targetSplits, targetSplitOptions, sourceDocCount]);
+
+  /**
+   * Documents in source_splits scope; match header when preview is loading. Preview (server) when idle.
+   */
+  const workSetDocumentCount = useMemo(() => {
+    const fromHeader = workSetDocumentCountFromHeader;
+    const fromPreview = previewResult?.source_document_count;
+    if (previewMutation.isPending) {
+      // Do not use a stale fromPreview from before the last split/scope change.
+      return fromHeader != null ? fromHeader : sourceDocCount;
+    }
+    if (fromPreview != null) {
+      return fromPreview;
+    }
+    return fromHeader ?? sourceDocCount;
+  }, [
+    workSetDocumentCountFromHeader,
+    previewResult?.source_document_count,
+    previewMutation.isPending,
+    sourceDocCount,
+  ]);
+
+  const partitionDocHint = workSetDocumentCount;
   const previewServerConflicts = previewResult?.conflicts ?? [];
   const submitLabel =
     subStep === 'schema' ? 'Execute schema' : subStep === 'sampling' ? 'Execute sampling' : 'Execute partitioning';
@@ -377,12 +412,11 @@ export default function TransformForm({ sourceDataset, onCreated }: TransformFor
           <TransformSamplingTab
             source={source}
             sourceDocCount={sourceDocCount}
-            poolDocCount={samplingPoolDocCount}
+            workDocumentCount={workSetDocumentCount}
             schemaLoading={schemaLoading}
             schemaLabels={schemaLabels}
             targetDocumentCount={subsetDocCount}
             onTargetDocumentCountChange={setSubsetDocCount}
-            onUseFullPool={() => setSubsetDocCount('')}
             transformSeed={transformSeed}
             onTransformSeedChange={setTransformSeed}
             boostLabel={boostLabel}

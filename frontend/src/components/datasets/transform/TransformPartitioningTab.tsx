@@ -6,7 +6,7 @@ interface TransformPartitioningTabProps {
   onResplitEnabledChange: (on: boolean) => void;
   partRows: SplitPartRow[];
   onPartRowsChange: (rows: SplitPartRow[]) => void;
-  /** Documents in scope (targeted pool) for count hints. */
+  /** Documents in selected target splits (for re-split editor hints). */
   partitioningDocHint: number;
   ignoreExistingSplits: boolean;
   onIgnoreExistingSplitsChange: (v: boolean) => void;
@@ -82,7 +82,7 @@ export default function TransformPartitioningTab({
                 <span className="font-medium text-gray-800">Flatten first</span>
                 <span className="mt-0.5 block text-xs text-gray-500">
                   Remove existing <code className="rounded bg-gray-100 px-0.5">split</code> on targeted documents
-                  before assigning new buckets (treats them as one pool).
+                  before assigning new buckets (treats them as one set).
                 </span>
               </span>
             </label>

@@ -13,7 +13,7 @@ function parseTargetN(raw: string): number | null {
 
 function samplingExecuteActionLabel(
   targetDocumentCount: string,
-  pool: number,
+  documentsInScope: number,
 ): { primary: string; detail: string } {
   const n = parseTargetN(targetDocumentCount);
   if (n != null) {
@@ -22,22 +22,21 @@ function samplingExecuteActionLabel(
       detail: 'Applies random resize and optional label boost with the current seed',
     };
   }
-  const p = pool > 0 ? pool.toLocaleString() : '—';
+  const d = documentsInScope > 0 ? documentsInScope.toLocaleString() : '—';
   return {
-    primary: `Run sampling (full ${p}–doc pool)`,
-    detail: 'No target size: keeps every document in the pool, then optional boost',
+    primary: `Run sampling (${d} document${documentsInScope === 1 ? '' : 's'} in selected splits)`,
+    detail: 'No target size: keeps every document in scope, then optional boost',
   };
 }
 
 interface TransformSamplingTabProps {
   source: string;
-  sourceDocCount: number;
-  poolDocCount: number;
+  /** Documents matching header target splits (for presets and size hints; aligned with server preview). */
+  workDocumentCount: number;
   schemaLoading: boolean;
   schemaLabels: DatasetLabelFrequency[];
   targetDocumentCount: string;
   onTargetDocumentCountChange: (v: string) => void;
-  onUseFullPool: () => void;
   transformSeed: number;
   onTransformSeedChange: (n: number) => void;
   boostLabel: string;
@@ -60,13 +59,11 @@ interface TransformSamplingTabProps {
 
 export default function TransformSamplingTab({
   source,
-  sourceDocCount,
-  poolDocCount,
+  workDocumentCount,
   schemaLoading,
   schemaLabels,
   targetDocumentCount,
   onTargetDocumentCountChange,
-  onUseFullPool,
   transformSeed,
   onTransformSeedChange,
   boostLabel,
@@ -93,33 +90,33 @@ export default function TransformSamplingTab({
   }
 
   const nTarget = parseTargetN(targetDocumentCount);
-  const pool = poolDocCount > 0 ? poolDocCount : sourceDocCount;
-  const showCompare = nTarget != null && pool > 0;
+  const nScope = workDocumentCount;
+  const showCompare = nTarget != null && nScope > 0;
   const deltaCaption =
     nTarget == null
-      ? 'Leave empty to keep every document in the pool (no resize).'
-      : nTarget < pool
+      ? 'Leave empty to keep every document in the selected splits (no resize).'
+      : nTarget < nScope
         ? 'Downsampling: random subset without replacement.'
-        : nTarget > pool
+        : nTarget > nScope
           ? 'Upsampling: documents drawn with replacement until the count is met.'
-          : 'Target matches pool size.';
+          : 'Target size matches the number of documents in the selected splits.';
 
   const { primary: executePrimary, detail: executeDetail } = samplingExecuteActionLabel(
     targetDocumentCount,
-    pool,
+    nScope,
   );
 
   const setPreset = (n: number) => onTargetDocumentCountChange(String(Math.max(0, Math.round(n))));
 
   const quickPresets =
-    pool > 0
+    nScope > 0
       ? [
-          { label: '25%' as const, v: () => setPreset(pool * 0.25) },
-          { label: '50%' as const, v: () => setPreset(pool * 0.5) },
-          { label: '75%' as const, v: () => setPreset(pool * 0.75) },
-          { label: '100%' as const, v: () => setPreset(pool) },
-          { label: '1.5×' as const, v: () => setPreset(pool * 1.5) },
-          { label: '2×' as const, v: () => setPreset(pool * 2) },
+          { label: '25%' as const, v: () => setPreset(nScope * 0.25) },
+          { label: '50%' as const, v: () => setPreset(nScope * 0.5) },
+          { label: '75%' as const, v: () => setPreset(nScope * 0.75) },
+          { label: '100%' as const, v: () => setPreset(nScope) },
+          { label: '1.5×' as const, v: () => setPreset(nScope * 1.5) },
+          { label: '2×' as const, v: () => setPreset(nScope * 2) },
         ]
       : [];
 
@@ -129,8 +126,9 @@ export default function TransformSamplingTab({
   return (
     <div className="space-y-4">
       <p className="text-xs text-gray-500">
-        <strong>Target splits</strong> in the header define the pool. This tab resizes, boosts, and uses the random seed
-        for reproducibility.
+        Choose <strong>target splits</strong> in the header, then set an optional <strong>target size</strong> and
+        optional <strong>label boost</strong>. <strong>Quick targets</strong> are fractions of the documents in the
+        selected splits. The random seed applies to resize, boost, and the transform run.
       </p>
 
       <div className="grid grid-cols-1 items-start gap-6 xl:grid-cols-[1fr,16.5rem]">
@@ -138,16 +136,7 @@ export default function TransformSamplingTab({
           {/* Top: 2 columns — target + seed | quick targets */}
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
             <div className="rounded-md bg-slate-50 p-3">
-              <p className="text-[11px] font-medium text-gray-500">
-                Pool:{' '}
-                <span className="font-mono text-gray-800 tabular-nums">
-                  {poolDocCount > 0 ? poolDocCount.toLocaleString() : '—'}
-                </span>
-                {poolDocCount <= 0 && sourceDocCount > 0 && (
-                  <span className="ml-1 text-gray-400">(dataset: {sourceDocCount.toLocaleString()})</span>
-                )}
-              </p>
-              <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-end">
+              <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-end">
                 <div className="min-w-0 flex-1">
                   <label
                     htmlFor="sampling-target-n"
@@ -163,11 +152,11 @@ export default function TransformSamplingTab({
                     inputMode="numeric"
                     value={targetDocumentCount}
                     onChange={(e) => onTargetDocumentCountChange(e.target.value)}
-                    placeholder={pool > 0 ? `e.g. ${Math.max(1, Math.floor(pool / 2))}` : 'e.g. 1000'}
+                    placeholder={nScope > 0 ? `e.g. ${Math.max(1, Math.floor(nScope / 2))}` : 'e.g. 1000'}
                     className="mt-0.5 w-full min-w-0 rounded border border-slate-200 bg-white px-2.5 py-1.5 font-mono text-sm font-semibold tabular-nums text-gray-900 shadow-sm focus:border-slate-400 focus:ring-1 focus:ring-slate-300 focus:outline-none"
                   />
                 </div>
-                <div className="w-full min-w-0 sm:w-28 sm:flex-shrink-0">
+                <div className="w-full min-w-0 sm:w-36 sm:flex-shrink-0">
                   <label
                     htmlFor="sampling-seed"
                     className="text-xs font-medium text-gray-700"
@@ -182,21 +171,14 @@ export default function TransformSamplingTab({
                     className="mt-0.5 w-full rounded border border-slate-200 bg-white px-2.5 py-1.5 font-mono text-sm tabular-nums text-gray-900 shadow-sm focus:border-slate-400 focus:ring-1 focus:ring-slate-300 focus:outline-none"
                   />
                 </div>
-                <button
-                  type="button"
-                  onClick={onUseFullPool}
-                  className="w-full rounded border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-800 shadow-sm hover:bg-slate-100 sm:mb-0.5 sm:w-auto sm:shrink-0"
-                >
-                  Use full pool
-                </button>
               </div>
               {showCompare && nTarget != null && (
                 <p className="mt-1.5 text-xs italic text-slate-600">
-                  {nTarget < pool
-                    ? `Downsample by ${(pool - nTarget).toLocaleString()} document${pool - nTarget === 1 ? '' : 's'}.`
-                    : nTarget > pool
-                      ? `Upsample by ${(nTarget - pool).toLocaleString()} (replacement).`
-                      : 'Same size as pool.'}
+                  {nTarget < nScope
+                    ? `Downsample by ${(nScope - nTarget).toLocaleString()} document${nScope - nTarget === 1 ? '' : 's'}.`
+                    : nTarget > nScope
+                      ? `Upsample by ${(nTarget - nScope).toLocaleString()} (replacement).`
+                      : 'Target size matches documents in the selected splits.'}
                 </p>
               )}
               <p className="mt-1 text-[11px] italic text-slate-500">{deltaCaption}</p>
@@ -343,13 +325,13 @@ export default function TransformSamplingTab({
               >
                 <tbody>
                   <tr className="border-b border-slate-100">
-                    <td className="px-2.5 py-1.5 text-slate-600">Pool (work set)</td>
+                    <td className="px-2.5 py-1.5 text-slate-600">Source documents</td>
                     <td className="px-2.5 py-1.5 text-right font-mono tabular-nums text-slate-900">
                       {previewResult.source_document_count.toLocaleString()} docs
                     </td>
                   </tr>
                   <tr className="border-b border-slate-100">
-                    <td className="px-2.5 py-1.5 text-slate-600">Spans in pool</td>
+                    <td className="px-2.5 py-1.5 text-slate-600">Spans (before resize)</td>
                     <td className="px-2.5 py-1.5 text-right font-mono tabular-nums text-slate-900">
                       {previewResult.source_span_count.toLocaleString()}
                     </td>
