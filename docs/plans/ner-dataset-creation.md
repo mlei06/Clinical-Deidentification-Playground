@@ -85,7 +85,7 @@ Today the building blocks exist (CLI batch, dataset registry, BRAT export, span 
 
 ### D1 — Core algorithm
 
-- Refactor surrogate application into a **single function** used by `apply_output_mode` and by dataset export, e.g. `surrogate_text_with_spans(original_text, spans, *, seed, consistency) -> tuple[str, list[PHISpan]]`.
+- Refactor surrogate application into a **single function** used by `apply_output_mode` and by dataset export, e.g. `surrogate_text_with_spans(original_text, spans, *, seed, consistency) -> tuple[str, list[EntitySpan]]`.
 - **Order:** Keep **right-to-left** replacement on **original** indices (same as today in `apply_output_mode`) so each replacement still slices the correct source substring from `original_text`.
 - **Non-overlapping spans:** Require **resolved** spans (longest-non-overlapping or explicit policy). Overlaps: reject with 422 or run `resolve_spans` pipeline step before surrogate.
 - **Output spans:** After each replacement at `(start, end)`, record the new span `(start, start + len(replacement))` in the **current** working string; when applying the next replacement to the **left**, **shift** already-recorded surrogate spans by `Δlength` for the segment just replaced (standard interval shift). Implement helper `shift_spans_after(spans, pivot_start, delta)` for spans with `start >= pivot_start`.

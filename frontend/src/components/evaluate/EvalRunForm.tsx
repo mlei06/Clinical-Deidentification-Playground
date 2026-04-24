@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Play, Loader2 } from 'lucide-react';
 import PipelineSelector from '../shared/PipelineSelector';
+import EvalLabelAlignment from './EvalLabelAlignment';
 import { useRunEvaluation } from '../../hooks/useEvalRuns';
 import { useDatasets } from '../../hooks/useDatasets';
 import type { EvalRunDetail } from '../../api/types';
@@ -183,6 +184,12 @@ export default function EvalRunForm({ onResult }: EvalRunFormProps) {
           No registered datasets. Register one under Datasets or use &quot;Path on server&quot;.
         </p>
       )}
+
+      <EvalLabelAlignment
+        sourceMode={sourceMode}
+        datasetName={datasetName}
+        pipelineName={pipeline}
+      />
     </div>
   );
 }

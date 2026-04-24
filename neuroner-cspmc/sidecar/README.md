@@ -40,4 +40,4 @@ Or set `base_url` on the pipe config. Override the port in `compose.yaml` if nee
 
 The main app pipe usually sends **`model`** only; set optional **`model_folder`** in the pipeline config to pass a full container path (e.g. `/models/neuroner/my_export`).
 
-Each entity includes optional **`confidence`** (0–1): softmax probability of the predicted label at each token, averaged over tokens overlapping the span. The main `neuroner_ner` pipe passes this through to **`PHISpan.confidence`** without filtering spans.
+Each entity includes optional **`confidence`** (0–1): softmax probability of the predicted label at each token, averaged over tokens overlapping the span. The main `neuroner_ner` pipe passes this through to **`EntitySpan.confidence`** without filtering spans.

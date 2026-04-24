@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from clinical_deid.domain import AnnotatedDocument, Document, PHISpan
+from clinical_deid.domain import AnnotatedDocument, Document, EntitySpan
 from clinical_deid.training_export import (
     FORMATS,
     _bio_tags,
@@ -33,7 +33,7 @@ def _make_doc(
 ) -> AnnotatedDocument:
     return AnnotatedDocument(
         document=Document(id=doc_id, text=text),
-        spans=[PHISpan(start=s, end=e, label=l) for s, e, l in spans],
+        spans=[EntitySpan(start=s, end=e, label=label) for s, e, label in spans],
     )
 
 
@@ -83,7 +83,7 @@ def test_tokenize_preserves_offsets():
 
 def test_bio_tags_simple():
     tokens = _tokenize("Patient John Smith DOB 01/15/1980")
-    spans = [PHISpan(start=8, end=18, label="NAME")]
+    spans = [EntitySpan(start=8, end=18, label="NAME")]
     tags = _bio_tags(tokens, spans)
     assert tags == ["O", "B-NAME", "I-NAME", "O", "O"]
 
@@ -96,8 +96,8 @@ def test_bio_tags_no_spans():
 def test_bio_tags_multiple_spans():
     tokens = _tokenize("Patient John Smith DOB 01/15/1980")
     spans = [
-        PHISpan(start=8, end=18, label="NAME"),
-        PHISpan(start=23, end=33, label="DATE"),
+        EntitySpan(start=8, end=18, label="NAME"),
+        EntitySpan(start=23, end=33, label="DATE"),
     ]
     tags = _bio_tags(tokens, spans)
     assert tags == ["O", "B-NAME", "I-NAME", "O", "B-DATE"]
@@ -105,7 +105,7 @@ def test_bio_tags_multiple_spans():
 
 def test_bio_tags_single_token_span():
     tokens = _tokenize("Call 555-1234 now")
-    spans = [PHISpan(start=5, end=13, label="PHONE")]
+    spans = [EntitySpan(start=5, end=13, label="PHONE")]
     tags = _bio_tags(tokens, spans)
     assert tags == ["O", "B-PHONE", "O"]
 
@@ -123,14 +123,12 @@ def test_to_conll_format(sample_docs):
     assert lines[0] == "-DOCSTART- -X- O O"
     assert lines[1] == ""
 
-    # Find token lines for first doc
-    token_lines = [l for l in lines[2:] if l and not l.startswith("-DOCSTART-")]
     # First token line should be "Patient O"
-    first_batch = []
-    for l in lines[2:]:
-        if l == "":
+    first_batch: list[str] = []
+    for line in lines[2:]:
+        if line == "":
             break
-        first_batch.append(l)
+        first_batch.append(line)
     assert first_batch[0] == "Patient O"
     assert first_batch[1] == "John B-NAME"
     assert first_batch[2] == "Smith I-NAME"

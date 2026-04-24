@@ -3,10 +3,10 @@ from __future__ import annotations
 from collections import defaultdict
 from dataclasses import dataclass
 
-from clinical_deid.domain import AnnotatedDocument, PHISpan
+from clinical_deid.domain import AnnotatedDocument, EntitySpan
 
 
-def span_key(s: PHISpan) -> tuple[int, int, str]:
+def span_key(s: EntitySpan) -> tuple[int, int, str]:
     return (s.start, s.end, s.label)
 
 
@@ -119,12 +119,12 @@ def strict_eval_report(
 def collect_low_confidence_spans(
     docs: list[AnnotatedDocument],
     threshold: float = 0.5,
-) -> list[tuple[str, PHISpan, str]]:
+) -> list[tuple[str, EntitySpan, str]]:
     """Return ``(doc_id, span, surface_text)`` for spans with confidence below *threshold*.
 
     Spans with ``confidence=None`` are excluded (regex-only detectors emit no score).
     """
-    results: list[tuple[str, PHISpan, str]] = []
+    results: list[tuple[str, EntitySpan, str]] = []
     for doc in docs:
         text = doc.document.text
         for span in doc.spans:

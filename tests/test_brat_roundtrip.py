@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from clinical_deid.domain import AnnotatedDocument, Document, PHISpan
+from clinical_deid.domain import AnnotatedDocument, Document, EntitySpan
 from clinical_deid.ingest.brat import load_brat_directory
 from clinical_deid.ingest.sink import write_annotated_corpus
 
@@ -11,7 +11,7 @@ def test_brat_flat_roundtrip_text_and_spans(tmp_path: Path) -> None:
     docs = [
         AnnotatedDocument(
             document=Document(id="n1", text="CALVERT HOSPITAL here", metadata={}),
-            spans=[PHISpan(start=0, end=16, label="HOSPITAL", source="brat")],
+            spans=[EntitySpan(start=0, end=16, label="HOSPITAL", source="brat")],
         )
     ]
     out = tmp_path / "brat"

@@ -7,7 +7,7 @@ import re
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from clinical_deid.domain import AnnotatedDocument, PHISpan
+from clinical_deid.domain import AnnotatedDocument, EntitySpan
 from clinical_deid.pipes.base import ConfigurablePipe
 from clinical_deid.pipes.detector_label_mapping import (
     accumulate_spans,
@@ -243,7 +243,7 @@ class WhitelistPipe(ConfigurablePipe):
 
     def forward(self, doc: AnnotatedDocument) -> AnnotatedDocument:
         text = doc.document.text
-        found: list[PHISpan] = []
+        found: list[EntitySpan] = []
         seen: set[tuple[int, int, str]] = set()
         for label, rx in self._list_patterns:
             for m in rx.finditer(text):
@@ -251,7 +251,7 @@ class WhitelistPipe(ConfigurablePipe):
                 if key not in seen:
                     seen.add(key)
                     found.append(
-                        PHISpan(
+                        EntitySpan(
                             start=m.start(),
                             end=m.end(),
                             label=label,

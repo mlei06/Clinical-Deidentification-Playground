@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import type { PHISpanResponse } from '../../api/types';
+import type { EntitySpanResponse } from '../../api/types';
 
 export type DocStatus =
   | 'pending'
@@ -15,8 +15,8 @@ export interface QueueDoc {
   sourceName: string;
   text: string;
   status: DocStatus;
-  detectedSpans: PHISpanResponse[];
-  editedSpans: PHISpanResponse[];
+  detectedSpans: EntitySpanResponse[];
+  editedSpans: EntitySpanResponse[];
   redactedText: string;
   note?: string;
   processingTimeMs?: number;

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from clinical_deid.domain import AnnotatedDocument, Document, PHISpan
+from clinical_deid.domain import AnnotatedDocument, Document, EntitySpan
 from clinical_deid.eval.spans import strict_micro_f1
 from clinical_deid.ingest.jsonl import load_annotated_documents_from_jsonl_bytes
 from clinical_deid.pipes.regex_ner import RegexNerPipe
@@ -20,7 +20,7 @@ def test_strict_f1_perfect_match() -> None:
     text = "x"
     d = AnnotatedDocument(
         document=Document(id="1", text=text),
-        spans=[PHISpan(start=0, end=1, label="A")],
+        spans=[EntitySpan(start=0, end=1, label="A")],
     )
     m = strict_micro_f1(d, d)
     assert m.precision == m.recall == m.f1 == 1.0

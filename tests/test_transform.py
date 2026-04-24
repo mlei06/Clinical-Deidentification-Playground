@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from clinical_deid.domain import AnnotatedDocument, Document, PHISpan
+from clinical_deid.domain import AnnotatedDocument, Document, EntitySpan
 from clinical_deid.transform.ops import (
     apply_label_mapping,
     boost_docs_with_label,
@@ -17,7 +17,7 @@ from clinical_deid.transform.ops import (
 def test_clone_new_id() -> None:
     a = AnnotatedDocument(
         document=Document(id="1", text="ab", metadata={"k": 1}),
-        spans=[PHISpan(start=0, end=1, label="X")],
+        spans=[EntitySpan(start=0, end=1, label="X")],
     )
     b = clone_annotated_document(a, "2")
     assert b.document.id == "2"
@@ -29,9 +29,9 @@ def test_filter_labels_drop() -> None:
     a = AnnotatedDocument(
         document=Document(id="1", text="xyz", metadata={}),
         spans=[
-            PHISpan(start=0, end=1, label="NAME"),
-            PHISpan(start=1, end=2, label="DATE"),
-            PHISpan(start=2, end=3, label="PHONE"),
+            EntitySpan(start=0, end=1, label="NAME"),
+            EntitySpan(start=1, end=2, label="DATE"),
+            EntitySpan(start=2, end=3, label="PHONE"),
         ],
     )
     out = filter_labels([a], drop=["DATE"])
@@ -43,9 +43,9 @@ def test_filter_labels_keep() -> None:
     a = AnnotatedDocument(
         document=Document(id="1", text="xyz", metadata={}),
         spans=[
-            PHISpan(start=0, end=1, label="NAME"),
-            PHISpan(start=1, end=2, label="DATE"),
-            PHISpan(start=2, end=3, label="PHONE"),
+            EntitySpan(start=0, end=1, label="NAME"),
+            EntitySpan(start=1, end=2, label="DATE"),
+            EntitySpan(start=2, end=3, label="PHONE"),
         ],
     )
     out = filter_labels([a], keep=["NAME"])
@@ -56,7 +56,7 @@ def test_filter_labels_keep() -> None:
 def test_filter_labels_noop() -> None:
     a = AnnotatedDocument(
         document=Document(id="1", text="x", metadata={}),
-        spans=[PHISpan(start=0, end=1, label="NAME")],
+        spans=[EntitySpan(start=0, end=1, label="NAME")],
     )
     out = filter_labels([a])
     assert len(out[0].spans) == 1
@@ -65,7 +65,7 @@ def test_filter_labels_noop() -> None:
 def test_apply_label_mapping() -> None:
     a = AnnotatedDocument(
         document=Document(id="1", text="xy", metadata={}),
-        spans=[PHISpan(start=0, end=1, label="NAME"), PHISpan(start=1, end=2, label="DATE")],
+        spans=[EntitySpan(start=0, end=1, label="NAME"), EntitySpan(start=1, end=2, label="DATE")],
     )
     out = apply_label_mapping([a], {"NAME": "PATIENT"})
     assert out[0].spans[0].label == "PATIENT"
@@ -89,7 +89,7 @@ def test_random_resize_down_up() -> None:
 def test_boost_docs_with_label() -> None:
     a = AnnotatedDocument(
         document=Document(id="a", text="x", metadata={}),
-        spans=[PHISpan(start=0, end=1, label="NAME")],
+        spans=[EntitySpan(start=0, end=1, label="NAME")],
     )
     b = AnnotatedDocument(document=Document(id="b", text="y", metadata={}), spans=[])
     out = boost_docs_with_label([a, b], "NAME", 1, id_prefix="z")
@@ -101,7 +101,7 @@ def test_run_transform_pipeline_order() -> None:
     docs = [
         AnnotatedDocument(
             document=Document(id="1", text="x", metadata={}),
-            spans=[PHISpan(start=0, end=1, label="NAME")],
+            spans=[EntitySpan(start=0, end=1, label="NAME")],
         )
     ]
     out = run_transform_pipeline(
@@ -139,8 +139,8 @@ def test_run_transform_by_mode_schema_isolation() -> None:
         AnnotatedDocument(
             document=Document(id="1", text="ab", metadata={}),
             spans=[
-                PHISpan(start=0, end=1, label="X"),
-                PHISpan(start=1, end=2, label="Y"),
+                EntitySpan(start=0, end=1, label="X"),
+                EntitySpan(start=1, end=2, label="Y"),
             ],
         ),
     ]
@@ -159,8 +159,8 @@ def test_run_transform_pipeline_drop_labels() -> None:
         AnnotatedDocument(
             document=Document(id="1", text="xy", metadata={}),
             spans=[
-                PHISpan(start=0, end=1, label="NAME"),
-                PHISpan(start=1, end=2, label="DATE"),
+                EntitySpan(start=0, end=1, label="NAME"),
+                EntitySpan(start=1, end=2, label="DATE"),
             ],
         )
     ]

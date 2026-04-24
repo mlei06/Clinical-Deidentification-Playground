@@ -10,12 +10,12 @@ from __future__ import annotations
 
 import random
 
-from clinical_deid.domain import PHISpan
+from clinical_deid.domain import EntitySpan
 from clinical_deid.pipes.span_merge import reconcile_overlapping_spans
 
 
-def _span(start: int, end: int, label: str, confidence: float | None = None) -> PHISpan:
-    return PHISpan(start=start, end=end, label=label, confidence=confidence)
+def _span(start: int, end: int, label: str, confidence: float | None = None) -> EntitySpan:
+    return EntitySpan(start=start, end=end, label=label, confidence=confidence)
 
 
 # ---------------------------------------------------------------------------

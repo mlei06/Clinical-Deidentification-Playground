@@ -99,10 +99,21 @@ def test_health_is_open(secured_client):
     assert resp.status_code == 200
 
 
-def test_docs_are_disabled_when_auth_enabled(secured_client):
+def test_docs_require_admin_when_auth_enabled(secured_client):
     client, _ = secured_client
-    assert client.get("/docs").status_code == 404
-    assert client.get("/openapi.json").status_code == 404
+    # Anonymous callers cannot access schema or UI.
+    assert client.get("/docs").status_code == 401
+    assert client.get("/redoc").status_code == 401
+    assert client.get("/openapi.json").status_code == 401
+    # Inference-scoped callers are rejected.
+    hdr_inf = {"X-API-Key": INFERENCE_KEY}
+    assert client.get("/docs", headers=hdr_inf).status_code == 403
+    assert client.get("/openapi.json", headers=hdr_inf).status_code == 403
+    # Admin callers can introspect.
+    hdr_admin = {"X-API-Key": ADMIN_KEY}
+    assert client.get("/docs", headers=hdr_admin).status_code == 200
+    assert client.get("/redoc", headers=hdr_admin).status_code == 200
+    assert client.get("/openapi.json", headers=hdr_admin).status_code == 200
 
 
 def test_all_mutating_routes_require_auth(secured_client):

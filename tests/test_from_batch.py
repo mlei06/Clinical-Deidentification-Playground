@@ -5,9 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
-
-from clinical_deid.domain import AnnotatedDocument, Document, PHISpan
+from clinical_deid.domain import AnnotatedDocument, EntitySpan
 from clinical_deid.ingest.from_batch import (
     _iter_text_inputs,
     batch_to_annotated_docs,
@@ -21,7 +19,7 @@ class _StubPipeline:
         end = min(4, len(doc.document.text))
         return AnnotatedDocument(
             document=doc.document,
-            spans=[PHISpan(start=0, end=end, label="NAME", source="stub")] if end > 0 else [],
+            spans=[EntitySpan(start=0, end=end, label="NAME", source="stub")] if end > 0 else [],
         )
 
 

@@ -9,18 +9,18 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable
 from typing import Literal
 
-from clinical_deid.domain import PHISpan
+from clinical_deid.domain import EntitySpan
 
 # ---------------------------------------------------------------------------
 # Geometry
 # ---------------------------------------------------------------------------
 
 
-def overlaps(a: PHISpan, b: PHISpan) -> bool:
+def overlaps(a: EntitySpan, b: EntitySpan) -> bool:
     return a.start < b.end and b.start < a.end
 
 
-def has_overlap_with_kept(span: PHISpan, kept: list[PHISpan]) -> bool:
+def has_overlap_with_kept(span: EntitySpan, kept: list[EntitySpan]) -> bool:
     """Check if *span* overlaps any span in *kept* (sorted by start).
 
     Uses the sorted order of *kept* to skip spans that end before ``span.start``
@@ -41,19 +41,19 @@ def has_overlap_with_kept(span: PHISpan, kept: list[PHISpan]) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def merge_union(span_groups: list[list[PHISpan]]) -> list[PHISpan]:
+def merge_union(span_groups: list[list[EntitySpan]]) -> list[EntitySpan]:
     """Concatenate all spans from every group and sort."""
-    out: list[PHISpan] = []
+    out: list[EntitySpan] = []
     for group in span_groups:
         out.extend(group)
     out.sort(key=lambda s: (s.start, s.end, s.label))
     return out
 
 
-def merge_exact_dedupe(span_groups: list[list[PHISpan]]) -> list[PHISpan]:
+def merge_exact_dedupe(span_groups: list[list[EntitySpan]]) -> list[EntitySpan]:
     """Drop exact duplicate (start, end, label) spans."""
     seen: set[tuple[int, int, str]] = set()
-    out: list[PHISpan] = []
+    out: list[EntitySpan] = []
     for group in span_groups:
         for s in group:
             key = (s.start, s.end, s.label)
@@ -64,14 +64,14 @@ def merge_exact_dedupe(span_groups: list[list[PHISpan]]) -> list[PHISpan]:
     return out
 
 
-def merge_consensus(span_groups: list[list[PHISpan]], threshold: int) -> list[PHISpan]:
+def merge_consensus(span_groups: list[list[EntitySpan]], threshold: int) -> list[EntitySpan]:
     """Keep spans where >= *threshold* groups have an overlapping same-label span."""
-    tagged: list[tuple[PHISpan, int]] = []
+    tagged: list[tuple[EntitySpan, int]] = []
     for gidx, group in enumerate(span_groups):
         for span in group:
             tagged.append((span, gidx))
 
-    kept: list[PHISpan] = []
+    kept: list[EntitySpan] = []
     for span, gidx in tagged:
         votes = 0
         for other_idx, other_group in enumerate(span_groups):
@@ -86,7 +86,7 @@ def merge_consensus(span_groups: list[list[PHISpan]], threshold: int) -> list[PH
             kept.append(span)
 
     kept.sort(key=lambda s: (s.start, -(s.end - s.start)))
-    deduped: list[PHISpan] = []
+    deduped: list[EntitySpan] = []
     for span in kept:
         if not any(overlaps(span, d) and span.label == d.label for d in deduped):
             deduped.append(span)
@@ -94,7 +94,7 @@ def merge_consensus(span_groups: list[list[PHISpan]], threshold: int) -> list[PH
     return deduped
 
 
-def merge_max_confidence(span_groups: list[list[PHISpan]]) -> list[PHISpan]:
+def merge_max_confidence(span_groups: list[list[EntitySpan]]) -> list[EntitySpan]:
     """Greedily keep highest-confidence spans; skip any overlap with an already kept span.
 
     Spans with ``confidence=None`` are treated as 1.0 (fully confident),
@@ -103,7 +103,7 @@ def merge_max_confidence(span_groups: list[list[PHISpan]]) -> list[PHISpan]:
     all_spans = [s for group in span_groups for s in group]
     all_spans.sort(key=lambda s: (s.confidence if s.confidence is not None else 1.0), reverse=True)
 
-    kept: list[PHISpan] = []
+    kept: list[EntitySpan] = []
     for span in all_spans:
         if not has_overlap_with_kept(span, kept):
             # Insert into sorted position (by start) to maintain order for sweep.
@@ -113,12 +113,12 @@ def merge_max_confidence(span_groups: list[list[PHISpan]]) -> list[PHISpan]:
     return kept
 
 
-def merge_longest_non_overlapping(span_groups: list[list[PHISpan]]) -> list[PHISpan]:
+def merge_longest_non_overlapping(span_groups: list[list[EntitySpan]]) -> list[EntitySpan]:
     """Greedily keep longest spans first; skip any overlap with an already kept span (any label)."""
     all_spans = [s for group in span_groups for s in group]
     all_spans.sort(key=lambda s: (s.end - s.start), reverse=True)
 
-    kept: list[PHISpan] = []
+    kept: list[EntitySpan] = []
     for span in all_spans:
         if not has_overlap_with_kept(span, kept):
             _insort_by_start(kept, span)
@@ -127,7 +127,7 @@ def merge_longest_non_overlapping(span_groups: list[list[PHISpan]]) -> list[PHIS
     return kept
 
 
-def merge_left_to_right(span_groups: list[list[PHISpan]]) -> list[PHISpan]:
+def merge_left_to_right(span_groups: list[list[EntitySpan]]) -> list[EntitySpan]:
     """Greedily keep spans in document order; leftmost span wins on overlap.
 
     Ties at the same start position are broken by longest span first.
@@ -135,7 +135,7 @@ def merge_left_to_right(span_groups: list[list[PHISpan]]) -> list[PHISpan]:
     all_spans = [s for group in span_groups for s in group]
     all_spans.sort(key=lambda s: (s.start, -(s.end - s.start)))
 
-    kept: list[PHISpan] = []
+    kept: list[EntitySpan] = []
     for span in all_spans:
         if not has_overlap_with_kept(span, kept):
             _insort_by_start(kept, span)
@@ -157,9 +157,9 @@ DEFAULT_LABEL_PRIORITY: list[str] = [
 
 
 def merge_label_priority(
-    span_groups: list[list[PHISpan]],
+    span_groups: list[list[EntitySpan]],
     label_priority: list[str] | None = None,
-) -> list[PHISpan]:
+) -> list[EntitySpan]:
     """Greedily keep spans with the highest-priority label first.
 
     *label_priority* is an ordered list where index 0 is the most important
@@ -180,7 +180,7 @@ def merge_label_priority(
         s.start,
     ))
 
-    kept: list[PHISpan] = []
+    kept: list[EntitySpan] = []
     for span in all_spans:
         if not has_overlap_with_kept(span, kept):
             _insort_by_start(kept, span)
@@ -189,7 +189,7 @@ def merge_label_priority(
     return kept
 
 
-def _insort_by_start(lst: list[PHISpan], span: PHISpan) -> None:
+def _insort_by_start(lst: list[EntitySpan], span: EntitySpan) -> None:
     """Insert *span* into *lst* keeping it sorted by ``start``."""
     lo, hi = 0, len(lst)
     while lo < hi:
@@ -201,7 +201,7 @@ def _insort_by_start(lst: list[PHISpan], span: PHISpan) -> None:
     lst.insert(lo, span)
 
 
-MergeFunc = Callable[[list[list[PHISpan]]], list[PHISpan]]
+MergeFunc = Callable[[list[list[EntitySpan]]], list[EntitySpan]]
 MergeStrategy = (
     Literal[
         "union",
@@ -241,11 +241,11 @@ def resolve_merge_strategy(
 
 
 def apply_resolve_spans(
-    span_groups: list[list[PHISpan]],
+    span_groups: list[list[EntitySpan]],
     strategy: MergeStrategy = "union",
     consensus_threshold: int = 2,
     label_priority: list[str] | None = None,
-) -> list[PHISpan]:
+) -> list[EntitySpan]:
     """Run the chosen merge over one or more span lists."""
     merge = resolve_merge_strategy(strategy, consensus_threshold, label_priority)
     return merge(span_groups)
@@ -256,7 +256,7 @@ def apply_resolve_spans(
 # ---------------------------------------------------------------------------
 
 
-def reconcile_overlapping_spans(spans: Iterable[PHISpan]) -> list[PHISpan]:
+def reconcile_overlapping_spans(spans: Iterable[EntitySpan]) -> list[EntitySpan]:
     """Document-level reconciliation for overlapping segmenter outputs.
 
     Use this when a segmenter produces overlapping segments (e.g. a sliding
@@ -295,13 +295,13 @@ def reconcile_overlapping_spans(spans: Iterable[PHISpan]) -> list[PHISpan]:
     invoke it.
     """
     items = sorted(spans, key=lambda s: (s.label, s.start, s.end))
-    result: list[PHISpan] = []
+    result: list[EntitySpan] = []
 
     i = 0
     n = len(items)
     while i < n:
         label = items[i].label
-        cluster: list[PHISpan] = [items[i]]
+        cluster: list[EntitySpan] = [items[i]]
         cluster_end = items[i].end
         i += 1
 
@@ -327,7 +327,7 @@ def reconcile_overlapping_spans(spans: Iterable[PHISpan]) -> list[PHISpan]:
         merged_source = cluster[0].source
 
         result.append(
-            PHISpan(
+            EntitySpan(
                 start=merged_start,
                 end=merged_end,
                 label=label,

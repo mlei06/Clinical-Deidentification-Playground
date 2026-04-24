@@ -1,4 +1,4 @@
-import type { PHISpanResponse } from '../api/types';
+import type { EntitySpanResponse } from '../api/types';
 import { CANONICAL_LABELS } from './canonicalLabels';
 
 /**
@@ -35,11 +35,11 @@ export const RESOLVE_SPANS_LABEL_PRIORITY: string[] = [
   'ACCOUNT',
 ];
 
-function overlaps(a: PHISpanResponse, b: PHISpanResponse): boolean {
+function overlaps(a: EntitySpanResponse, b: EntitySpanResponse): boolean {
   return a.start < b.end && b.start < a.end;
 }
 
-function hasOverlapWithKept(span: PHISpanResponse, kept: PHISpanResponse[]): boolean {
+function hasOverlapWithKept(span: EntitySpanResponse, kept: EntitySpanResponse[]): boolean {
   return kept.some((k) => overlaps(span, k));
 }
 
@@ -48,9 +48,9 @@ function hasOverlapWithKept(span: PHISpanResponse, kept: PHISpanResponse[]): boo
  * Higher-priority labels (earlier in *labelPriority*) win; ties break by longer span, then leftmost.
  */
 export function mergeLabelPrioritySpans(
-  spans: PHISpanResponse[],
+  spans: EntitySpanResponse[],
   labelPriority: string[] = RESOLVE_SPANS_LABEL_PRIORITY,
-): PHISpanResponse[] {
+): EntitySpanResponse[] {
   const priorityMap = new Map(labelPriority.map((l, i) => [l, i]));
   const defaultRank = labelPriority.length;
   const all = [...spans].sort((a, b) => {
@@ -62,7 +62,7 @@ export function mergeLabelPrioritySpans(
     if (la !== lb) return lb - la;
     return a.start - b.start;
   });
-  const kept: PHISpanResponse[] = [];
+  const kept: EntitySpanResponse[] = [];
   for (const span of all) {
     if (!hasOverlapWithKept(span, kept)) {
       kept.push(span);
@@ -78,8 +78,8 @@ export function spanRangeKey(start: number, end: number): string {
 }
 
 /** Group spans that share identical [start, end). */
-export function groupSpansByExactRange(spans: PHISpanResponse[]): Map<string, PHISpanResponse[]> {
-  const m = new Map<string, PHISpanResponse[]>();
+export function groupSpansByExactRange(spans: EntitySpanResponse[]): Map<string, EntitySpanResponse[]> {
+  const m = new Map<string, EntitySpanResponse[]>();
   for (const s of spans) {
     const k = spanRangeKey(s.start, s.end);
     const list = m.get(k) ?? [];
@@ -93,14 +93,14 @@ export interface SpanConflictSet {
   start: number;
   end: number;
   text: string;
-  spans: PHISpanResponse[];
+  spans: EntitySpanResponse[];
 }
 
 /**
  * Ranges where two or more spans share the same indices (possibly different labels).
  */
 export function findConflictSets(
-  spans: PHISpanResponse[],
+  spans: EntitySpanResponse[],
   originalText: string,
 ): SpanConflictSet[] {
   const byRange = groupSpansByExactRange(spans);
@@ -124,20 +124,20 @@ export function labelPriority(label: string): number {
   return 1000 + label.charCodeAt(0);
 }
 
-export function sortSpansByPrimary(spans: PHISpanResponse[]): PHISpanResponse[] {
+export function sortSpansByPrimary(spans: EntitySpanResponse[]): EntitySpanResponse[] {
   return [...spans].sort((a, b) => labelPriority(a.label) - labelPriority(b.label));
 }
 
-export function pickPrimarySpan(spans: PHISpanResponse[]): PHISpanResponse {
+export function pickPrimarySpan(spans: EntitySpanResponse[]): EntitySpanResponse {
   return sortSpansByPrimary(spans)[0]!;
 }
 
 /**
  * One span per exact range — the primary label wins for rendering the annotated source.
  */
-export function dedupeSpansKeepPrimary(spans: PHISpanResponse[]): PHISpanResponse[] {
+export function dedupeSpansKeepPrimary(spans: EntitySpanResponse[]): EntitySpanResponse[] {
   const byRange = groupSpansByExactRange(spans);
-  const out: PHISpanResponse[] = [];
+  const out: EntitySpanResponse[] = [];
   for (const list of byRange.values()) {
     out.push(pickPrimarySpan(list));
   }
@@ -147,9 +147,9 @@ export function dedupeSpansKeepPrimary(spans: PHISpanResponse[]): PHISpanRespons
 
 /** After resolution: remove every span at this range, then add the kept span. */
 export function resolveConflictKeepSpan(
-  spans: PHISpanResponse[],
-  kept: PHISpanResponse,
-): PHISpanResponse[] {
+  spans: EntitySpanResponse[],
+  kept: EntitySpanResponse,
+): EntitySpanResponse[] {
   const rk = spanRangeKey(kept.start, kept.end);
   const next = spans.filter((s) => spanRangeKey(s.start, s.end) !== rk);
   next.push(kept);
@@ -159,9 +159,9 @@ export function resolveConflictKeepSpan(
 
 /** After resolution: drop every span at this range — the user opted to keep none of the candidates. */
 export function resolveConflictDropAll(
-  spans: PHISpanResponse[],
+  spans: EntitySpanResponse[],
   range: { start: number; end: number },
-): PHISpanResponse[] {
+): EntitySpanResponse[] {
   const rk = spanRangeKey(range.start, range.end);
   return spans.filter((s) => spanRangeKey(s.start, s.end) !== rk);
 }

@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from clinical_deid.domain import AnnotatedDocument, Document, PHISpan
+from clinical_deid.domain import AnnotatedDocument, Document, EntitySpan
 
 
-def _parse_brat_ann(ann_path: Path) -> list[PHISpan]:
-    spans: list[PHISpan] = []
+def _parse_brat_ann(ann_path: Path) -> list[EntitySpan]:
+    spans: list[EntitySpan] = []
     text = ann_path.read_text(encoding="utf-8")
     for line in text.splitlines():
         line = line.strip()
@@ -29,7 +29,7 @@ def _parse_brat_ann(ann_path: Path) -> list[PHISpan]:
             end = int(bits[2])
         except ValueError:
             continue
-        spans.append(PHISpan(start=start, end=end, label=label, source="brat"))
+        spans.append(EntitySpan(start=start, end=end, label=label, source="brat"))
     return spans
 
 

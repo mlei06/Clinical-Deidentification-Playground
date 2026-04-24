@@ -29,6 +29,21 @@ traversing via `..` are rejected with 400; symlinks are resolved before the
 boundary check so a symlink inside the root pointing outside will also be
 rejected.
 
+### Domain packs (label space + risk profile)
+
+The platform ships with a clinical de-identification pack as the default, but the label schema and risk/coverage reporting are pluggable. Built-ins: `clinical_phi` (default) and `generic_pii`. Register custom packs at startup via `clinical_deid.labels.register_label_space(...)` and `clinical_deid.risk.register_risk_profile(...)`.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CLINICAL_DEID_LABEL_SPACE_NAME` | `clinical_phi` | Canonical entity labels + alias table. `clinical_phi` covers HIPAA Safe Harbor plus clinical additions; `generic_pii` is a minimal universal-PII pack. |
+| `CLINICAL_DEID_RISK_PROFILE_NAME` | `clinical_phi` | Risk weights + coverage identifiers for `POST /eval/run` and `clinical-deid eval` (default when the request/CLI does not override). `clinical_phi` uses HIPAA's 18 identifiers with clinical severity weights; `generic_pii` uses six categorical identifiers (names, contact, location, id, temporal, network) with uniform weights. |
+
+**`generic_pii` and pipes:** `CLINICAL_DEID_LABEL_SPACE_NAME` and `CLINICAL_DEID_RISK_PROFILE_NAME` do **not** automatically change `regex_ner` / `surrogate` behavior. Those pipes still use `RegexNerConfig.pattern_pack` and `SurrogateConfig.strategy_pack` (defaults: `clinical_phi`). For a consistent non-clinical stack, set those to `generic_pii` in each pipeline (or register custom pattern/surrogate packs) alongside the two env vars above.
+
+**Label normalization:** `POST /process/*` responses apply `default_label_space().normalize` to span labels (alias table + fallback). **Evaluation** (`POST /eval/run`, `evaluate_pipeline`, CLI `eval`) compares **raw** gold and predicted label strings; align the corpus and pipeline (e.g. a final `label_mapper`) if names differ. Internal pipeline `label_mapping` remaps are preserved until the inference boundary.
+
+Regex pattern packs (`clinical_phi`, `generic_pii`) and surrogate strategy packs (`clinical_phi`, `generic_pii`) are the built-ins selectable per-pipe via the `pattern_pack` / `strategy_pack` fields on `RegexNerConfig` / `SurrogateConfig`.
+
 ### HTTP / auth
 
 | Variable | Default | Description |
@@ -191,7 +206,7 @@ src/clinical_deid/
 ├── transform/            # Dataset transforms
 ├── compose/              # Multi-corpus merging
 ├── eval/                 # Evaluation metrics + runner
-├── domain.py             # Document, PHISpan, AnnotatedDocument
+├── domain.py             # Document, EntitySpan, AnnotatedDocument
 ├── config.py             # Settings
 ├── db.py                 # SQLite + pipeline cache
 ├── models.py             # Filesystem model registry scanner

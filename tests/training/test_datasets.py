@@ -11,9 +11,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from clinical_deid.domain import AnnotatedDocument, Document, PHISpan
+from clinical_deid.domain import AnnotatedDocument, Document, EntitySpan
 from clinical_deid.training.datasets import derive_label_list, tokenize_and_align
-from clinical_deid.training.errors import NoLabelsFound, SlowTokenizerUnsupported
+from clinical_deid.training.errors import SlowTokenizerUnsupported
 
 
 # ---------------------------------------------------------------------------
@@ -24,7 +24,7 @@ from clinical_deid.training.errors import NoLabelsFound, SlowTokenizerUnsupporte
 def _doc(text: str, spans: list[tuple[int, int, str]]) -> AnnotatedDocument:
     return AnnotatedDocument(
         document=Document(id="test", text=text),
-        spans=[PHISpan(start=s, end=e, label=l) for s, e, l in spans],
+        spans=[EntitySpan(start=s, end=e, label=label) for s, e, label in spans],
     )
 
 

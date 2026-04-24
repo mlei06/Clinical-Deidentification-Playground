@@ -6,7 +6,7 @@ import LabelBadge from '../shared/LabelBadge';
 import SpanEditor from '../inference/SpanEditor';
 import { redactDocument } from '../../api/process';
 import { useReviewQueue, type QueueDoc } from './store';
-import type { OutputMode, PHISpanResponse } from '../../api/types';
+import type { OutputMode, EntitySpanResponse } from '../../api/types';
 
 interface DocumentReviewerProps {
   doc: QueueDoc;
@@ -38,7 +38,7 @@ export default function DocumentReviewer({ doc, reviewer }: DocumentReviewerProp
     });
   }, [doc.editedSpans, doc.detectedSpans]);
 
-  const handleChangeSpans = (spans: PHISpanResponse[]) => {
+  const handleChangeSpans = (spans: EntitySpanResponse[]) => {
     updateDoc(doc.id, { editedSpans: spans });
   };
 

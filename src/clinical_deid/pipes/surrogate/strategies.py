@@ -6,12 +6,7 @@ import random
 
 from faker import Faker
 
-from clinical_deid.pipes.surrogate.pipe import SURROGATE_STRATEGIES
-
-_LABEL_TO_STRATEGY: dict[str, str] = {}
-for _strat, _labels in SURROGATE_STRATEGIES.items():
-    for _lbl in _labels:
-        _LABEL_TO_STRATEGY[_lbl] = _strat
+from clinical_deid.pipes.surrogate.packs import CLINICAL_PHI_SURROGATE
 
 
 class SurrogateGenerator:
@@ -19,14 +14,28 @@ class SurrogateGenerator:
 
     Same ``(label, original_text)`` pair always produces the same surrogate
     for the lifetime of this generator (or until :meth:`reset` is called).
+
+    *label_to_strategy* is the ``label → strategy`` map from a surrogate pack.
+    Defaults to the clinical_phi pack for back-compat.
     """
 
-    def __init__(self, seed: int | None = None, *, consistency: bool = True) -> None:
+    def __init__(
+        self,
+        seed: int | None = None,
+        *,
+        consistency: bool = True,
+        label_to_strategy: dict[str, str] | None = None,
+    ) -> None:
         self._faker = Faker()
         if seed is not None:
             self._faker.seed_instance(seed)
             random.seed(seed)
         self._consistency = consistency
+        self._label_to_strategy = dict(
+            label_to_strategy
+            if label_to_strategy is not None
+            else CLINICAL_PHI_SURROGATE.label_to_strategy
+        )
         self._map: dict[tuple[str, str], str] = {}
 
     def replace(self, label: str, original_text: str) -> str:
@@ -50,7 +59,7 @@ class SurrogateGenerator:
     # ------------------------------------------------------------------
 
     def _generate(self, label: str, original_text: str) -> str:
-        strategy = _LABEL_TO_STRATEGY.get(label.upper())
+        strategy = self._label_to_strategy.get(label.upper())
         if strategy == "Name":
             return self._gen_name(original_text)
         if strategy == "Date":

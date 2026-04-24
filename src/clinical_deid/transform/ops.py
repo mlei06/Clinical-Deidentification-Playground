@@ -3,7 +3,7 @@ from __future__ import annotations
 import random
 from copy import deepcopy
 
-from clinical_deid.domain import AnnotatedDocument, Document, PHISpan
+from clinical_deid.domain import AnnotatedDocument, Document, EntitySpan
 from clinical_deid.pipes.detector_label_mapping import remap_span_labels
 from clinical_deid.transform.splits import reassign_splits
 
@@ -13,7 +13,7 @@ def clone_annotated_document(ad: AnnotatedDocument, new_document_id: str) -> Ann
     meta = dict(ad.document.metadata)
     doc = Document(id=new_document_id, text=ad.document.text, metadata=meta)
     spans = [
-        PHISpan.model_validate(deepcopy(s.model_dump(mode="json", exclude_none=True)))
+        EntitySpan.model_validate(deepcopy(s.model_dump(mode="json", exclude_none=True)))
         for s in ad.spans
     ]
     return AnnotatedDocument(document=doc, spans=spans)

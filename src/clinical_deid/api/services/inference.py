@@ -17,11 +17,12 @@ from fastapi import HTTPException
 
 from clinical_deid.api.schemas import (
     OutputMode,
-    PHISpanResponse,
+    EntitySpanResponse,
     ProcessResponse,
 )
 from clinical_deid.config import get_settings
-from clinical_deid.domain import AnnotatedDocument, Document, PHISpan, tag_replace
+from clinical_deid.domain import AnnotatedDocument, Document, EntitySpan, tag_replace
+from clinical_deid.labels import normalize_entity_spans
 from clinical_deid.pipeline_store import load_pipeline_config
 from clinical_deid.pipes.base import Pipe
 from clinical_deid.pipes.combinators import Pipeline
@@ -48,7 +49,7 @@ def load_pipe_chain(pipeline_name: str) -> tuple[Pipe, dict[str, Any]]:
 
 def apply_output_mode(
     original_text: str,
-    spans: list[PHISpanResponse],
+    spans: list[EntitySpanResponse],
     output_mode: OutputMode,
     *,
     surrogate_seed: int | None = None,
@@ -68,7 +69,7 @@ def apply_output_mode(
             ) from exc
 
         phi_spans = [
-            PHISpan(
+            EntitySpan(
                 start=s.start,
                 end=s.end,
                 label=s.label,
@@ -88,7 +89,7 @@ def apply_output_mode(
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         return surrogate_text
 
-    phi_spans = [PHISpan(start=s.start, end=s.end, label=s.label) for s in spans]
+    phi_spans = [EntitySpan(start=s.start, end=s.end, label=s.label) for s in spans]
     return tag_replace(original_text, phi_spans)
 
 
@@ -124,8 +125,10 @@ def process_single(
         result = pipe_chain.forward(doc)
         elapsed_ms = (time.perf_counter() - t0) * 1000
 
+    result = result.with_spans(normalize_entity_spans(list(result.spans)))
+
     span_responses = [
-        PHISpanResponse(
+        EntitySpanResponse(
             start=s.start,
             end=s.end,
             label=s.label,
@@ -145,7 +148,7 @@ def process_single(
     )
 
     surrogate_text: str | None = None
-    surrogate_spans: list[PHISpanResponse] | None = None
+    surrogate_spans: list[EntitySpanResponse] | None = None
     if include_surrogate_spans and output_mode == OutputMode.surrogate:
         try:
             from clinical_deid.pipes.surrogate.align import surrogate_text_with_spans
@@ -155,7 +158,7 @@ def process_single(
                 detail=f"surrogate mode requires faker: {exc}",
             ) from exc
         phi_spans = [
-            PHISpan(
+            EntitySpan(
                 start=s.start,
                 end=s.end,
                 label=s.label,
@@ -174,7 +177,7 @@ def process_single(
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         surrogate_spans = [
-            PHISpanResponse(
+            EntitySpanResponse(
                 start=s.start,
                 end=s.end,
                 label=s.label,

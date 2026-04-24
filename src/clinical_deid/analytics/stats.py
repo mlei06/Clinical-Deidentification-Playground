@@ -9,7 +9,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from clinical_deid.domain import AnnotatedDocument, PHISpan
+from clinical_deid.domain import AnnotatedDocument, EntitySpan
 
 
 def _mean(xs: list[float]) -> float:
@@ -74,7 +74,7 @@ def rough_token_count(text: str) -> int:
     return len(text.split())
 
 
-def spans_overlap(a: PHISpan, b: PHISpan) -> bool:
+def spans_overlap(a: EntitySpan, b: EntitySpan) -> bool:
     return max(a.start, b.start) < min(a.end, b.end)
 
 

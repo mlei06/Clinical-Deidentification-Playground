@@ -5,7 +5,7 @@ import {
   createJSONStorage,
   type PersistOptions,
 } from 'zustand/middleware';
-import type { PHISpanResponse } from '../../api/types';
+import type { EntitySpanResponse } from '../../api/types';
 import { makeIdbStorage } from '../../lib/idbStorage';
 
 export type ExportOutputType = 'redacted' | 'annotated' | 'surrogate_annotated';
@@ -20,8 +20,8 @@ export interface DatasetFile {
   id: string;
   sourceLabel: string;
   originalText: string;
-  annotations: PHISpanResponse[];
-  detectedAt?: PHISpanResponse[] | null;
+  annotations: EntitySpanResponse[];
+  detectedAt?: EntitySpanResponse[] | null;
   detectionStatus: DetectionStatus;
   lastDetectionTarget?: string;
   resolved: boolean;
@@ -30,7 +30,7 @@ export interface DatasetFile {
   error?: string;
   processingTimeMs?: number;
   surrogateText?: string | null;
-  annotationsOnSurrogate?: PHISpanResponse[] | null;
+  annotationsOnSurrogate?: EntitySpanResponse[] | null;
   createdAt: string;
 }
 
@@ -76,13 +76,13 @@ interface State extends UiState {
   replaceFileAnnotations: (
     datasetId: string,
     fileId: string,
-    spans: PHISpanResponse[],
+    spans: EntitySpanResponse[],
     opts: {
       target: string;
       processingTimeMs?: number;
       clearResolved: boolean;
       surrogateText?: string | null;
-      annotationsOnSurrogate?: PHISpanResponse[] | null;
+      annotationsOnSurrogate?: EntitySpanResponse[] | null;
     },
   ) => void;
 }
@@ -118,8 +118,8 @@ interface LegacyDoc {
   sourceName?: string;
   text?: string;
   status?: string;
-  detectedSpans?: PHISpanResponse[];
-  editedSpans?: PHISpanResponse[];
+  detectedSpans?: EntitySpanResponse[];
+  editedSpans?: EntitySpanResponse[];
   redactedText?: string;
   note?: string;
   processingTimeMs?: number;

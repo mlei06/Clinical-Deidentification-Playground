@@ -25,7 +25,6 @@ from clinical_deid.pipes.blacklist import (
 from clinical_deid.pipes.combinators import (
     LabelMapper,
     LabelMapperConfig,
-    MergeStrategy,
     Pipeline,
     ResolveSpans,
     ResolveSpansConfig,
@@ -48,7 +47,7 @@ from clinical_deid.pipes.registry import (
     save_pipeline,
 )
 from clinical_deid.pipes.trace import PipelineRunResult, PipelineTraceFrame, snapshot_document
-from clinical_deid.pipes.span_merge import apply_resolve_spans
+from clinical_deid.pipes.span_merge import MergeStrategy, apply_resolve_spans
 from clinical_deid.pipes.whitelist import WhitelistConfig, WhitelistPipe, WhitelistLabelConfig, WhitelistLabelSettings
 
 __all__ = [

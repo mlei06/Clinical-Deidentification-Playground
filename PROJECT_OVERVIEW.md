@@ -35,7 +35,7 @@ FastAPI backend with SQLite for audit only, React + TypeScript frontend. Python 
 
 | Component | Details |
 |---|---|
-| **Domain models** | `Document` (id, text, metadata), `PHISpan` (start, end, label, confidence, source), `AnnotatedDocument` (document + spans). Universal contract across all services. |
+| **Domain models** | `Document` (id, text, metadata), `EntitySpan` (start, end, label, confidence, source), `AnnotatedDocument` (document + spans). Universal contract across all services. |
 | **Pipe system** | Protocol-based: `Pipe.forward(AnnotatedDocument) -> AnnotatedDocument`. Subtypes: `Detector`, `Preprocessor`, `SpanTransformer`, `Redactor`. |
 | **Built-in pipes (catalog)** | Detectors: `regex_ner`, `whitelist`, `presidio_ner`, `llm_ner`, `neuroner_ner`, `huggingface_ner`. Span transforms: `label_mapper` (deprecated), `label_filter`, `resolve_spans`, `blacklist`, `consistency_propagator`. Redaction/surrogate **text** is applied at the API via `output_mode` on `/process` (spans-only pipelines preferred). Legacy redactor modules may exist on disk but are not the primary pattern. |
 | **Pipeline composition** | JSON pipelines are a **sequential** list of pipes. Combine multiple detectors by listing them one after another, then merge overlaps with `resolve_spans` (strategies include union, consensus, max-confidence, longest-non-overlapping, exact-dedupe). |
@@ -240,7 +240,7 @@ Multiple detectors then consensus merge (no `parallel` pipe type — use a linea
 
 ```
 src/clinical_deid/
-  domain.py                  # Document, PHISpan, AnnotatedDocument
+  domain.py                  # Document, EntitySpan, AnnotatedDocument
   tables.py                  # AuditLogRecord (only DB table)
   db.py                      # SQLite engine, init_db()
   config.py                  # Settings (pydantic-settings), .env loading

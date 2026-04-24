@@ -15,7 +15,7 @@ from __future__ import annotations
 import logging
 from typing import Iterable
 
-from clinical_deid.domain import AnnotatedDocument, Document, PHISpan
+from clinical_deid.domain import AnnotatedDocument, Document, EntitySpan
 
 logger = logging.getLogger(__name__)
 
@@ -158,7 +158,7 @@ def split_doc_into_sentences(doc: AnnotatedDocument) -> list[AnnotatedDocument]:
     result: list[AnnotatedDocument] = []
     for sent_idx, (s, e) in enumerate(bounds):
         sub_text = text[s:e]
-        sub_spans: list[PHISpan] = []
+        sub_spans: list[EntitySpan] = []
         for span in doc.spans:
             # Clip to sentence bounds
             cs = max(span.start, s)
@@ -166,7 +166,7 @@ def split_doc_into_sentences(doc: AnnotatedDocument) -> list[AnnotatedDocument]:
             if cs >= ce:
                 continue  # no overlap or zero-length after clip
             sub_spans.append(
-                PHISpan(
+                EntitySpan(
                     start=cs - s,
                     end=ce - s,
                     label=span.label,

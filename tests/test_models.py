@@ -7,12 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from clinical_deid.models import (
-    ModelInfo,
-    get_model,
-    list_models,
-    scan_models,
-)
+from clinical_deid.models import get_model, list_models, scan_models
 
 
 def _write_manifest(model_dir: Path, manifest: dict) -> None:

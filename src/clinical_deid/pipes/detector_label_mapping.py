@@ -6,7 +6,7 @@ from typing import Any
 
 from pydantic import Field
 
-from clinical_deid.domain import AnnotatedDocument, PHISpan
+from clinical_deid.domain import AnnotatedDocument, EntitySpan
 from clinical_deid.pipes.ui_schema import field_ui
 
 DETECTOR_LABEL_MAPPING_DESCRIPTION = (
@@ -33,11 +33,11 @@ DETECTOR_LABEL_MAPPING = detector_label_mapping_field()
 
 
 def remap_span_labels(
-    spans: list[PHISpan],
+    spans: list[EntitySpan],
     mapping: dict[str, str | None],
     *,
     drop_unmapped: bool = False,
-) -> list[PHISpan]:
+) -> list[EntitySpan]:
     """Single primitive for span-label remap.
 
     - Key present with non-null value → relabel.
@@ -46,7 +46,7 @@ def remap_span_labels(
     """
     if not mapping and not drop_unmapped:
         return spans
-    out: list[PHISpan] = []
+    out: list[EntitySpan] = []
     for s in spans:
         if s.label in mapping:
             new_label = mapping[s.label]
@@ -79,16 +79,21 @@ def remap_label_set(
 
 
 def apply_detector_label_mapping(
-    spans: list[PHISpan],
+    spans: list[EntitySpan],
     mapping: dict[str, str | None],
-) -> list[PHISpan]:
-    """Apply *mapping* to span labels; null values remove the span."""
+) -> list[EntitySpan]:
+    """Apply *mapping* to span labels; null values remove the span.
+
+    The active :func:`default_label_space` is applied at **inference** API
+    ``process_single`` — not here — so ad-hoc remaps (e.g. ``PHONE`` → ``TEL``)
+    are preserved through the pipe chain. Eval compares raw span labels.
+    """
     return remap_span_labels(spans, mapping, drop_unmapped=False)
 
 
 def accumulate_spans(
     doc: AnnotatedDocument,
-    new_spans: list[PHISpan],
+    new_spans: list[EntitySpan],
     skip_overlapping: bool = False,
 ) -> AnnotatedDocument:
     """Return *doc* with existing spans plus *new_spans* accumulated.

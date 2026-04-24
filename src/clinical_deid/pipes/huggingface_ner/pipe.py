@@ -1,7 +1,7 @@
 """Hugging Face NER detector pipe.
 
 Loads a token-classification model from ``models/huggingface/{name}/`` (registered
-via ``model_manifest.json``) and produces ``PHISpan``s.  Device is selected at
+via ``model_manifest.json``) and produces ``EntitySpan``s.  Device is selected at
 runtime — CUDA when available, else CPU — so the pipeline JSON stays portable
 across machines.  Segmentation defaults to whatever the model was trained with
 (``training.segmentation`` in the manifest), so inference matches training context
@@ -16,7 +16,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from clinical_deid.domain import AnnotatedDocument, PHISpan
+from clinical_deid.domain import AnnotatedDocument, EntitySpan
 from clinical_deid.pipes.base import ConfigurablePipe
 from clinical_deid.pipes.detector_label_mapping import (
     accumulate_spans,
@@ -297,13 +297,13 @@ def _predict_truncate(
     text: str,
     source: str,
     entity_map: dict[str, str],
-) -> list[PHISpan]:
+) -> list[EntitySpan]:
     """Single forward pass — input is truncated at the model's context window."""
-    spans: list[PHISpan] = []
+    spans: list[EntitySpan] = []
     for ent in hf(text):
         raw = ent.get("entity_group") or ent.get("entity", "UNK")
         label = entity_map.get(raw, raw)
-        spans.append(PHISpan(
+        spans.append(EntitySpan(
             start=ent["start"],
             end=ent["end"],
             label=label,
@@ -319,7 +319,7 @@ def _predict_by_chunks(
     source: str,
     entity_map: dict[str, str],
     max_tokens: int,
-) -> list[PHISpan]:
+) -> list[EntitySpan]:
     """Sliding-window inference for documents longer than the model context.
 
     Tokenizes once with offset mapping, slices the text into overlapping
@@ -349,7 +349,7 @@ def _predict_by_chunks(
     n = len(offsets)
     step = max(1, window_tokens - CHUNK_STRIDE_TOKENS)
 
-    spans: list[PHISpan] = []
+    spans: list[EntitySpan] = []
     start_tok = 0
     while start_tok < n:
         end_tok = min(start_tok + window_tokens, n)
@@ -360,7 +360,7 @@ def _predict_by_chunks(
             for ent in hf(sub):
                 raw = ent.get("entity_group") or ent.get("entity", "UNK")
                 label = entity_map.get(raw, raw)
-                spans.append(PHISpan(
+                spans.append(EntitySpan(
                     start=ent["start"] + char_start,
                     end=ent["end"] + char_start,
                     label=label,
@@ -378,7 +378,7 @@ def _predict_by_sentence(
     text: str,
     source: str,
     entity_map: dict[str, str],
-) -> list[PHISpan]:
+) -> list[EntitySpan]:
     """Run the pipeline per sentence and remap offsets back to document coords."""
     from clinical_deid.training.segmentation import sentence_offsets
 
@@ -386,7 +386,7 @@ def _predict_by_sentence(
     if not bounds:
         return []
 
-    spans: list[PHISpan] = []
+    spans: list[EntitySpan] = []
     for sent_start, sent_end in bounds:
         sub = text[sent_start:sent_end]
         if not sub:
@@ -394,7 +394,7 @@ def _predict_by_sentence(
         for ent in hf(sub):
             raw = ent.get("entity_group") or ent.get("entity", "UNK")
             label = entity_map.get(raw, raw)
-            spans.append(PHISpan(
+            spans.append(EntitySpan(
                 start=ent["start"] + sent_start,
                 end=ent["end"] + sent_start,
                 label=label,
@@ -457,13 +457,13 @@ class HuggingfaceNerPipe(ConfigurablePipe):
         ``build_huggingface_label_space_bundle`` so the UI stays in sync.
         """
         if self._manifest_labels:
-            return {self._config.entity_map.get(l, l) for l in self._manifest_labels}
+            return {self._config.entity_map.get(lbl, lbl) for lbl in self._manifest_labels}
         try:
             _, manifest = self._resolve_model()
         except Exception:
             return set()
         labels = manifest.get("labels") or []
-        return {self._config.entity_map.get(l, l) for l in labels}
+        return {self._config.entity_map.get(lbl, lbl) for lbl in labels}
 
     @property
     def label_mapping(self) -> dict[str, str | None]:

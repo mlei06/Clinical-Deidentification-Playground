@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
 
 from clinical_deid.api.routers import audit, datasets, deploy, dictionaries, evaluation, inference, models, pipelines, process
 from clinical_deid.api.schemas import HealthResponse
@@ -22,11 +23,12 @@ async def lifespan(_app: FastAPI):
 
 def create_app() -> FastAPI:
     """Application factory — defers settings access until called."""
-    from clinical_deid.api.auth import auth_enabled
+    from clinical_deid.api.auth import auth_enabled, require_admin
     from clinical_deid.config import get_settings
 
-    # When API keys are configured, don't expose anonymous /docs or /redoc.
-    # (Local dev with no keys keeps them for convenience.)
+    # With auth enabled, don't expose the anonymous /docs / /redoc / /openapi.json —
+    # we re-mount them below behind an admin-scope dependency so operators can still
+    # introspect the schema.
     docs_kwargs: dict[str, str | None] = {}
     if auth_enabled():
         docs_kwargs = {"docs_url": None, "redoc_url": None, "openapi_url": None}
@@ -42,6 +44,9 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
         **docs_kwargs,
     )
+
+    if auth_enabled():
+        _mount_admin_docs(application, require_admin)
 
     settings = get_settings()
 
@@ -70,9 +75,30 @@ def create_app() -> FastAPI:
 
     @application.get("/health", response_model=HealthResponse)
     def health() -> HealthResponse:
-        return HealthResponse()
+        return HealthResponse(
+            status="ok",
+            label_space_name=settings.label_space_name,
+            risk_profile_name=settings.risk_profile_name,
+        )
 
     return application
+
+
+def _mount_admin_docs(application: FastAPI, require_admin) -> None:
+    """Re-mount /docs, /redoc, /openapi.json behind admin-scope auth."""
+    openapi_url = "/openapi.json"
+
+    @application.get(openapi_url, include_in_schema=False, dependencies=[require_admin])
+    def openapi_schema() -> dict:
+        return application.openapi()
+
+    @application.get("/docs", include_in_schema=False, dependencies=[require_admin])
+    def swagger_ui() -> object:
+        return get_swagger_ui_html(openapi_url=openapi_url, title=f"{application.title} — docs")
+
+    @application.get("/redoc", include_in_schema=False, dependencies=[require_admin])
+    def redoc_ui() -> object:
+        return get_redoc_html(openapi_url=openapi_url, title=f"{application.title} — redoc")
 
 
 app = create_app()

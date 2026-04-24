@@ -6,21 +6,21 @@ from clinical_deid.analytics.stats import (
     has_split_metadata,
     UNSPLIT_BUCKET,
 )
-from clinical_deid.domain import AnnotatedDocument, Document, PHISpan
+from clinical_deid.domain import AnnotatedDocument, Document, EntitySpan
 
 
 def test_analytics_two_docs_overlap_and_cooc() -> None:
     a = AnnotatedDocument(
         document=Document(id="1", text="Hello world patient"),
         spans=[
-            PHISpan(start=0, end=5, label="X"),
-            PHISpan(start=3, end=8, label="Y"),  # overlaps first
+            EntitySpan(start=0, end=5, label="X"),
+            EntitySpan(start=3, end=8, label="Y"),  # overlaps first
         ],
     )
     b = AnnotatedDocument(
         document=Document(id="2", text="foo"),
-        spans=[PHISpan(start=0, end=3, label="X"),
-               PHISpan(start=0, end=3, label="Z")],  # same span two labels - overlap
+        spans=[EntitySpan(start=0, end=3, label="X"),
+               EntitySpan(start=0, end=3, label="Z")],  # same span two labels - overlap
     )
     stats = compute_dataset_analytics([a, b])
     assert stats.document_count == 2
@@ -44,13 +44,13 @@ def test_documents_by_span_count_mixed() -> None:
         AnnotatedDocument(document=Document(id="a", text="x"), spans=[]),
         AnnotatedDocument(
             document=Document(id="b", text="y"),
-            spans=[PHISpan(start=0, end=1, label="L")],
+            spans=[EntitySpan(start=0, end=1, label="L")],
         ),
         AnnotatedDocument(
             document=Document(id="c", text="z z"),
             spans=[
-                PHISpan(start=0, end=1, label="L"),
-                PHISpan(start=2, end=3, label="L"),
+                EntitySpan(start=0, end=1, label="L"),
+                EntitySpan(start=2, end=3, label="L"),
             ],
         ),
     ]

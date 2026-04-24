@@ -5,14 +5,14 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 
-from clinical_deid.domain import AnnotatedDocument, PHISpan
+from clinical_deid.domain import AnnotatedDocument, EntitySpan
 from clinical_deid.ids import BratWriteStemStrategy, default_brat_write_stem
 
 # Must match reader subfolder names in :func:`load_brat_corpus_with_splits`.
 CORPUS_SPLIT_NAMES = frozenset({"train", "valid", "test", "dev", "deploy"})
 
 
-def format_ann_lines(spans: list[PHISpan], text: str) -> str:
+def format_ann_lines(spans: list[EntitySpan], text: str) -> str:
     """BRAT text-bound annotations; surfaces taken from ``text`` for consistency."""
     lines: list[str] = []
     for i, span in enumerate(spans, 1):
@@ -25,7 +25,7 @@ def write_brat_pair(
     output_dir: Path,
     stem: str,
     text: str,
-    spans: list[PHISpan],
+    spans: list[EntitySpan],
 ) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     txt_path = output_dir / f"{stem}.txt"

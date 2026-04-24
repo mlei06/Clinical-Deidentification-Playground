@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from clinical_deid.domain import AnnotatedDocument, Document, PHISpan
+from clinical_deid.domain import AnnotatedDocument, Document, EntitySpan
 from clinical_deid.pipes.detector_label_mapping import accumulate_spans
 from clinical_deid.pipes.combinators import Pipeline
 from clinical_deid.pipes.regex_ner import RegexNerConfig, RegexNerPipe
-from clinical_deid.pipes.whitelist import WhitelistConfig, WhitelistPipe, WhitelistLabelConfig
+from clinical_deid.pipes.whitelist import WhitelistConfig, WhitelistPipe
 
 
-def _doc(text: str, spans: list[PHISpan] | None = None) -> AnnotatedDocument:
+def _doc(text: str, spans: list[EntitySpan] | None = None) -> AnnotatedDocument:
     return AnnotatedDocument(
         document=Document(id="d", text=text), spans=spans or []
     )
@@ -21,8 +21,8 @@ def _doc(text: str, spans: list[PHISpan] | None = None) -> AnnotatedDocument:
 
 
 def test_accumulate_spans_combines_existing_and_new() -> None:
-    doc = _doc("abcdefghij", [PHISpan(start=0, end=3, label="A")])
-    new = [PHISpan(start=5, end=8, label="B")]
+    doc = _doc("abcdefghij", [EntitySpan(start=0, end=3, label="A")])
+    new = [EntitySpan(start=5, end=8, label="B")]
     result = accumulate_spans(doc, new)
     assert len(result.spans) == 2
     labels = {s.label for s in result.spans}
@@ -30,33 +30,33 @@ def test_accumulate_spans_combines_existing_and_new() -> None:
 
 
 def test_accumulate_spans_skip_overlapping_drops_conflict() -> None:
-    existing = [PHISpan(start=0, end=5, label="A")]
+    existing = [EntitySpan(start=0, end=5, label="A")]
     doc = _doc("abcdefghij", existing)
-    new = [PHISpan(start=3, end=8, label="B")]
+    new = [EntitySpan(start=3, end=8, label="B")]
     result = accumulate_spans(doc, new, skip_overlapping=True)
     assert len(result.spans) == 1
     assert result.spans[0].label == "A"
 
 
 def test_accumulate_spans_skip_overlapping_keeps_non_overlapping() -> None:
-    existing = [PHISpan(start=0, end=3, label="A")]
+    existing = [EntitySpan(start=0, end=3, label="A")]
     doc = _doc("abcdefghij", existing)
-    new = [PHISpan(start=5, end=8, label="B")]
+    new = [EntitySpan(start=5, end=8, label="B")]
     result = accumulate_spans(doc, new, skip_overlapping=True)
     assert len(result.spans) == 2
 
 
 def test_accumulate_spans_default_keeps_overlaps() -> None:
-    existing = [PHISpan(start=0, end=5, label="A")]
+    existing = [EntitySpan(start=0, end=5, label="A")]
     doc = _doc("abcdefghij", existing)
-    new = [PHISpan(start=3, end=8, label="B")]
+    new = [EntitySpan(start=3, end=8, label="B")]
     result = accumulate_spans(doc, new, skip_overlapping=False)
     assert len(result.spans) == 2
 
 
 def test_accumulate_spans_sorted_output() -> None:
-    doc = _doc("abcdefghij", [PHISpan(start=5, end=8, label="B")])
-    new = [PHISpan(start=0, end=3, label="A")]
+    doc = _doc("abcdefghij", [EntitySpan(start=5, end=8, label="B")])
+    new = [EntitySpan(start=0, end=3, label="A")]
     result = accumulate_spans(doc, new)
     assert result.spans[0].start < result.spans[1].start
 

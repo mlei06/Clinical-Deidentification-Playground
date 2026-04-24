@@ -9,10 +9,9 @@ Four matching modes:
 
 from __future__ import annotations
 
-from collections import defaultdict
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
-from clinical_deid.domain import PHISpan
+from clinical_deid.domain import EntitySpan
 
 
 # ---------------------------------------------------------------------------
@@ -71,11 +70,11 @@ def make_match_result(tp: int, fp: int, fn: int, partial: int = 0) -> MatchResul
     return MatchResult(precision=prec, recall=rec, f1=f1, tp=tp, fp=fp, fn=fn, partial=partial)
 
 
-def _spans_overlap(a: PHISpan, b: PHISpan) -> bool:
+def _spans_overlap(a: EntitySpan, b: EntitySpan) -> bool:
     return a.start < b.end and b.start < a.end
 
 
-def _overlap_chars(a: PHISpan, b: PHISpan) -> int:
+def _overlap_chars(a: EntitySpan, b: EntitySpan) -> int:
     return max(0, min(a.end, b.end) - max(a.start, b.start))
 
 
@@ -84,7 +83,7 @@ def _overlap_chars(a: PHISpan, b: PHISpan) -> int:
 # ---------------------------------------------------------------------------
 
 
-def _strict_match(pred: list[PHISpan], gold: list[PHISpan]) -> MatchResult:
+def _strict_match(pred: list[EntitySpan], gold: list[EntitySpan]) -> MatchResult:
     pred_set = {(s.start, s.end, s.label) for s in pred}
     gold_set = {(s.start, s.end, s.label) for s in gold}
     tp = len(pred_set & gold_set)
@@ -98,7 +97,7 @@ def _strict_match(pred: list[PHISpan], gold: list[PHISpan]) -> MatchResult:
 # ---------------------------------------------------------------------------
 
 
-def _exact_boundary_match(pred: list[PHISpan], gold: list[PHISpan]) -> MatchResult:
+def _exact_boundary_match(pred: list[EntitySpan], gold: list[EntitySpan]) -> MatchResult:
     pred_set = {(s.start, s.end) for s in pred}
     gold_set = {(s.start, s.end) for s in gold}
     tp = len(pred_set & gold_set)
@@ -112,7 +111,7 @@ def _exact_boundary_match(pred: list[PHISpan], gold: list[PHISpan]) -> MatchResu
 # ---------------------------------------------------------------------------
 
 
-def _partial_overlap_match(pred: list[PHISpan], gold: list[PHISpan]) -> MatchResult:
+def _partial_overlap_match(pred: list[EntitySpan], gold: list[EntitySpan]) -> MatchResult:
     """Spans overlap AND share the same label = match; greedy assignment."""
     gold_matched: set[int] = set()
     pred_matched: set[int] = set()
@@ -154,7 +153,7 @@ def _partial_overlap_match(pred: list[PHISpan], gold: list[PHISpan]) -> MatchRes
 
 
 def _spans_to_char_tags(
-    spans: list[PHISpan], text_length: int
+    spans: list[EntitySpan], text_length: int
 ) -> list[str]:
     """Convert spans to per-character BIO-like tags.
 
@@ -173,7 +172,7 @@ def _spans_to_char_tags(
 
 
 def _char_level_match(
-    pred: list[PHISpan], gold: list[PHISpan], text_length: int
+    pred: list[EntitySpan], gold: list[EntitySpan], text_length: int
 ) -> MatchResult:
     """Per-character B/I/O comparison."""
     if text_length == 0:
@@ -204,8 +203,8 @@ def _char_level_match(
 
 
 def compute_metrics(
-    pred_spans: list[PHISpan],
-    gold_spans: list[PHISpan],
+    pred_spans: list[EntitySpan],
+    gold_spans: list[EntitySpan],
     text: str,
 ) -> EvalMetrics:
     """Compute all four matching modes for a single document."""
@@ -218,8 +217,8 @@ def compute_metrics(
 
 
 def compute_per_label_metrics(
-    pred_spans: list[PHISpan],
-    gold_spans: list[PHISpan],
+    pred_spans: list[EntitySpan],
+    gold_spans: list[EntitySpan],
     text: str,
 ) -> list[LabelMetrics]:
     """Compute per-label metrics across all matching modes."""

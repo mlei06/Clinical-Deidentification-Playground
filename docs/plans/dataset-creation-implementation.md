@@ -98,7 +98,7 @@ Current gap (baseline for this plan):
 
 ### Tests
 
-- `tests/test_from_batch.py` — unit tests for the converter using a stub pipeline (`lambda doc: AnnotatedDocument(document=doc.document, spans=[PHISpan(start=0, end=4, label="NAME")])`); verify span propagation and metadata preservation.
+- `tests/test_from_batch.py` — unit tests for the converter using a stub pipeline (`lambda doc: AnnotatedDocument(document=doc.document, spans=[EntitySpan(start=0, end=4, label="NAME")])`); verify span propagation and metadata preservation.
 - `tests/test_datasets_api.py::test_ingest_from_pipeline` — write two `.txt` files under `tmp_path / "corpora" / "raw"`, POST, assert new dataset visible in `GET /datasets`, `corpus.jsonl` exists with 2 lines.
 - `tests/test_datasets_api.py::test_ingest_from_pipeline_path_escape_rejected` — passes `../../etc/passwd`, asserts 400.
 
@@ -120,7 +120,7 @@ Current gap (baseline for this plan):
 
 - `src/clinical_deid/api/routers/datasets.py` — add:
   - `PUT /datasets/{name}/documents/{doc_id}`
-    - Request body: `{ "spans": [...PHISpan...], "text": "optional override" }`.
+    - Request body: `{ "spans": [...EntitySpan...], "text": "optional override" }`.
     - If `text` provided: validate every span start/end lies within it; reject 422 on mismatch.
     - If `text` absent: spans validated against existing `document.text`.
     - Rewrite `corpus.jsonl` atomically (write temp + `Path.replace`) — keep the rest of the file unchanged.
@@ -158,11 +158,11 @@ Current gap (baseline for this plan):
   - ```python
     def surrogate_text_with_spans(
         original_text: str,
-        spans: list[PHISpan],
+        spans: list[EntitySpan],
         *,
         seed: int | None = None,
         consistency: bool = True,
-    ) -> tuple[str, list[PHISpan]]:
+    ) -> tuple[str, list[EntitySpan]]:
         ...
     ```
   - **Algorithm** (documented choice): compute replacements left-to-right using a cumulative offset map — simpler to reason about than the right-to-left shift approach, only one pass. Reject overlapping spans with `ValueError` (caller pre-resolves via `resolve_spans`).
@@ -191,7 +191,7 @@ Current gap (baseline for this plan):
 ### API — inference
 
 - `src/clinical_deid/api/schemas.py::ProcessRequest` — add optional `include_surrogate_spans: bool = False`.
-- `src/clinical_deid/api/schemas.py::ProcessResponse` — add optional `surrogate_text: str | None`, `surrogate_spans: list[PHISpanResponse] | None`.
+- `src/clinical_deid/api/schemas.py::ProcessResponse` — add optional `surrogate_text: str | None`, `surrogate_spans: list[EntitySpanResponse] | None`.
 - `src/clinical_deid/api/services/inference.py::process_single` — when flag set **and** `output_mode == surrogate`, call `surrogate_text_with_spans` and populate the new fields. `redacted_text` keeps its existing semantics (the surrogate string) for backward compat.
 
 ### API — dataset export

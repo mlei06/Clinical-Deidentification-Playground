@@ -592,16 +592,16 @@ def update_document(
     the document id is not present, or ``ValueError`` if any span is out of range.
     Recomputes analytics after the rewrite.
     """
-    from clinical_deid.domain import PHISpan
+    from clinical_deid.domain import EntitySpan
 
     home = dataset_home(corpora_dir, name)
     corpus_path = home / CORPUS_JSONL_NAME
     if not corpus_path.is_file():
         raise FileNotFoundError(f"Dataset {name!r} not found under {corpora_dir}")
 
-    validated_spans: list[PHISpan] = []
+    validated_spans: list[EntitySpan] = []
     for s in spans:
-        validated_spans.append(s if isinstance(s, PHISpan) else PHISpan.model_validate(s))
+        validated_spans.append(s if isinstance(s, EntitySpan) else EntitySpan.model_validate(s))
 
     docs = _load_documents(home)
     updated: AnnotatedDocument | None = None

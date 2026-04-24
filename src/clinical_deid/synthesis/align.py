@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from clinical_deid.domain import PHISpan
+from clinical_deid.domain import EntitySpan
 
 
 def phi_dict_to_spans(
@@ -10,13 +10,13 @@ def phi_dict_to_spans(
     phi_entities: dict[str, list[str]],
     *,
     source: str = "llm_phi_dict",
-) -> list[PHISpan]:
+) -> list[EntitySpan]:
     """
     For each surface string (in arbitrary key order), take the first unseen occurrence
     in ``text`` starting from the previous match end. Best-effort only; overlapping or
     repeated entities may need manual or model-level span output.
     """
-    spans: list[PHISpan] = []
+    spans: list[EntitySpan] = []
     cursor = 0
     for label, surfaces in sorted(phi_entities.items()):
         for surface in surfaces:
@@ -30,19 +30,19 @@ def phi_dict_to_spans(
                 continue
             start, end = pos, pos + len(s)
             spans.append(
-                PHISpan(start=start, end=end, label=label, source=source)
+                EntitySpan(start=start, end=end, label=label, source=source)
             )
             cursor = max(cursor, end)
     spans.sort(key=lambda sp: (sp.start, sp.end))
     return spans
 
 
-def drop_overlapping_spans(spans: list[PHISpan]) -> list[PHISpan]:
+def drop_overlapping_spans(spans: list[EntitySpan]) -> list[EntitySpan]:
     """
     Keep a non-overlapping subset in start order (greedy: earlier span wins; later overlaps dropped).
     """
     ordered = sorted(spans, key=lambda s: (s.start, s.end))
-    out: list[PHISpan] = []
+    out: list[EntitySpan] = []
     last_end = -1
     for s in ordered:
         if s.start >= last_end:

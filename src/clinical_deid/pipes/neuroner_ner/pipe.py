@@ -20,7 +20,7 @@ from urllib.parse import quote
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from clinical_deid.domain import AnnotatedDocument, PHISpan
+from clinical_deid.domain import AnnotatedDocument, EntitySpan
 from clinical_deid.pipes.base import ConfigurablePipe
 from clinical_deid.pipes.detector_label_mapping import (
     accumulate_spans,
@@ -521,7 +521,7 @@ class NeuroNerPipe(ConfigurablePipe):
         response = self._http_predict(text)
 
         entities = response.get("entities", [])
-        found: list[PHISpan] = []
+        found: list[EntitySpan] = []
         text_len = len(text)
         for ent in entities:
             raw_label = ent["type"]
@@ -541,7 +541,7 @@ class NeuroNerPipe(ConfigurablePipe):
                     span_conf = None
             if 0 <= start < end <= text_len:
                 found.append(
-                    PHISpan(
+                    EntitySpan(
                         start=start,
                         end=end,
                         label=label,

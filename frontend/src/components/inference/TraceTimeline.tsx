@@ -14,7 +14,7 @@ import {
   type FrameDiffStats,
   type TextSeg,
 } from '../../lib/traceDiff';
-import type { TraceFrame, PHISpanResponse } from '../../api/types';
+import type { TraceFrame, EntitySpanResponse } from '../../api/types';
 
 interface TraceTimelineProps {
   frames: TraceFrame[];
@@ -24,10 +24,10 @@ type ViewMode = 'diff' | 'absolute';
 
 function traceSpansToResponse(
   frame: TraceFrame,
-): { text: string; spans: PHISpanResponse[] } | null {
+): { text: string; spans: EntitySpanResponse[] } | null {
   if (!frame.document) return null;
   const text = frame.document.document.text;
-  const spans: PHISpanResponse[] = frame.document.spans.map((s) => ({
+  const spans: EntitySpanResponse[] = frame.document.spans.map((s) => ({
     ...s,
     text: text.slice(s.start, s.end),
   }));
@@ -61,23 +61,23 @@ function DiffStatsBadge({ stats }: { stats: FrameDiffStats }) {
   );
 }
 
-function describeKept(span: PHISpanResponse): string {
+function describeKept(span: EntitySpanResponse): string {
   const conf = span.confidence != null ? ` (${(span.confidence * 100).toFixed(0)}%)` : '';
   const src = span.source ? ` — ${span.source}` : '';
   return `${span.label}${conf}${src}`;
 }
 
-function describeAdded(span: PHISpanResponse, currentPipe: string): string {
+function describeAdded(span: EntitySpanResponse, currentPipe: string): string {
   const rule = span.source && span.source !== currentPipe ? ` — rule: ${span.source}` : '';
   return `${span.label} — added by ${currentPipe}${rule}`;
 }
 
-function describeRemoved(span: PHISpanResponse, currentPipe: string): string {
+function describeRemoved(span: EntitySpanResponse, currentPipe: string): string {
   const origin = span.source ? ` — was detected by ${span.source}` : '';
   return `${span.label} — removed by ${currentPipe}${origin}`;
 }
 
-function describePrimary(unit: SpanDiffUnit<PHISpanResponse>, currentPipe: string): string {
+function describePrimary(unit: SpanDiffUnit<EntitySpanResponse>, currentPipe: string): string {
   switch (unit.status) {
     case 'kept':
       return describeKept(unit.primary);
@@ -89,7 +89,7 @@ function describePrimary(unit: SpanDiffUnit<PHISpanResponse>, currentPipe: strin
 }
 
 interface DiffMarkProps {
-  unit: SpanDiffUnit<PHISpanResponse>;
+  unit: SpanDiffUnit<EntitySpanResponse>;
   currentPipe: string;
   text: string;
 }
@@ -149,9 +149,9 @@ function DiffMark({ unit, currentPipe, text }: DiffMarkProps) {
 
 interface SpanDiffViewProps {
   text: string;
-  currentSpans: PHISpanResponse[];
-  added: PHISpanResponse[];
-  removed: PHISpanResponse[];
+  currentSpans: EntitySpanResponse[];
+  added: EntitySpanResponse[];
+  removed: EntitySpanResponse[];
   currentPipe: string;
 }
 

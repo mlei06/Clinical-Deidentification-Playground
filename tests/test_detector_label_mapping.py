@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from clinical_deid.domain import AnnotatedDocument, Document, PHISpan
+from clinical_deid.domain import AnnotatedDocument, Document, EntitySpan
 from clinical_deid.pipes.combinators import LabelMapper, LabelMapperConfig
 from clinical_deid.pipes.detector_label_mapping import (
     apply_detector_label_mapping,
@@ -26,8 +26,8 @@ def test_effective_detector_labels_drop() -> None:
 
 def test_apply_detector_label_mapping_drop() -> None:
     spans = [
-        PHISpan(start=0, end=1, label="X", source="t"),
-        PHISpan(start=2, end=3, label="Y", source="t"),
+        EntitySpan(start=0, end=1, label="X", source="t"),
+        EntitySpan(start=2, end=3, label="Y", source="t"),
     ]
     out = apply_detector_label_mapping(spans, {"X": None})
     assert len(out) == 1 and out[0].label == "Y"
@@ -80,8 +80,8 @@ def test_label_mapper_null_drops() -> None:
     doc = AnnotatedDocument(
         document=Document(id="1", text="ab"),
         spans=[
-            PHISpan(start=0, end=1, label="A", source="s"),
-            PHISpan(start=1, end=2, label="B", source="s"),
+            EntitySpan(start=0, end=1, label="A", source="s"),
+            EntitySpan(start=1, end=2, label="B", source="s"),
         ],
     )
     pipe = LabelMapper(LabelMapperConfig(mapping={"A": None}))

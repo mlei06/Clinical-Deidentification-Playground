@@ -4,7 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project summary
 
-Clinical De-Identification Playground — a local-first platform for detecting and removing Protected Health Information (PHI) from clinical text. Compose detection pipelines from modular pipes, evaluate against gold-standard corpora, serve inference via HTTP API, and maintain an audit trail.
+A local-first **named-entity recognition platform** — compose detection pipelines from modular pipes, evaluate against gold-standard corpora, serve inference via HTTP API, and maintain an audit trail.
+
+The default configuration ships a **clinical de-identification pack** (HIPAA Safe Harbor label space, pattern library, surrogate strategies, and risk profile) so the platform works out of the box for PHI detection. The clinical domain is a *pack*, not a baked-in assumption: swap the label space, regex patterns, surrogate strategies, and risk/coverage profile to target any NER task. Built-in alternative: the minimal ``generic_pii`` pack. Custom packs register at startup.
 
 ## Quick start
 
@@ -63,9 +65,34 @@ class Pipe(Protocol):
 
 Subtypes: `Detector` (produces spans), `SpanTransformer` (modifies spans), `Redactor` (replaces text), `Preprocessor` (transforms text before detection).
 
-### Canonical PHI labels
+### Pluggable label space
 
-`PHILabel` enum in `domain.py` defines the canonical label space (~30 labels based on HIPAA Safe Harbor 18 identifiers + clinical additions). Detectors may use any internal labels but should map to canonical labels via `remap` config. `PHILabel.normalize(raw_label)` maps raw strings to canonical labels (with alias support), falling back to `OTHER`.
+The canonical entity-label schema is a **LabelSpace** (`clinical_deid.labels.LabelSpace`) — a named, frozen bundle of labels + aliases + fallback. The platform ships two built-in packs:
+
+- **`clinical_phi`** (default) — HIPAA Safe Harbor identifiers plus clinical additions (~40 labels).
+- **`generic_pii`** — minimal general-purpose PII (NAME, EMAIL, PHONE, ADDRESS, DATE, ID, LOCATION, ORGANIZATION, URL, IP_ADDRESS, OTHER).
+
+Select the active pack via `CLINICAL_DEID_LABEL_SPACE_NAME` (or `Settings.label_space_name`). Register custom packs at startup with `register_label_space(LabelSpace(...))` — pipes then use `get_label_space(name).normalize(raw)` to canonicalize detector output.
+
+Use the label-space API (`get_label_space`, `default_label_space`, `CLINICAL_PHI.normalize`, …) and plain `str` labels — not a special enum. Detectors map internal tags via per-pipe `remap` / `label_mapping` and the active `LabelSpace` normalizes at **inference** (`POST /process/*`) only. **Evaluation** uses raw gold vs raw predicted label strings; align the corpus and pipeline (e.g. a final `label_mapper`) if names differ.
+
+The core span type is `EntitySpan` in `domain.py` (``start``, ``end``, ``label``, optional ``confidence`` / ``source``).
+
+### Pluggable risk profile
+
+Coverage reporting and risk-weighted recall are driven by a **RiskProfile** (`clinical_deid.risk.RiskProfile`) — a named bundle of per-label risk weights plus a coverage scheme (ordered `CoverageIdentifier` list + label→identifier map). Built-in profiles:
+
+- **`clinical_phi`** (default) — HIPAA Safe Harbor's 18 identifiers with clinical-severity weights. Identifier #17 (full-face photographs) is marked non-required (always `n/a` in text).
+- **`generic_pii`** — six categorical identifiers (names, contact, location, id, temporal, network) with uniform weights.
+
+Select via `CLINICAL_DEID_RISK_PROFILE_NAME` / `Settings.risk_profile_name`. When `evaluate_pipeline(...)` is called without `risk_profile=`, it uses `default_risk_profile()` from `clinical_deid.risk` (those settings). `POST /eval/run` accepts optional `risk_profile_name` in the JSON body; `clinical-deid eval` accepts optional `--risk-profile` — each overrides the env default for that run. Persisted eval JSON includes `metrics.risk_profile_name` for the profile used. `eval/risk.py` keeps its module-level API (`risk_weighted_recall`, `hipaa_coverage_report`, `DEFAULT_RISK_WEIGHTS`, `HIPAA_IDENTIFIER_NAMES`, `LABEL_TO_HIPAA`) as a thin shim, still derived from the built-in `clinical_phi` profile for backward compatibility.
+
+### Pluggable regex pattern + surrogate packs
+
+- **RegexPatternPack** (`clinical_deid.pipes.regex_ner.packs`) — named `label → regex` bundles. Built-ins: `clinical_phi` (default, 22 labels) and `generic_pii` (universal subset: EMAIL, PHONE, URL, IP_ADDRESS, DATE, SSN). Set via `RegexNerConfig.pattern_pack`.
+- **SurrogatePack** (`clinical_deid.pipes.surrogate.packs`) — named `label → strategy` maps over the Faker-backed generators. Built-ins: `clinical_phi` and `generic_pii`. Set via `SurrogateConfig.strategy_pack`.
+
+Custom packs register via `register_pattern_pack(...)` / `register_surrogate_pack(...)` at startup. `BUILTIN_REGEX_PATTERNS` and `SURROGATE_STRATEGIES` stay as back-compat aliases pointing at the clinical pack.
 
 ### Redaction as an output mode (not a pipe)
 
@@ -136,7 +163,7 @@ frontend/                # Vite + React + TypeScript playground UI
     shared/              # Reusable components (SpanHighlighter, LabelBadge, etc.)
 
 src/clinical_deid/
-  domain.py              # Document, PHISpan, AnnotatedDocument
+  domain.py              # Document, EntitySpan, AnnotatedDocument
   pipes/                 # All pipe implementations + registry + combinators
     registry.py          # Central registry, JSON load/dump, pipe catalog
     base.py              # Pipe protocol definitions

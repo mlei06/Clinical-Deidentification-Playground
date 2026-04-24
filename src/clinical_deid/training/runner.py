@@ -38,7 +38,6 @@ def run_training(
     """Run end-to-end training. Returns the final model directory path."""
     # Step 1: check deps
     try:
-        import torch
         from transformers import (
             AutoModelForTokenClassification,
             AutoTokenizer,

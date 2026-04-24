@@ -1,5 +1,5 @@
 /**
- * Canonical PHI label space — mirrors PHILabel enum in domain.py.
+ * Canonical label list for the default clinical_phi pack (align with `clinical_deid.labels.CLINICAL_PHI`).
  *
  * All pipeline outputs should normalize to these labels so that
  * redaction/surrogate logic works consistently.

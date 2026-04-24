@@ -4,7 +4,7 @@ from typing import Any, Literal, get_args
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from clinical_deid.domain import AnnotatedDocument, PHISpan
+from clinical_deid.domain import AnnotatedDocument, EntitySpan
 from clinical_deid.pipes.base import ConfigurablePipe
 from clinical_deid.pipes.detector_label_mapping import (
     accumulate_spans,
@@ -405,11 +405,11 @@ class PresidioNerPipe(ConfigurablePipe):
             score_threshold=self._config.score_threshold,
         )
 
-        found: list[PHISpan] = []
+        found: list[EntitySpan] = []
         for r in results:
             label = self._config.entity_map.get(r.entity_type, r.entity_type)
             found.append(
-                PHISpan(
+                EntitySpan(
                     start=r.start,
                     end=r.end,
                     label=label,

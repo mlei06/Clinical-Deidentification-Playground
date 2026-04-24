@@ -16,7 +16,7 @@ class Document:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 @dataclass
-class PHISpan:
+class EntitySpan:
     start: int          # character offset (inclusive)
     end: int            # character offset (exclusive)
     label: str          # entity type, e.g. "PATIENT", "DATE"
@@ -26,7 +26,7 @@ class PHISpan:
 @dataclass
 class AnnotatedDocument:
     document: Document
-    spans: list[PHISpan]
+    spans: list[EntitySpan]
 ```
 
 ### Pipe protocol
@@ -333,7 +333,7 @@ class MyDetectorConfig(BaseModel):
 ### Step 2: Implement the pipe
 
 ```python
-from clinical_deid.domain import AnnotatedDocument, PHISpan
+from clinical_deid.domain import AnnotatedDocument, EntitySpan
 
 class MyDetectorPipe:
     def __init__(self, config: MyDetectorConfig) -> None:
@@ -351,7 +351,7 @@ class MyDetectorPipe:
         text = doc.document.text
         import re
         for m in re.finditer(r"SECRET", text):
-            new_spans.append(PHISpan(
+            new_spans.append(EntitySpan(
                 start=m.start(),
                 end=m.end(),
                 label="SECRET",

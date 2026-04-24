@@ -7,7 +7,7 @@ import random
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Iterable
 
-from clinical_deid.domain import AnnotatedDocument, PHISpan
+from clinical_deid.domain import AnnotatedDocument, EntitySpan
 from clinical_deid.pipes.detector_label_mapping import remap_span_labels
 
 if TYPE_CHECKING:
@@ -53,9 +53,9 @@ def derive_label_list(
 # ---------------------------------------------------------------------------
 
 
-def _find_covering_span(tok_start: int, spans: list[PHISpan]) -> PHISpan | None:
+def _find_covering_span(tok_start: int, spans: list[EntitySpan]) -> EntitySpan | None:
     """Return the longest span that covers tok_start, or None."""
-    best: PHISpan | None = None
+    best: EntitySpan | None = None
     for span in spans:
         if span.start <= tok_start < span.end:
             if best is None or (span.end - span.start) > (best.end - best.start):

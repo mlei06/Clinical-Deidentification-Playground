@@ -7,7 +7,7 @@ import io
 import pytest
 
 from clinical_deid.dictionary_store import DictionaryStore
-from clinical_deid.domain import AnnotatedDocument, Document, PHISpan
+from clinical_deid.domain import AnnotatedDocument, Document, EntitySpan
 
 
 def _doc(text: str) -> AnnotatedDocument:
@@ -335,7 +335,7 @@ def test_blacklist_pipe_with_dictionary(tmp_path, monkeypatch):
     from clinical_deid.pipes.blacklist import BlacklistSpans, BlacklistSpansConfig
 
     text = "seen in PATIENT room"
-    spans = [PHISpan(start=text.index("PATIENT"), end=text.index("PATIENT") + 7, label="NAME")]
+    spans = [EntitySpan(start=text.index("PATIENT"), end=text.index("PATIENT") + 7, label="NAME")]
     doc = AnnotatedDocument(document=Document(id="d", text=text), spans=spans)
 
     config = BlacklistSpansConfig(

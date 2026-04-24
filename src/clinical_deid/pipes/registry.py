@@ -24,12 +24,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
-LabelSource = Literal["none", "compute", "bundle", "both"]
-BundleKeySemantics = Literal["ner_raw", "presidio_entity"]
-
 from pydantic import BaseModel
 
 from clinical_deid.pipes.base import ConfigurablePipe, Pipe
+
+LabelSource = Literal["none", "compute", "bundle", "both"]
+BundleKeySemantics = Literal["ner_raw", "presidio_entity"]
 
 if TYPE_CHECKING:
     from clinical_deid.pipes.combinators import Pipeline
@@ -459,7 +459,7 @@ def _dump_pipeline_steps(pipeline: Pipeline) -> dict[str, Any]:
 
 def dump_pipe(pipe: Pipe) -> dict[str, Any]:
     """Serialize a single pipe to a JSON-compatible dict."""
-    from clinical_deid.pipes.combinators import LabelFilter, LabelMapper, Pipeline
+    from clinical_deid.pipes.combinators import Pipeline
 
     if isinstance(pipe, Pipeline):
         out = _dump_pipeline_steps(pipe)

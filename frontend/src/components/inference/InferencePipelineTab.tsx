@@ -1,6 +1,6 @@
 import TraceTimeline from './TraceTimeline';
 import { usePipeline } from '../../hooks/usePipelines';
-import type { PHISpanResponse, TraceFrame } from '../../api/types';
+import type { EntitySpanResponse, TraceFrame } from '../../api/types';
 
 const HIGH_RISK = new Set([
   'SSN',
@@ -20,7 +20,7 @@ function mean(nums: number[]): number {
 
 interface InferencePipelineTabProps {
   pipelineName: string | null;
-  spans: PHISpanResponse[];
+  spans: EntitySpanResponse[];
   frames: TraceFrame[] | null | undefined;
 }
 

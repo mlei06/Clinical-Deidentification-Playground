@@ -1,4 +1,4 @@
-import type { PHISpanResponse, TraceFrame } from '../api/types';
+import type { EntitySpanResponse, TraceFrame } from '../api/types';
 
 export interface SpanLabelConflict {
   start: number;
@@ -60,7 +60,7 @@ export function buildConflictMapFromTrace(
 /** Map final span keys (start-end-label) to conflict info when range matches. */
 export function conflictsForFinalSpans(
   conflicts: ConflictRangeMap,
-  spans: PHISpanResponse[],
+  spans: EntitySpanResponse[],
 ): Map<string, SpanLabelConflict> {
   const out = new Map<string, SpanLabelConflict>();
   for (const s of spans) {

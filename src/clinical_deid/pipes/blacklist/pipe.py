@@ -9,7 +9,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
-from clinical_deid.domain import AnnotatedDocument, PHISpan
+from clinical_deid.domain import AnnotatedDocument, EntitySpan
 from clinical_deid.pipes.base import ConfigurablePipe
 from clinical_deid.pipes.ui_schema import field_ui
 from clinical_deid.pipes.whitelist.lists import parse_list_file
@@ -312,7 +312,7 @@ class BlacklistSpans(ConfigurablePipe):
         if self._config.match == "overlap_document" and (self._blacklist or self._regex_patterns):
             regions = blacklist_regions_for_text(text, self._blacklist, self._regex_patterns)
 
-        out: list[PHISpan] = []
+        out: list[EntitySpan] = []
         for span in doc.spans:
             if self._label_filter is not None and span.label not in self._label_filter:
                 out.append(span)
@@ -325,7 +325,7 @@ class BlacklistSpans(ConfigurablePipe):
     def _should_drop(
         self,
         text: str,
-        span: PHISpan,
+        span: EntitySpan,
         regions: list[tuple[int, int]] | None,
     ) -> bool:
         start, end = span.start, span.end

@@ -4,21 +4,21 @@ import { Eye, EyeOff, Columns2 } from 'lucide-react';
 import SpanHighlighter from './SpanHighlighter';
 import RedactedView from './RedactedView';
 import LabelBadge from './LabelBadge';
-import type { PHISpanResponse } from '../../api/types';
+import type { EntitySpanResponse } from '../../api/types';
 
 type ViewMode = 'annotated' | 'redacted' | 'side-by-side';
 
 export interface AnnotatedViewerInteractiveProps {
   activeSpanKey?: string | null;
   onSpanHover?: (key: string | null) => void;
-  onSpanClick?: (span: PHISpanResponse, key: string, anchor: DOMRect) => void;
+  onSpanClick?: (span: EntitySpanResponse, key: string, anchor: DOMRect) => void;
   onUncoveredSelection?: (sel: { start: number; end: number; text: string }) => void;
 }
 
 interface AnnotatedDocumentViewerProps {
   originalText: string;
   redactedText: string;
-  spans: PHISpanResponse[];
+  spans: EntitySpanResponse[];
   processingTimeMs?: number;
   pipelineName?: string;
   interactive?: AnnotatedViewerInteractiveProps;

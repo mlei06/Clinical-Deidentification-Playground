@@ -1,9 +1,9 @@
 """Surrogate text + span alignment.
 
-Given ``original_text`` and a list of character-offset ``PHISpan`` annotations,
+Given ``original_text`` and a list of character-offset ``EntitySpan`` annotations,
 produce a new string where each span's substring is replaced with a realistic
 surrogate (via :class:`SurrogateGenerator`), plus a new list of
-``PHISpan``\\s whose offsets point into the *surrogate* string.
+``EntitySpan``\\s whose offsets point into the *surrogate* string.
 
 Algorithm: single left-to-right pass with a cumulative-offset counter. Spans
 are required to be non-overlapping (callers should pre-resolve via
@@ -12,10 +12,10 @@ are required to be non-overlapping (callers should pre-resolve via
 
 from __future__ import annotations
 
-from clinical_deid.domain import PHISpan
+from clinical_deid.domain import EntitySpan
 
 
-def _check_non_overlapping(spans: list[PHISpan]) -> None:
+def _check_non_overlapping(spans: list[EntitySpan]) -> None:
     prev_end = -1
     for s in spans:
         if s.start < prev_end:
@@ -28,11 +28,11 @@ def _check_non_overlapping(spans: list[PHISpan]) -> None:
 
 def surrogate_text_with_spans(
     original_text: str,
-    spans: list[PHISpan],
+    spans: list[EntitySpan],
     *,
     seed: int | None = None,
     consistency: bool = True,
-) -> tuple[str, list[PHISpan]]:
+) -> tuple[str, list[EntitySpan]]:
     """Return ``(surrogate_text, surrogate_spans)``.
 
     - ``surrogate_spans[i]`` points at the replacement substring for
@@ -52,7 +52,7 @@ def surrogate_text_with_spans(
     gen = SurrogateGenerator(seed=seed, consistency=consistency)
 
     out_parts: list[str] = []
-    out_spans: list[PHISpan] = []
+    out_spans: list[EntitySpan] = []
     cursor = 0  # next index in original_text to copy from
     offset = 0  # cumulative delta (len surrogate - len original) so far
 
@@ -65,7 +65,7 @@ def surrogate_text_with_spans(
         out_parts.append(replacement)
         new_end = new_start + len(replacement)
         out_spans.append(
-            PHISpan(
+            EntitySpan(
                 start=new_start,
                 end=new_end,
                 label=s.label,

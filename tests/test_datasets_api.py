@@ -990,6 +990,38 @@ def test_eval_with_dataset_name(client, tmp_path):
     body = resp.json()
     assert body["document_count"] == 3
     assert body["dataset_source"] == "dataset:eval-gold"
+    assert body["metrics"]["risk_profile_name"] == "clinical_phi"
+
+
+def test_eval_run_risk_profile_name_persisted_and_unknown_400(client, tmp_path):
+    jsonl = _write_sample_jsonl(tmp_path / "data" / "gold_rp.jsonl", count=1)
+    client.post(
+        "/datasets",
+        json={"name": "eval-rp", "data_path": str(jsonl), "format": "jsonl"},
+    )
+    client.post("/pipelines", json={"name": "noop-rp", "config": {"pipes": []}})
+
+    resp = client.post(
+        "/eval/run",
+        json={
+            "pipeline_name": "noop-rp",
+            "dataset_name": "eval-rp",
+            "risk_profile_name": "generic_pii",
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["metrics"]["risk_profile_name"] == "generic_pii"
+
+    resp_bad = client.post(
+        "/eval/run",
+        json={
+            "pipeline_name": "noop-rp",
+            "dataset_name": "eval-rp",
+            "risk_profile_name": "not_a_real_profile",
+        },
+    )
+    assert resp_bad.status_code == 400
+    assert "Known:" in resp_bad.json()["detail"]
 
 
 def test_eval_dataset_splits_filters_and_source_string(client, tmp_path):

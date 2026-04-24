@@ -17,9 +17,9 @@ pytest.importorskip("transformers", reason="requires [train] extra")
 pytest.importorskip("torch", reason="requires [train] extra")
 pytest.importorskip("datasets", reason="requires [train] extra")
 
-from clinical_deid.domain import AnnotatedDocument, Document, PHISpan
+from clinical_deid.domain import AnnotatedDocument, Document, EntitySpan
 from clinical_deid.training.config import TrainingConfig, TrainingHyperparams
-from clinical_deid.training.errors import EmptyDataset, NoLabelsFound, OutputExists
+from clinical_deid.training.errors import OutputExists
 from clinical_deid.training.runner import run_training
 
 TINY_MODEL = "hf-internal-testing/tiny-bert-for-token-classification"
@@ -33,7 +33,7 @@ TINY_MODEL = "hf-internal-testing/tiny-bert-for-token-classification"
 def _make_doc(doc_id: str, text: str, spans: list[tuple[int, int, str]]) -> AnnotatedDocument:
     return AnnotatedDocument(
         document=Document(id=doc_id, text=text),
-        spans=[PHISpan(start=s, end=e, label=l) for s, e, l in spans],
+        spans=[EntitySpan(start=s, end=e, label=label) for s, e, label in spans],
     )
 
 
@@ -201,7 +201,6 @@ def test_freeze_encoder(tmp_path):
     models_dir = tmp_path / "models"
     _register_dataset(corpora_dir, "tiny-train", SAMPLE_DOCS)
 
-    import torch
     from transformers import AutoModelForTokenClassification
 
     # Capture grad state via a hook approach: just train and check loss decreases

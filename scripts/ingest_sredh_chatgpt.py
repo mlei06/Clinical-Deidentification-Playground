@@ -29,7 +29,7 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from clinical_deid.domain import AnnotatedDocument, Document, PHISpan
+from clinical_deid.domain import AnnotatedDocument, Document, EntitySpan
 
 CHATGPT_DIR = (
     Path(__file__).resolve().parents[1]
@@ -105,7 +105,7 @@ def parse_file(path: Path) -> list[AnnotatedDocument]:
             continue
 
         # Build spans by finding each entity in the sentence text
-        spans: list[PHISpan] = []
+        spans: list[EntitySpan] = []
         used_positions: set[tuple[int, int]] = set()
 
         for label, entity_text in annotations:
@@ -118,7 +118,7 @@ def parse_file(path: Path) -> list[AnnotatedDocument]:
                 if result not in used_positions:
                     used_positions.add(result)
                     spans.append(
-                        PHISpan(
+                        EntitySpan(
                             start=result[0],
                             end=result[1],
                             label=label,

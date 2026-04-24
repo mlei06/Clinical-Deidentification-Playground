@@ -5,9 +5,13 @@ from __future__ import annotations
 import logging
 import random
 import re
-from datetime import timedelta
+from datetime import date, timedelta
+from typing import TYPE_CHECKING
 
 from clinical_deid.ingest.mimic.faker_providers import get_faker, getrandformat
+
+if TYPE_CHECKING:
+    from clinical_deid.ingest.mimic.profile import NoteProfile
 from clinical_deid.ingest.mimic.names import generate_name
 
 logger = logging.getLogger(__name__)
@@ -170,15 +174,13 @@ def get_placeholder_entity(placeholder: str) -> str:
 def get_replaced_text(
     entity: str,
     randformat: dict | None = None,
-    profile: "NoteProfile | None" = None,
+    profile: NoteProfile | None = None,
 ) -> tuple[str, str] | None:
     """Return ``(surface_text, brat_entity_type)`` or ``None`` if unsupported.
 
     ``profile`` provides within-note consistency for names, dates, age, and MRN.
     ``randformat`` controls date/hospital formatting; defaults to :func:`getrandformat`.
     """
-    from clinical_deid.ingest.mimic.profile import NoteProfile  # local import avoids cycles
-
     fake = get_faker()
     if randformat is None:
         randformat = getrandformat()
@@ -198,8 +200,7 @@ def get_replaced_text(
         return (name, "NAME")
 
     # ------------------------------------------------------------------ dates
-    def _admit_offset(days: int = 0) -> "date":
-        from datetime import date as dt_date
+    def _admit_offset(days: int = 0) -> date:
         base = profile.admit_date if profile else fake.date_between("-5y", "today")
         return base + timedelta(days=days)
 

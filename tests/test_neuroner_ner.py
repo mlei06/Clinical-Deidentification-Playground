@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 import pytest
 
-from clinical_deid.domain import AnnotatedDocument, Document, PHISpan
+from clinical_deid.domain import AnnotatedDocument, Document, EntitySpan
 from clinical_deid.pipes.neuroner_ner.pipe import (
     DEFAULT_ENTITY_MAP,
     NeuroNerConfig,
@@ -197,7 +197,7 @@ def test_forward_accumulates_with_existing_spans() -> None:
     pipe._model_labels = list(I2B2_LABELS)
     pipe._labels_model_key = pipe._labels_cache_key()
 
-    existing = PHISpan(start=0, end=7, label="NAME", source="other_detector")
+    existing = EntitySpan(start=0, end=7, label="NAME", source="other_detector")
     doc = AnnotatedDocument(
         document=Document(id="test", text="Patient John Smith was seen on 01/15/2023."),
         spans=[existing],

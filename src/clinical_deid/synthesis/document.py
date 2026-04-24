@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from clinical_deid.domain import AnnotatedDocument, Document, PHISpan
+from clinical_deid.domain import AnnotatedDocument, Document, EntitySpan
 from clinical_deid.synthesis.align import drop_overlapping_spans, phi_dict_to_spans
 from clinical_deid.synthesis.types import SynthesisResult
 
@@ -33,7 +33,7 @@ def synthesis_result_to_annotated_document(
         meta.setdefault("llm_raw_completion", result.raw_completion)
 
     text = result.clinical_note
-    spans: list[PHISpan] = []
+    spans: list[EntitySpan] = []
     if align_spans and result.phi_entities and text:
         spans = phi_dict_to_spans(text, result.phi_entities, source=span_source)
         if drop_overlapping:

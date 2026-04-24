@@ -2,7 +2,7 @@
 
 Sends document text to an OpenAI-compatible LLM with a structured prompt
 asking it to identify PHI spans, then parses the JSON response back into
-:class:`~clinical_deid.domain.PHISpan` objects.
+:class:`~clinical_deid.domain.EntitySpan` objects.
 
 Requires ``pip install clinical-deid-playground[llm]`` (httpx).
 """
@@ -17,7 +17,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-from clinical_deid.domain import AnnotatedDocument, PHISpan
+from clinical_deid.domain import AnnotatedDocument, EntitySpan
 from clinical_deid.pipes.base import ConfigurablePipe
 from clinical_deid.pipes.detector_label_mapping import accumulate_spans
 from clinical_deid.pipes.ui_schema import field_ui
@@ -284,12 +284,12 @@ class LlmNerPipe(ConfigurablePipe):
 
         parsed = _parse_llm_response(raw_response, len(llm_text))
         allowed_labels = set(self._config.labels)
-        spans: list[PHISpan] = []
+        spans: list[EntitySpan] = []
         for item in parsed:
             if item["label"] not in allowed_labels:
                 continue
             spans.append(
-                PHISpan(
+                EntitySpan(
                     start=item["start"],
                     end=item["end"],
                     label=item["label"],

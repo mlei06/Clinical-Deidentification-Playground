@@ -1,6 +1,6 @@
 export type OutputMode = 'annotated' | 'redacted' | 'surrogate';
 
-export interface PHISpanResponse {
+export interface EntitySpanResponse {
   start: number;
   end: number;
   label: string;
@@ -26,14 +26,14 @@ export interface ProcessResponse {
   request_id: string;
   original_text: string;
   redacted_text: string;
-  spans: PHISpanResponse[];
+  spans: EntitySpanResponse[];
   pipeline_name: string;
   processing_time_ms: number;
   intermediary_trace: TraceFrame[] | null;
   /** Present when the caller passes `include_surrogate_spans=true` with `output_mode=surrogate`. */
   surrogate_text?: string | null;
   /** Spans with offsets in `surrogate_text`. Same length / order as `spans`. */
-  surrogate_spans?: PHISpanResponse[] | null;
+  surrogate_spans?: EntitySpanResponse[] | null;
 }
 
 export interface BatchProcessItem {

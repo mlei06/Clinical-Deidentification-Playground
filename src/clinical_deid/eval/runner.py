@@ -7,10 +7,9 @@ Pipelines only produce spans; redaction is applied separately at the API layer.
 from __future__ import annotations
 
 from collections import defaultdict
-from dataclasses import dataclass, field
-from typing import Any
+from dataclasses import dataclass
 
-from clinical_deid.domain import AnnotatedDocument, PHISpan
+from clinical_deid.domain import AnnotatedDocument, EntitySpan
 from clinical_deid.eval.matching import (
     EvalMetrics,
     LabelMetrics,
@@ -20,8 +19,8 @@ from clinical_deid.eval.matching import (
     make_match_result,
 )
 from clinical_deid.eval.redaction import RedactionMetrics, compute_redaction_metrics
-from clinical_deid.eval.risk import DEFAULT_RISK_WEIGHTS, risk_weighted_recall
 from clinical_deid.pipes.base import Pipe
+from clinical_deid.risk import RiskProfile, default_risk_profile
 
 
 # ---------------------------------------------------------------------------
@@ -36,8 +35,8 @@ class DocumentEvalResult:
     document_id: str
     metrics: EvalMetrics
     per_label: list[LabelMetrics]
-    false_negatives: list[PHISpan]
-    false_positives: list[PHISpan]
+    false_negatives: list[EntitySpan]
+    false_positives: list[EntitySpan]
     risk_weighted_recall: float
     redaction: RedactionMetrics | None = None
 
@@ -62,23 +61,23 @@ class EvalResult:
 
 
 def _compute_false_negatives(
-    pred_spans: list[PHISpan], gold_spans: list[PHISpan]
-) -> list[PHISpan]:
+    pred_spans: list[EntitySpan], gold_spans: list[EntitySpan]
+) -> list[EntitySpan]:
     """Gold spans not matched (exact start, end, label) by any prediction."""
     pred_set = {(s.start, s.end, s.label) for s in pred_spans}
     return [s for s in gold_spans if (s.start, s.end, s.label) not in pred_set]
 
 
 def _compute_false_positives(
-    pred_spans: list[PHISpan], gold_spans: list[PHISpan]
-) -> list[PHISpan]:
+    pred_spans: list[EntitySpan], gold_spans: list[EntitySpan]
+) -> list[EntitySpan]:
     """Predicted spans not matched by any gold span."""
     gold_set = {(s.start, s.end, s.label) for s in gold_spans}
     return [s for s in pred_spans if (s.start, s.end, s.label) not in gold_set]
 
 
 def _build_confusion_matrix(
-    pred_spans: list[PHISpan], gold_spans: list[PHISpan]
+    pred_spans: list[EntitySpan], gold_spans: list[EntitySpan]
 ) -> dict[str, dict[str, int]]:
     """Build label confusion matrix from overlapping pred/gold spans.
 
@@ -169,19 +168,36 @@ def evaluate_pipeline(
     pipeline: Pipe,
     documents: list[AnnotatedDocument],
     risk_weights: dict[str, float] | None = None,
+    risk_profile: RiskProfile | None = None,
 ) -> EvalResult:
     """Run pipeline on each doc, compute all metrics, sort docs by worst performance.
 
     Each document in *documents* is treated as a gold-standard reference.
-    The pipeline is run on a clean copy (no spans), and results are compared.
+    The pipeline is run on a clean copy (no spans), and results are compared
+    on **raw** span label strings (no :func:`normalize_entity_spans`). Align
+    gold and pipeline output via the pipeline (e.g. ``label_mapper``) or the
+    corpus so labels match; see docs/configuration.md (label normalization applies
+    to ``POST /process/*`` only, not to eval).
 
     If the pipeline's output text differs from the input (indicating redaction),
     redaction metrics are also computed.
+
+    Pass *risk_profile* to use a named pack (coverage scheme + weights) for
+    risk-weighted recall. *risk_weights* overrides only the weights dict and is
+    kept for back-compat; new callers should prefer ``risk_profile``.
+
+    When *risk_weights* and *risk_profile* are both omitted, the active profile
+    is :func:`~clinical_deid.risk.default_risk_profile` (``CLINICAL_DEID_RISK_PROFILE_NAME``,
+    default ``clinical_phi``).
     """
-    weights = risk_weights or DEFAULT_RISK_WEIGHTS
+    # Resolve weighting: explicit weights > explicit profile > settings default.
+    if risk_weights is not None:
+        profile = RiskProfile(name="adhoc", weights=risk_weights, default_weight=1.0)
+    else:
+        profile = risk_profile or default_risk_profile()
     doc_results: list[DocumentEvalResult] = []
-    all_fn: list[PHISpan] = []
-    all_gold: list[PHISpan] = []
+    all_fn: list[EntitySpan] = []
+    all_gold: list[EntitySpan] = []
 
     # Per-mode accumulators
     strict_results: list[MatchResult] = []
@@ -206,7 +222,6 @@ def evaluate_pipeline(
 
         text = gold_doc.document.text
         gold_spans = list(gold_doc.spans)
-
         pred_spans = list(pred_doc.spans)
 
         # Detect redaction: output text differs from input
@@ -219,7 +234,7 @@ def evaluate_pipeline(
         # False negatives / positives
         fn = _compute_false_negatives(pred_spans, gold_spans)
         fp = _compute_false_positives(pred_spans, gold_spans)
-        rwr = risk_weighted_recall(fn, gold_spans, weights)
+        rwr = profile.risk_weighted_recall(fn, gold_spans)
 
         # Compute redaction metrics if text was transformed
         doc_redaction: RedactionMetrics | None = None
@@ -291,7 +306,7 @@ def evaluate_pipeline(
             support=support,
         )
 
-    total_rwr = risk_weighted_recall(all_fn, all_gold, weights)
+    total_rwr = profile.risk_weighted_recall(all_fn, all_gold)
 
     # Aggregate redaction metrics
     agg_redaction: RedactionMetrics | None = None

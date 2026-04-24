@@ -10,12 +10,12 @@ import {
 } from 'react';
 import { clsx } from 'clsx';
 import { labelColor } from '../../lib/labelColors';
-import { phiSpanKey, isRangeUncovered } from '../../lib/phiSpanKey';
+import { entitySpanKey, isRangeUncovered } from '../../lib/entitySpanKey';
 import { spanRangeKey } from '../../lib/spanOverlapConflicts';
 import { scrollTextRangeIntoView } from '../../lib/scrollRangeIntoView';
 import type { SpanLabelConflict } from '../../lib/traceConflicts';
 import LabelBadge from './LabelBadge';
-import type { PHISpanResponse } from '../../api/types';
+import type { EntitySpanResponse } from '../../api/types';
 
 export interface SpanHighlighterHandle {
   scrollToRange: (start: number, end: number) => void;
@@ -24,11 +24,11 @@ export interface SpanHighlighterHandle {
 
 interface SpanHighlighterProps {
   text: string;
-  spans: PHISpanResponse[];
+  spans: EntitySpanResponse[];
   activeSpanKey?: string | null;
   flashSpanKey?: string | null;
   onSpanHover?: (key: string | null) => void;
-  onSpanClick?: (span: PHISpanResponse, key: string, anchor: DOMRect) => void;
+  onSpanClick?: (span: EntitySpanResponse, key: string, anchor: DOMRect) => void;
   onUncoveredSelection?: (
     sel: { start: number; end: number; text: string },
     anchor: DOMRect,
@@ -39,19 +39,19 @@ interface SpanHighlighterProps {
   conflictBySpanKey?: Map<string, SpanLabelConflict>;
   onConflictClick?: (c: SpanLabelConflict, anchor: DOMRect) => void;
   overlapConflictRangeKeys?: Set<string>;
-  overlapSpanCandidatesByRange?: Map<string, PHISpanResponse[]>;
-  onOverlapConflictClick?: (rangeKey: string, spans: PHISpanResponse[], anchor: DOMRect) => void;
+  overlapSpanCandidatesByRange?: Map<string, EntitySpanResponse[]>;
+  onOverlapConflictClick?: (rangeKey: string, spans: EntitySpanResponse[], anchor: DOMRect) => void;
   onSpanResize?: (key: string, start: number, end: number) => void;
 }
 
 interface SegmentMeta {
   text: string;
-  span: PHISpanResponse | null;
+  span: EntitySpanResponse | null;
   textStart: number;
   textEnd: number;
 }
 
-function buildSegments(text: string, spans: PHISpanResponse[]): SegmentMeta[] {
+function buildSegments(text: string, spans: EntitySpanResponse[]): SegmentMeta[] {
   if (spans.length === 0) {
     return [{ text, span: null, textStart: 0, textEnd: text.length }];
   }
@@ -220,8 +220,8 @@ const SpanHighlighter = forwardRef<SpanHighlighterHandle, SpanHighlighterProps>(
     const segments = useMemo(() => buildSegments(text, spans), [text, spans]);
 
     const spanByKey = useMemo(() => {
-      const m = new Map<string, PHISpanResponse>();
-      for (const s of spans) m.set(phiSpanKey(s), s);
+      const m = new Map<string, EntitySpanResponse>();
+      for (const s of spans) m.set(entitySpanKey(s), s);
       return m;
     }, [spans]);
 
@@ -231,7 +231,7 @@ const SpanHighlighter = forwardRef<SpanHighlighterHandle, SpanHighlighterProps>(
       for (let i = 0; i < sorted.length; i++) {
         const prev = i > 0 ? sorted[i - 1] : null;
         const next = i < sorted.length - 1 ? sorted[i + 1] : null;
-        m.set(phiSpanKey(sorted[i]), {
+        m.set(entitySpanKey(sorted[i]), {
           minStart: prev ? prev.end : 0,
           maxEnd: next ? next.start : text.length,
         });
@@ -250,12 +250,12 @@ const SpanHighlighter = forwardRef<SpanHighlighterHandle, SpanHighlighterProps>(
     } | null>(null);
 
     const beginResize = useCallback(
-      (side: 'left' | 'right', span: PHISpanResponse) =>
+      (side: 'left' | 'right', span: EntitySpanResponse) =>
         (e: MouseEvent<HTMLSpanElement>) => {
           if (!onSpanResize) return;
           e.stopPropagation();
           e.preventDefault();
-          const key = phiSpanKey(span);
+          const key = entitySpanKey(span);
           const b = siblingBounds.get(key);
           if (!b) return;
           dragRef.current = {
@@ -368,7 +368,7 @@ const SpanHighlighter = forwardRef<SpanHighlighterHandle, SpanHighlighterProps>(
           }
           const s = seg.span;
           const c = labelColor(s.label);
-          const key = phiSpanKey(s);
+          const key = entitySpanKey(s);
           const rangeK = spanRangeKey(s.start, s.end);
           const isActive = activeSpanKey != null && activeSpanKey === key;
           const isFlash = flashSpanKey != null && flashSpanKey === key;

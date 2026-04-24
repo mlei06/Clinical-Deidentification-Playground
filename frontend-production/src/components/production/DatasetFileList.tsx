@@ -409,20 +409,22 @@ function FileListBody({
 
   if (!shouldVirtualize) {
     return (
-      <ul className="flex-1 overflow-auto" ref={parentRef as React.RefObject<HTMLUListElement>}>
-        {visible.map((f) => (
-          <li key={f.id}>
-            <FileRow
-              file={f}
-              isCurrent={f.id === currentFileId}
-              isSelected={selectedIds.has(f.id)}
-              onToggleSelected={onToggleSelected}
-              onSelectCurrent={onSelectCurrent}
-              onRemove={onRemove}
-            />
-          </li>
-        ))}
-      </ul>
+      <div className="flex-1 overflow-auto" ref={parentRef}>
+        <ul className="m-0 list-none p-0">
+          {visible.map((f) => (
+            <li key={f.id}>
+              <FileRow
+                file={f}
+                isCurrent={f.id === currentFileId}
+                isSelected={selectedIds.has(f.id)}
+                onToggleSelected={onToggleSelected}
+                onSelectCurrent={onSelectCurrent}
+                onRemove={onRemove}
+              />
+            </li>
+          ))}
+        </ul>
+      </div>
     );
   }
 

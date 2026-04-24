@@ -5,8 +5,15 @@
 // Output mode for process/redact/scrub endpoints
 export type OutputMode = 'annotated' | 'redacted' | 'surrogate';
 
+/** ``GET /health`` — also exposes active pack names for UIs. */
+export interface HealthResponse {
+  status: string;
+  label_space_name: string;
+  risk_profile_name: string;
+}
+
 // Domain
-export interface PHISpanResponse {
+export interface EntitySpanResponse {
   start: number;
   end: number;
   label: string;
@@ -37,7 +44,7 @@ export interface ProcessResponse {
   request_id: string;
   original_text: string;
   redacted_text: string;
-  spans: PHISpanResponse[];
+  spans: EntitySpanResponse[];
   pipeline_name: string;
   processing_time_ms: number;
   intermediary_trace: TraceFrame[] | null;

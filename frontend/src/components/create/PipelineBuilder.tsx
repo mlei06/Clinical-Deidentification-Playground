@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { ReactFlowProvider } from '@xyflow/react';
 import { Save, FolderOpen, FilePlus2 } from 'lucide-react';
 import PipeCatalogSidebar from './PipeCatalogSidebar';
@@ -6,12 +7,34 @@ import PipelineCanvas from './PipelineCanvas';
 import PipeConfigPanel from './PipeConfigPanel';
 import PipelineSaveDialog from './PipelineSaveDialog';
 import PipelineLoadDialog from './PipelineLoadDialog';
+import { usePipelines } from '../../hooks/usePipelines';
+import { usePipeTypes } from '../../hooks/usePipeTypes';
 import { usePipelineEditorStore } from '../../stores/pipelineEditorStore';
 
 export default function PipelineBuilder() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [saveOpen, setSaveOpen] = useState(false);
   const [loadOpen, setLoadOpen] = useState(false);
+  const { data: pipelines } = usePipelines();
+  const { data: pipeTypes } = usePipeTypes();
+  const loadFromPipeline = usePipelineEditorStore((s) => s.loadFromPipeline);
   const { pipelineName, isDirty, nodes, reset } = usePipelineEditorStore();
+
+  const loadName = searchParams.get('load')?.trim() ?? null;
+  useEffect(() => {
+    if (!loadName || !pipelines?.length || !pipeTypes?.length) return;
+    const detail = pipelines.find((p) => p.name === loadName);
+    if (!detail) return;
+    loadFromPipeline(detail, pipeTypes);
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete('load');
+        return next;
+      },
+      { replace: true },
+    );
+  }, [loadName, pipelines, pipeTypes, loadFromPipeline, setSearchParams]);
 
   return (
     <ReactFlowProvider>

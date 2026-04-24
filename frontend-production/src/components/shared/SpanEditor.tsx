@@ -12,14 +12,14 @@ import {
 } from 'lucide-react';
 import LabelBadge from './LabelBadge';
 import { CANONICAL_LABELS } from '../../lib/canonicalLabels';
-import { phiSpanKey } from '../../lib/phiSpanKey';
+import { entitySpanKey } from '../../lib/entitySpanKey';
 import { pickPrimarySpan, spanRangeKey, type SpanConflictSet } from '../../lib/spanOverlapConflicts';
-import type { PHISpanResponse } from '../../api/types';
+import type { EntitySpanResponse } from '../../api/types';
 
 interface SpanEditorProps {
   originalText: string;
-  spans: PHISpanResponse[];
-  onChange: (spans: PHISpanResponse[]) => void;
+  spans: EntitySpanResponse[];
+  onChange: (spans: EntitySpanResponse[]) => void;
   onReset: () => void;
   isApplying: boolean;
   isDirty: boolean;
@@ -30,7 +30,7 @@ interface SpanEditorProps {
   activeSpanKey?: string | null;
   onActiveSpanKeyChange?: (key: string | null) => void;
   conflictSets?: SpanConflictSet[];
-  onResolveConflict?: (kept: PHISpanResponse) => void;
+  onResolveConflict?: (kept: EntitySpanResponse) => void;
   onDropConflict?: (range: { start: number; end: number }) => void;
   onQuickResolveLabelPriority?: () => void;
   onUpdateOutput?: () => void;
@@ -71,7 +71,7 @@ export default function SpanEditor({
   };
 
   const grouped = useMemo(() => {
-    const map = new Map<string, PHISpanResponse[]>();
+    const map = new Map<string, EntitySpanResponse[]>();
     for (const s of spans) {
       const list = map.get(s.label) ?? [];
       list.push(s);
@@ -94,9 +94,9 @@ export default function SpanEditor({
       for (const c of conflictSets) {
         const rk = spanRangeKey(c.start, c.end);
         const primary = pickPrimarySpan(c.spans);
-        const pk = phiSpanKey(primary);
+        const pk = entitySpanKey(primary);
         next[rk] =
-          prev[rk] && c.spans.some((s) => phiSpanKey(s) === prev[rk]) ? prev[rk]! : pk;
+          prev[rk] && c.spans.some((s) => entitySpanKey(s) === prev[rk]) ? prev[rk]! : pk;
       }
       return next;
     });
@@ -111,10 +111,10 @@ export default function SpanEditor({
     });
   }, []);
 
-  const selectAllInLabel = (items: PHISpanResponse[]) => {
+  const selectAllInLabel = (items: EntitySpanResponse[]) => {
     setSelectedKeys((prev) => {
       const next = new Set(prev);
-      const keys = items.map((s) => phiSpanKey(s));
+      const keys = items.map((s) => entitySpanKey(s));
       const allOn = keys.every((k) => next.has(k));
       if (allOn) keys.forEach((k) => next.delete(k));
       else keys.forEach((k) => next.add(k));
@@ -123,7 +123,7 @@ export default function SpanEditor({
   };
 
   const handleDelete = (key: string) => {
-    onChange(spans.filter((s) => phiSpanKey(s) !== key));
+    onChange(spans.filter((s) => entitySpanKey(s) !== key));
     setSelectedKeys((prev) => {
       const next = new Set(prev);
       next.delete(key);
@@ -133,19 +133,19 @@ export default function SpanEditor({
   };
 
   const handleLabelChange = (key: string, newLabel: string) => {
-    onChange(spans.map((s) => (phiSpanKey(s) === key ? { ...s, label: newLabel } : s)));
+    onChange(spans.map((s) => (entitySpanKey(s) === key ? { ...s, label: newLabel } : s)));
   };
 
   const deleteSelected = () => {
     if (selectedKeys.size === 0) return;
-    onChange(spans.filter((s) => !selectedKeys.has(phiSpanKey(s))));
+    onChange(spans.filter((s) => !selectedKeys.has(entitySpanKey(s))));
     setSelectedKeys(new Set());
     onActiveSpanKeyChange(null);
   };
 
-  const deleteAllInLabel = (_label: string, items: PHISpanResponse[]) => {
-    const keys = new Set(items.map((s) => phiSpanKey(s)));
-    onChange(spans.filter((s) => !keys.has(phiSpanKey(s))));
+  const deleteAllInLabel = (_label: string, items: EntitySpanResponse[]) => {
+    const keys = new Set(items.map((s) => entitySpanKey(s)));
+    onChange(spans.filter((s) => !keys.has(entitySpanKey(s))));
     setSelectedKeys((prev) => {
       const next = new Set(prev);
       keys.forEach((k) => next.delete(k));
@@ -163,14 +163,14 @@ export default function SpanEditor({
       return;
     }
     if (!onResolveConflict) return;
-    const kept = cs.spans.find((s) => phiSpanKey(s) === key);
+    const kept = cs.spans.find((s) => entitySpanKey(s) === key);
     if (!kept) return;
     onResolveConflict(kept);
   };
 
   const copyTermsForBlacklist = async () => {
     const terms = spans
-      .filter((s) => selectedKeys.has(phiSpanKey(s)))
+      .filter((s) => selectedKeys.has(entitySpanKey(s)))
       .map((s) => (s.text || originalText.slice(s.start, s.end)).trim())
       .filter(Boolean);
     const unique = [...new Set(terms)];
@@ -306,7 +306,7 @@ export default function SpanEditor({
                     </div>
                     <div className="space-y-1.5">
                       {cs.spans.map((s) => {
-                        const id = phiSpanKey(s);
+                        const id = entitySpanKey(s);
                         return (
                           <label
                             key={id}
@@ -453,14 +453,14 @@ export default function SpanEditor({
                           className="rounded border-gray-300"
                           checked={
                             items.length > 0 &&
-                            items.every((s) => selectedKeys.has(phiSpanKey(s)))
+                            items.every((s) => selectedKeys.has(entitySpanKey(s)))
                           }
                           onChange={() => selectAllInLabel(items)}
                         />
                         <span>Select group</span>
                       </li>
                       {items.map((s) => {
-                        const key = phiSpanKey(s);
+                        const key = entitySpanKey(s);
                         const rowActive = activeSpanKey === key;
                         const sel = selectedKeys.has(key);
                         const rowConflict = conflictRangeKeySet.has(

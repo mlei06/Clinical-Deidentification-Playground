@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Loader2, X } from 'lucide-react';
 import { redactDocument } from '../../api/process';
-import type { PHISpanResponse } from '../../api/types';
+import type { EntitySpanResponse } from '../../api/types';
 import type { SpanConflictSet } from '../../lib/spanOverlapConflicts';
 import LabelBadge from '../shared/LabelBadge';
 
@@ -12,7 +12,7 @@ interface ConflictResolutionPopoverProps {
   anchorRect: DOMRect | null;
   originalText: string;
   conflict: SpanConflictSet | null;
-  onKeep: (kept: PHISpanResponse) => void;
+  onKeep: (kept: EntitySpanResponse) => void;
   /** Drop every candidate at the conflicting range — user decided no label applies here. */
   onDropAll?: (range: { start: number; end: number }) => void;
 }

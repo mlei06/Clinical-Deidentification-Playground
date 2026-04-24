@@ -16,6 +16,13 @@ class OutputMode(str, Enum):
 
 class HealthResponse(BaseModel):
     status: str = "ok"
+    label_space_name: str = Field(
+        description="Active LabelSpace (``CLINICAL_DEID_LABEL_SPACE_NAME``) — used for "
+        "``POST /process/*`` span label normalization, not for evaluation."
+    )
+    risk_profile_name: str = Field(
+        description="Default risk profile (``CLINICAL_DEID_RISK_PROFILE_NAME``) for eval when not overridden."
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -81,7 +88,7 @@ class ProcessRequest(BaseModel):
     )
 
 
-class PHISpanResponse(BaseModel):
+class EntitySpanResponse(BaseModel):
     start: int
     end: int
     label: str
@@ -94,7 +101,7 @@ class ProcessResponse(BaseModel):
     request_id: str
     original_text: str
     redacted_text: str
-    spans: list[PHISpanResponse]
+    spans: list[EntitySpanResponse]
     pipeline_name: str
     processing_time_ms: float
     intermediary_trace: list[dict[str, Any]] | None = Field(
@@ -108,7 +115,7 @@ class ProcessResponse(BaseModel):
             "identical to ``redacted_text`` in that case but exposed explicitly for clarity."
         ),
     )
-    surrogate_spans: list[PHISpanResponse] | None = Field(
+    surrogate_spans: list[EntitySpanResponse] | None = Field(
         default=None,
         description=(
             "Spans aligned to ``surrogate_text`` (character offsets point into the surrogate). "

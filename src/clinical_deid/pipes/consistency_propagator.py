@@ -11,7 +11,7 @@ import re
 
 from pydantic import BaseModel, Field
 
-from clinical_deid.domain import AnnotatedDocument, PHISpan
+from clinical_deid.domain import AnnotatedDocument, EntitySpan
 from clinical_deid.pipes.base import ConfigurablePipe
 
 
@@ -64,7 +64,7 @@ class ConsistencyPropagatorPipe(ConfigurablePipe):
         # Collect high-confidence spans eligible for propagation.
         # Spans with confidence=None are treated as 1.0 (deterministic match),
         # so rule-based detector spans are always eligible as seeds.
-        seed_spans: list[PHISpan] = []
+        seed_spans: list[EntitySpan] = []
         for s in doc.spans:
             effective = s.confidence if s.confidence is not None else 1.0
             if effective < cfg.min_confidence:
@@ -77,7 +77,7 @@ class ConsistencyPropagatorPipe(ConfigurablePipe):
         existing = {(s.start, s.end, s.label) for s in doc.spans}
 
         # Deduplicate seed surface texts per label
-        seen_texts: dict[tuple[str, str], PHISpan] = {}
+        seen_texts: dict[tuple[str, str], EntitySpan] = {}
         for s in seed_spans:
             surface = text[s.start : s.end]
             key = (surface.lower() if not cfg.case_sensitive else surface, s.label)
@@ -85,7 +85,7 @@ class ConsistencyPropagatorPipe(ConfigurablePipe):
                 seen_texts[key] = s
 
         # Find all occurrences and create new spans
-        new_spans: list[PHISpan] = []
+        new_spans: list[EntitySpan] = []
         for (surface_key, label), seed in seen_texts.items():
             original_surface = text[seed.start : seed.end]
             positions = _find_all_occurrences(text, original_surface, case_sensitive=cfg.case_sensitive)
@@ -93,7 +93,7 @@ class ConsistencyPropagatorPipe(ConfigurablePipe):
                 end = pos + len(original_surface)
                 if (pos, end, label) not in existing:
                     new_spans.append(
-                        PHISpan(
+                        EntitySpan(
                             start=pos,
                             end=end,
                             label=label,

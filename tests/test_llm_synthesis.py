@@ -115,11 +115,11 @@ def test_synthesis_result_to_annotated_document() -> None:
 
 
 def test_drop_overlapping_spans() -> None:
-    from clinical_deid.domain import PHISpan
+    from clinical_deid.domain import EntitySpan
 
     s = [
-        PHISpan(start=0, end=3, label="A"),
-        PHISpan(start=1, end=4, label="B"),
+        EntitySpan(start=0, end=3, label="A"),
+        EntitySpan(start=1, end=4, label="B"),
     ]
     kept = drop_overlapping_spans(s)
     assert len(kept) == 1

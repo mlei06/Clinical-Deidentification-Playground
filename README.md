@@ -1,6 +1,10 @@
 # Clinical-Deidentification-Playground
 
-A **local-first platform** for clinical PHI de-identification: compose modular detection **pipes** into named **pipelines**, evaluate against gold-standard corpora, and expose **inference HTTP APIs** with an **auditable** response trail (spans, timing, optional per-step traces).
+A **local-first NER platform** — compose modular detection **pipes** into named **pipelines**, evaluate against gold-standard corpora, and expose **inference HTTP APIs** with an **auditable** response trail (spans, timing, optional per-step traces).
+
+The default configuration ships a **clinical de-identification pack** (HIPAA Safe Harbor label space, regex pattern library, surrogate strategies, risk/coverage profile), so the platform works out of the box for PHI detection. The clinical domain is a *pack*, not a baked-in assumption: swap the label space, pattern pack, surrogate pack, and risk profile to target any NER task. A minimal `generic_pii` pack ships alongside the clinical pack; custom packs register at startup. See [docs/configuration.md](docs/configuration.md) for pack-selection env vars (`CLINICAL_DEID_LABEL_SPACE_NAME`, `CLINICAL_DEID_RISK_PROFILE_NAME`).
+
+**API types:** inference JSON uses `EntitySpanResponse` for spans; the Python model is `EntitySpan` in `clinical_deid.domain`. There is no generated label enum in `domain.py`—use `clinical_deid.labels` and plain strings.
 
 High-level flow:
 
@@ -45,6 +49,8 @@ clinical-deid setup          # verify deps, download spaCy model, init DB
 ```
 
 Optional extras for specific pipes: `pip install -e ".[presidio]"`, `pip install -e ".[ner]"`, `pip install -e ".[llm]"`, etc. (see `pyproject.toml`).
+
+`pip` is the canonical install path; `uv.lock` is committed for reproducible builds when using `uv sync` / `uv pip install -e ".[dev]"`, but is not required.
 
 ## CLI
 

@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from clinical_deid.domain import AnnotatedDocument, Document, PHISpan
+from clinical_deid.domain import AnnotatedDocument, Document, EntitySpan
 from clinical_deid.pipes.blacklist import BlacklistSpans, BlacklistSpansConfig
 from clinical_deid.pipes.registry import load_pipeline
 
 
-def _doc(text: str, spans: list[PHISpan]) -> AnnotatedDocument:
+def _doc(text: str, spans: list[EntitySpan]) -> AnnotatedDocument:
     return AnnotatedDocument(document=Document(id="d", text=text), spans=spans)
 
 
@@ -15,7 +15,7 @@ def test_blacklist_drops_span_with_token_in_notes_common() -> None:
     """Token PATIENT is a common clinical term and should be blacklisted."""
     text = "seen in PATIENT room"
     spans = [
-        PHISpan(start=text.index("PATIENT"), end=text.index("PATIENT") + 7, label="FOO"),
+        EntitySpan(start=text.index("PATIENT"), end=text.index("PATIENT") + 7, label="FOO"),
     ]
     pipe = BlacklistSpans(
         BlacklistSpansConfig(terms=["PATIENT"], load_all_dictionaries=False, match="any_token")
@@ -26,7 +26,7 @@ def test_blacklist_drops_span_with_token_in_notes_common() -> None:
 
 def test_blacklist_keeps_when_no_token_match() -> None:
     text = "Smith J"
-    spans = [PHISpan(start=0, end=5, label="NAME")]
+    spans = [EntitySpan(start=0, end=5, label="NAME")]
     pipe = BlacklistSpans(
         BlacklistSpansConfig(
             terms=["PATIENT"],
@@ -42,8 +42,8 @@ def test_blacklist_keeps_when_no_token_match() -> None:
 def test_blacklist_apply_to_labels_skips_other_labels() -> None:
     text = "PATIENT room"
     spans = [
-        PHISpan(start=0, end=7, label="NAME"),
-        PHISpan(start=0, end=7, label="OTHER"),
+        EntitySpan(start=0, end=7, label="NAME"),
+        EntitySpan(start=0, end=7, label="OTHER"),
     ]
     pipe = BlacklistSpans(
         BlacklistSpansConfig(
@@ -60,7 +60,7 @@ def test_blacklist_apply_to_labels_skips_other_labels() -> None:
 
 def test_whole_span_drops_only_full_match() -> None:
     text = "PATIENTFOO"
-    spans = [PHISpan(start=0, end=10, label="X")]
+    spans = [EntitySpan(start=0, end=10, label="X")]
     pipe = BlacklistSpans(
         BlacklistSpansConfig(
             terms=["PATIENT"],
@@ -71,7 +71,7 @@ def test_whole_span_drops_only_full_match() -> None:
     assert len(pipe.forward(_doc(text, spans)).spans) == 1
 
     text2 = "PATIENT"
-    spans2 = [PHISpan(start=0, end=7, label="X")]
+    spans2 = [EntitySpan(start=0, end=7, label="X")]
     assert len(pipe.forward(_doc(text2, spans2)).spans) == 0
 
 
@@ -88,8 +88,8 @@ def test_exact_span_migrates_to_whole_span() -> None:
 def test_overlap_document_regex_only_regions() -> None:
     text = "ok Bell palsy end"
     spans = [
-        PHISpan(start=0, end=2, label="X"),
-        PHISpan(start=3, end=13, label="X"),
+        EntitySpan(start=0, end=2, label="X"),
+        EntitySpan(start=3, end=13, label="X"),
     ]
     pipe = BlacklistSpans(
         BlacklistSpansConfig(
@@ -106,8 +106,8 @@ def test_overlap_document_regex_only_regions() -> None:
 def test_overlap_document_drops_when_span_overlaps_region() -> None:
     text = "aa PATIENT bb"
     spans = [
-        PHISpan(start=0, end=2, label="X"),
-        PHISpan(start=3, end=10, label="X"),
+        EntitySpan(start=0, end=2, label="X"),
+        EntitySpan(start=3, end=10, label="X"),
     ]
     pipe = BlacklistSpans(
         BlacklistSpansConfig(

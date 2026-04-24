@@ -1,4 +1,4 @@
-"""Surrogate replacement redactor: replaces PHI with realistic fake data."""
+"""Surrogate replacement redactor: replaces spans with realistic fake data."""
 
 from __future__ import annotations
 
@@ -6,36 +6,11 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from clinical_deid.domain import AnnotatedDocument, Document
 from clinical_deid.pipes.base import ConfigurablePipe
+from clinical_deid.pipes.surrogate.packs import CLINICAL_PHI_SURROGATE
 from clinical_deid.pipes.ui_schema import field_ui
 
-SURROGATE_STRATEGIES: dict[str, list[str]] = {
-    "Name": [
-        "NAME",
-        "PATIENT",
-        "PERSON",
-        "STAFF",
-        "HCW",
-        "DOCTOR",
-        "FIRST_NAME",
-        "LAST_NAME",
-        "FIRSTNAME",
-        "LASTNAME",
-        "FULL_NAME",
-        "FULLNAME",
-        "USERNAME",
-    ],
-    "Date": ["DATE", "DATE_TIME"],
-    "Phone": ["PHONE", "PHONE_NUMBER", "FAX"],
-    "Email": ["EMAIL", "EMAIL_ADDRESS"],
-    "ID": ["ID", "MRN", "SSN", "SIN", "OHIP", "IDNUM"],
-    "Address": ["LOCATION", "ADDRESS", "LOCATION_OTHER"],
-    "Postal Code": ["POSTAL_CODE_CA"],
-    "Organization": ["HOSPITAL", "ORGANIZATION"],
-    "Age": ["AGE"],
-    "Country": ["COUNTRY"],
-    "State": ["STATE"],
-    "URL": ["URL"],
-}
+# JSON-schema UI hint: strategy → labels for the default clinical_phi pack.
+SURROGATE_STRATEGIES: dict[str, list[str]] = CLINICAL_PHI_SURROGATE.strategies_to_labels()
 
 
 class SurrogateConfig(BaseModel):
@@ -54,6 +29,14 @@ class SurrogateConfig(BaseModel):
         default=True,
         description="Same original text with same label produces the same surrogate within a document.",
         json_schema_extra=field_ui(ui_group="General", ui_order=2, ui_widget="switch"),
+    )
+    strategy_pack: str = Field(
+        default="clinical_phi",
+        description=(
+            "Name of the registered surrogate strategy pack to use. "
+            "Built-ins: 'clinical_phi' (default), 'generic_pii'."
+        ),
+        json_schema_extra=field_ui(ui_group="General", ui_order=3, ui_widget="text", ui_advanced=True),
     )
 
 
@@ -75,10 +58,14 @@ class SurrogatePipe(ConfigurablePipe):
         if not doc.spans:
             return doc
 
+        from clinical_deid.pipes.surrogate.packs import get_surrogate_pack
         from clinical_deid.pipes.surrogate.strategies import SurrogateGenerator
 
+        pack = get_surrogate_pack(self._config.strategy_pack)
         gen = SurrogateGenerator(
-            seed=self._config.seed, consistency=self._config.consistency
+            seed=self._config.seed,
+            consistency=self._config.consistency,
+            label_to_strategy=pack.label_to_strategy,
         )
         text = doc.document.text
 

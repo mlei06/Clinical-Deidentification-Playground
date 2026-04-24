@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import json
-
 from clinical_deid.api.schemas import SaveInferenceSnapshotRequest
 
 

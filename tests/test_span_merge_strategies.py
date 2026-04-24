@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from clinical_deid.domain import AnnotatedDocument, Document, PHISpan
+from clinical_deid.domain import AnnotatedDocument, Document, EntitySpan
 from clinical_deid.pipes.combinators import ResolveSpans, ResolveSpansConfig
 from clinical_deid.pipes.span_merge import (
     DEFAULT_LABEL_PRIORITY,
@@ -12,12 +12,12 @@ from clinical_deid.pipes.span_merge import (
 )
 
 
-def _spans(*tuples: tuple[int, int, str]) -> list[list[PHISpan]]:
+def _spans(*tuples: tuple[int, int, str]) -> list[list[EntitySpan]]:
     """Build a single-group span list from (start, end, label) tuples."""
-    return [[PHISpan(start=s, end=e, label=l) for s, e, l in tuples]]
+    return [[EntitySpan(start=s, end=e, label=lbl) for s, e, lbl in tuples]]
 
 
-def _doc(text: str, spans: list[PHISpan]) -> AnnotatedDocument:
+def _doc(text: str, spans: list[EntitySpan]) -> AnnotatedDocument:
     return AnnotatedDocument(document=Document(id="d", text=text), spans=spans)
 
 
@@ -139,8 +139,8 @@ class TestResolveSpansPipeIntegration:
     def test_left_to_right_pipe(self) -> None:
         text = "John Smith was born 1990-01-01"
         spans = [
-            PHISpan(start=0, end=10, label="NAME"),
-            PHISpan(start=5, end=10, label="LAST_NAME"),
+            EntitySpan(start=0, end=10, label="NAME"),
+            EntitySpan(start=5, end=10, label="LAST_NAME"),
         ]
         pipe = ResolveSpans(ResolveSpansConfig(strategy="left_to_right"))
         out = pipe.forward(_doc(text, spans)).spans
@@ -150,8 +150,8 @@ class TestResolveSpansPipeIntegration:
     def test_label_priority_pipe_with_custom_ranking(self) -> None:
         text = "John Smith was born 1990-01-01"
         spans = [
-            PHISpan(start=0, end=10, label="ORGANIZATION"),
-            PHISpan(start=0, end=10, label="NAME"),
+            EntitySpan(start=0, end=10, label="ORGANIZATION"),
+            EntitySpan(start=0, end=10, label="NAME"),
         ]
         pipe = ResolveSpans(ResolveSpansConfig(
             strategy="label_priority",
@@ -164,8 +164,8 @@ class TestResolveSpansPipeIntegration:
     def test_label_priority_pipe_default_ranking(self) -> None:
         text = "John Smith was born 1990-01-01"
         spans = [
-            PHISpan(start=0, end=10, label="ORGANIZATION"),
-            PHISpan(start=0, end=10, label="NAME"),
+            EntitySpan(start=0, end=10, label="ORGANIZATION"),
+            EntitySpan(start=0, end=10, label="NAME"),
         ]
         pipe = ResolveSpans(ResolveSpansConfig(strategy="label_priority"))
         out = pipe.forward(_doc(text, spans)).spans

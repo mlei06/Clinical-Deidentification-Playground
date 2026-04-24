@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 from clinical_deid.domain import AnnotatedDocument
 from clinical_deid.pipes.base import ConfigurablePipe, Pipe
 from clinical_deid.pipes.detector_label_mapping import remap_span_labels
-from clinical_deid.pipes.span_merge import DEFAULT_LABEL_PRIORITY, MergeStrategy, apply_resolve_spans
+from clinical_deid.pipes.span_merge import DEFAULT_LABEL_PRIORITY, apply_resolve_spans
 from clinical_deid.pipes.trace import PipelineRunResult, PipelineTraceFrame, snapshot_document
 from clinical_deid.pipes.ui_schema import field_ui
 

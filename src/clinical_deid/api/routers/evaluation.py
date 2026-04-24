@@ -6,7 +6,7 @@ import logging
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from clinical_deid.api.auth import require_admin
 from clinical_deid.api.deps import SessionDep
@@ -56,6 +56,14 @@ class EvalRunRequest(BaseModel):
     dataset_name: str | None = None
     #: If set, only documents whose ``metadata["split"]`` is in this list are evaluated.
     dataset_splits: list[str] | None = None
+    risk_profile_name: str | None = Field(
+        default=None,
+        description=(
+            "When set, use this risk profile for risk-weighted recall. "
+            "When omitted, uses the active profile from server settings "
+            "(CLINICAL_DEID_RISK_PROFILE_NAME, default clinical_phi)."
+        ),
+    )
 
 
 class EvalRunSummary(BaseModel):
@@ -178,6 +186,7 @@ def run_evaluation(session: SessionDep, body: EvalRunRequest) -> EvalRunDetail:
 
     from clinical_deid.eval.runner import evaluate_pipeline
     from clinical_deid.ingest.sources import load_annotated_corpus
+    from clinical_deid.risk import default_risk_profile, get_risk_profile
     from clinical_deid.transform.ops import filter_documents_by_split_query
 
     settings = get_settings()
@@ -211,15 +220,25 @@ def run_evaluation(session: SessionDep, body: EvalRunRequest) -> EvalRunDetail:
             body.dataset_splits,
         )
     elif body.dataset_path:
-        corpus_path = Path(body.dataset_path).resolve()
-        allowed_roots = [Path.cwd().resolve()]
-        if settings.evaluations_dir.is_absolute():
-            allowed_roots.append(settings.evaluations_dir.resolve())
-        if not any(corpus_path == root or root in corpus_path.parents for root in allowed_roots):
+        # Scope dataset_path to the corpora root so admin callers can't read arbitrary
+        # paths on the server. Use dataset_name for anything already registered.
+        corpora_root = settings.corpora_dir.resolve()
+        raw_path = Path(body.dataset_path)
+        corpus_path = (
+            raw_path.resolve()
+            if raw_path.is_absolute()
+            else (corpora_root / raw_path).resolve()
+        )
+        try:
+            corpus_path.relative_to(corpora_root)
+        except ValueError as exc:
             raise HTTPException(
-                status_code=403,
-                detail="dataset_path must be within the project working directory",
-            )
+                status_code=400,
+                detail=(
+                    f"dataset_path must stay under the corpora root ({corpora_root}); "
+                    "use POST /datasets/import/* to register data outside that tree first."
+                ),
+            ) from exc
         if not corpus_path.exists():
             raise HTTPException(status_code=404, detail=f"dataset path not found: {body.dataset_path}")
         if corpus_path.suffix.lower() != ".jsonl":
@@ -259,7 +278,15 @@ def run_evaluation(session: SessionDep, body: EvalRunRequest) -> EvalRunDetail:
             )
 
     # Run evaluation
-    result = evaluate_pipeline(pipe_chain, documents)
+    if body.risk_profile_name:
+        try:
+            eval_risk_profile = get_risk_profile(body.risk_profile_name)
+        except KeyError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+    else:
+        eval_risk_profile = default_risk_profile()
+
+    result = evaluate_pipeline(pipe_chain, documents, risk_profile=eval_risk_profile)
 
     # Serialize metrics
     per_label_dict = {}
@@ -277,6 +304,7 @@ def run_evaluation(session: SessionDep, body: EvalRunRequest) -> EvalRunDetail:
         "risk_weighted_recall": result.risk_weighted_recall,
         "label_confusion": result.label_confusion,
         "has_redaction": result.has_redaction,
+        "risk_profile_name": eval_risk_profile.name,
     }
 
     if result.redaction is not None:

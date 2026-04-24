@@ -33,6 +33,28 @@ class Settings(BaseSettings):
     #: stays canonical (JSONL only).
     exports_dir: Path = Path("data/exports")
     dictionaries_dir: Path = Path("data/dictionaries")
+    #: Active label space (see :mod:`clinical_deid.labels`). The default
+    #: ``clinical_phi`` pack ships HIPAA Safe Harbor identifiers plus clinical
+    #: additions; ``generic_pii`` is a minimal general-purpose starting point.
+    #: Register custom packs at startup via ``register_label_space(...)``.
+    label_space_name: str = Field(
+        default="clinical_phi",
+        description=(
+            "Name of the registered label space used as the canonical entity "
+            "schema. Built-ins: 'clinical_phi' (default), 'generic_pii'."
+        ),
+    )
+    #: Active risk profile (see :mod:`clinical_deid.risk`). The default
+    #: ``clinical_phi`` profile ships HIPAA Safe Harbor coverage and
+    #: clinical-severity risk weights.
+    risk_profile_name: str = Field(
+        default="clinical_phi",
+        description=(
+            "Name of the registered risk profile used for risk-weighted recall "
+            "and coverage reporting. Built-ins: 'clinical_phi' (default), "
+            "'generic_pii'."
+        ),
+    )
     cors_origins: list[str] = Field(
         default=["http://localhost:3000", "http://127.0.0.1:3000"],
         description="Allowed CORS origins for the API.",

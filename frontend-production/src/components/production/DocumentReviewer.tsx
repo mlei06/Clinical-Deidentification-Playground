@@ -15,14 +15,14 @@ import SpanEditor from '../shared/SpanEditor';
 import { redactDocument } from '../../api/production';
 import { useProductionStore, type DatasetFile } from './store';
 import { CANONICAL_LABELS } from '../../lib/canonicalLabels';
-import { phiSpanKey } from '../../lib/phiSpanKey';
+import { entitySpanKey } from '../../lib/entitySpanKey';
 import {
   findConflictSets,
   mergeLabelPrioritySpans,
   resolveConflictDropAll,
   resolveConflictKeepSpan,
 } from '../../lib/spanOverlapConflicts';
-import type { OutputMode, PHISpanResponse } from '../../api/types';
+import type { OutputMode, EntitySpanResponse } from '../../api/types';
 
 interface DocumentReviewerProps {
   datasetId: string;
@@ -105,12 +105,12 @@ export default function DocumentReviewer({
   );
 
   const overlapSpanCandidatesByRange = useMemo(() => {
-    const m = new Map<string, PHISpanResponse[]>();
+    const m = new Map<string, EntitySpanResponse[]>();
     for (const c of conflictSets) m.set(`${c.start}-${c.end}`, c.spans);
     return m;
   }, [conflictSets]);
 
-  const handleChangeSpans = (spans: PHISpanResponse[]) => {
+  const handleChangeSpans = (spans: EntitySpanResponse[]) => {
     updateFile(datasetId, file.id, { annotations: spans });
   };
 
@@ -121,7 +121,7 @@ export default function DocumentReviewer({
   };
 
   const handleResolveConflict = useCallback(
-    (kept: PHISpanResponse) => {
+    (kept: EntitySpanResponse) => {
       updateFile(datasetId, file.id, {
         annotations: resolveConflictKeepSpan(file.annotations, kept),
       });
@@ -189,7 +189,7 @@ export default function DocumentReviewer({
         s.label === addLabel,
     );
     if (!exists) {
-      const next: PHISpanResponse = {
+      const next: EntitySpanResponse = {
         start: ghostSelection.start,
         end: ghostSelection.end,
         label: addLabel,
@@ -201,7 +201,7 @@ export default function DocumentReviewer({
         (a, b) => a.start - b.start || a.end - b.end,
       );
       updateFile(datasetId, file.id, { annotations: merged });
-      setFlashSpanKey(phiSpanKey(next));
+      setFlashSpanKey(entitySpanKey(next));
     }
     setGhostSelection(null);
   };

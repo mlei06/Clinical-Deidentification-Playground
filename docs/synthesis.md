@@ -144,7 +144,7 @@ It handles common LLM formatting quirks: missing quotes, trailing commas, markdo
 
 1. For each label in the PHI dict, iterates over the surface strings.
 2. Finds each string's first unseen occurrence in the note text (greedy forward search).
-3. Creates a `PHISpan(start, end, label)`.
+3. Creates an `EntitySpan(start, end, label)`.
 4. Optionally drops overlapping spans.
 5. Stores the full PHI dict in `document.metadata["phi_entities"]` for reference.
 

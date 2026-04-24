@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from clinical_deid.domain import AnnotatedDocument, Document, PHISpan
+from clinical_deid.domain import AnnotatedDocument, Document, EntitySpan
 from clinical_deid.training.segmentation import (
     sentence_offsets,
     split_doc_into_sentences,
@@ -14,7 +14,7 @@ from clinical_deid.training.segmentation import (
 def _doc(doc_id: str, text: str, spans: list[tuple[int, int, str]]) -> AnnotatedDocument:
     return AnnotatedDocument(
         document=Document(id=doc_id, text=text),
-        spans=[PHISpan(start=s, end=e, label=lbl) for s, e, lbl in spans],
+        spans=[EntitySpan(start=s, end=e, label=lbl) for s, e, lbl in spans],
     )
 
 

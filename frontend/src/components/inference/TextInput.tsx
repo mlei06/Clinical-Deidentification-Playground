@@ -32,7 +32,7 @@ export default function TextInput({ value, onChange }: TextInputProps) {
       <textarea
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        placeholder="Paste clinical text here, or drag & drop a file..."
+        placeholder="Paste text here, or drag & drop a file..."
         className="h-48 w-full resize-y rounded-lg border border-gray-300 p-3 font-mono text-sm text-gray-900 shadow-sm placeholder:text-gray-400 focus:border-gray-500 focus:ring-1 focus:ring-gray-500 focus:outline-none"
       />
       <input {...getInputProps()} />

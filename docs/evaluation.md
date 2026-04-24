@@ -2,6 +2,8 @@
 
 Span-level evaluation metrics for measuring PHI detection quality. Available as a Python library, via `POST /eval/run`, and via `clinical-deid eval`.
 
+**Labels:** `evaluate_pipeline` (and the HTTP/CLI entry points) compare **raw** gold and predicted span `label` strings. There is no `LabelSpace` normalization at the eval step — if your gold file uses different names than the pipeline, use a **`label_mapper`** (or per-detector remaps) so output strings match the corpus, or change the gold. Inference responses (`POST /process/*`) may still apply `default_label_space().normalize` to span labels; that is separate from evaluation.
+
 ## Strict micro F1
 
 The primary metric is **strict micro F1**: a span is a true positive only if it matches a gold span exactly on `(start, end, label)`.
@@ -9,7 +11,7 @@ The primary metric is **strict micro F1**: a span is a true positive only if it 
 ```python
 from clinical_deid.eval import strict_micro_f1, span_sets, SpanMicroF1
 
-# Gold and predicted spans as lists of PHISpan
+# Gold and predicted spans as lists of EntitySpan
 gold_spans = doc.spans       # ground truth
 pred_spans = result.spans    # pipeline output
 
@@ -99,4 +101,4 @@ for label in ["PATIENT", "DATE", "PHONE", "HOSPITAL"]:
 
 Server-side evaluation is available via `POST /eval/run` and the `clinical-deid eval` CLI. The runner supports multiple matching modes (strict, exact boundary, partial overlap, token-level), risk-weighted metrics, run comparison, and per-document breakdowns — see `src/clinical_deid/eval/` and the OpenAPI schema when `/docs` is enabled.
 
-**Gold data sources:** use a **registered dataset** (`dataset_name`) or a **`dataset_path` to a `.jsonl` file** on the server (paths must stay within the project working directory). BRAT gold must be converted to JSONL first (Datasets tab: **Convert BRAT → JSONL**, or `clinical-deid dataset import-brat`). In Python, `load_annotated_corpus` can still load BRAT or JSONL from any path for ad-hoc scripts.
+**Gold data sources:** use a **registered dataset** (`dataset_name`) or a **`dataset_path` to a `.jsonl` file** on the server (paths must stay within the corpora root — `CLINICAL_DEID_CORPORA_DIR`, default `data/corpora/`). BRAT gold must be converted to JSONL first (Datasets tab: **Convert BRAT → JSONL**, or `clinical-deid dataset import-brat`). In Python, `load_annotated_corpus` can still load BRAT or JSONL from any path for ad-hoc scripts.

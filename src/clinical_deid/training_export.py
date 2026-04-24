@@ -17,7 +17,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from clinical_deid.domain import AnnotatedDocument, PHISpan
+from clinical_deid.domain import AnnotatedDocument, EntitySpan
 
 
 # ---------------------------------------------------------------------------
@@ -39,7 +39,7 @@ def _tokenize(text: str) -> list[tuple[str, int, int]]:
 
 def _bio_tags(
     tokens: list[tuple[str, int, int]],
-    spans: list[PHISpan],
+    spans: list[EntitySpan],
 ) -> list[str]:
     """Assign BIO tags to tokens based on character-level spans.
 
@@ -86,7 +86,7 @@ def to_conll(docs: list[AnnotatedDocument]) -> str:
     """
     lines: list[str] = []
     for doc in docs:
-        lines.append(f"-DOCSTART- -X- O O")
+        lines.append("-DOCSTART- -X- O O")
         lines.append("")
         tokens = _tokenize(doc.document.text)
         tags = _bio_tags(tokens, list(doc.spans))

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from clinical_deid.domain import AnnotatedDocument, Document, PHISpan
+from clinical_deid.domain import AnnotatedDocument, Document, EntitySpan
 from clinical_deid.transform.ops import run_transform_pipeline, strip_split_metadata
 from clinical_deid.transform.splits import reassign_splits
 
@@ -44,7 +44,7 @@ def test_pipeline_resplit_last() -> None:
     docs = [
         AnnotatedDocument(
             document=Document(id="a", text="x", metadata={"split": "train"}),
-            spans=[PHISpan(start=0, end=1, label="NAME")],
+            spans=[EntitySpan(start=0, end=1, label="NAME")],
         )
     ]
     out = run_transform_pipeline(

@@ -17,7 +17,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-from clinical_deid.domain import AnnotatedDocument, Document, PHISpan
+from clinical_deid.domain import AnnotatedDocument, Document, EntitySpan
 from clinical_deid.pipes.base import ConfigurablePipe
 from clinical_deid.pipes.ui_schema import field_ui
 
@@ -122,8 +122,8 @@ _OPERATOR_PARAMS: dict[str, tuple[str, ...]] = {
 }
 
 
-def _spans_to_recognizer_results(spans: list[PHISpan]) -> list[Any]:
-    """Convert ``PHISpan`` list to Presidio ``RecognizerResult`` list."""
+def _spans_to_recognizer_results(spans: list[EntitySpan]) -> list[Any]:
+    """Convert ``EntitySpan`` list to Presidio ``RecognizerResult`` list."""
     from presidio_analyzer import RecognizerResult
 
     return [

@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from clinical_deid.models import ModelInfo, _load_manifest
+from clinical_deid.models import _load_manifest
 from clinical_deid.training.manifest import write_manifest_v2
 
 

@@ -6,7 +6,7 @@ import re
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from clinical_deid.domain import AnnotatedDocument, PHISpan
+from clinical_deid.domain import AnnotatedDocument, EntitySpan
 from clinical_deid.pipes.base import ConfigurablePipe
 from clinical_deid.pipes.detector_label_mapping import (
     accumulate_spans,
@@ -283,7 +283,7 @@ _ADDRESS = (
 )
 
 
-BUILTIN_REGEX_PATTERNS: dict[str, str] = {
+_CLINICAL_PHI_PATTERNS: dict[str, str] = {
     "DATE": _DATE,
     "DATE_TIME": _DATE_TIME,
     "AGE": _AGE,
@@ -307,6 +307,21 @@ BUILTIN_REGEX_PATTERNS: dict[str, str] = {
     "ZIP_CODE_US": _ZIP_CODE_US,
     "ADDRESS": _ADDRESS,
 }
+
+# Register the built-in packs now that the pattern dict is defined. This is a
+# one-shot side-effect import; ``packs._register_builtin_packs()`` reads
+# ``_CLINICAL_PHI_PATTERNS`` above.
+from clinical_deid.pipes.regex_ner.packs import (  # noqa: E402
+    _register_builtin_packs,
+    get_pattern_pack,
+)
+
+_register_builtin_packs()
+
+# Backward-compat alias: legacy callers import ``BUILTIN_REGEX_PATTERNS`` from
+# this module (and via ``clinical_deid.pipes.regex_ner``). Always points at the
+# default (``clinical_phi``) pack's patterns.
+BUILTIN_REGEX_PATTERNS: dict[str, str] = dict(_CLINICAL_PHI_PATTERNS)
 
 
 class RegexLabelSettings(BaseModel):
@@ -334,6 +349,20 @@ class RegexNerConfig(BaseModel):
         json_schema_extra=field_ui(
             ui_group="General",
             ui_order=1,
+            ui_widget="text",
+            ui_advanced=True,
+        ),
+    )
+
+    pattern_pack: str = Field(
+        default="clinical_phi",
+        description=(
+            "Name of the registered regex pattern pack to use. "
+            "Built-ins: 'clinical_phi' (default), 'generic_pii'."
+        ),
+        json_schema_extra=field_ui(
+            ui_group="General",
+            ui_order=2,
             ui_widget="text",
             ui_advanced=True,
         ),
@@ -376,13 +405,14 @@ class RegexNerConfig(BaseModel):
         return mapping
 
 
-def builtin_regex_label_names() -> list[str]:
-    return sorted(BUILTIN_REGEX_PATTERNS.keys())
+def builtin_regex_label_names(pack_name: str = "clinical_phi") -> list[str]:
+    """Return the labels contributed by *pack_name* (default: clinical_phi)."""
+    return get_pattern_pack(pack_name).labels()
 
 
 def default_base_labels() -> list[str]:
-    """Default label space for the regex_ner detector."""
-    return sorted(BUILTIN_REGEX_PATTERNS.keys())
+    """Default label space for the regex_ner detector (clinical_phi pack)."""
+    return get_pattern_pack("clinical_phi").labels()
 
 
 class _ResolvedRegex:
@@ -394,14 +424,15 @@ class _ResolvedRegex:
 
 
 def _resolve_regex(config: RegexNerConfig) -> list[_ResolvedRegex]:
-    label_keys = set(BUILTIN_REGEX_PATTERNS) | set(config.labels)
+    pack = get_pattern_pack(config.pattern_pack)
+    label_keys = set(pack.patterns) | set(config.labels)
 
     out: list[_ResolvedRegex] = []
     for label in sorted(label_keys):
         settings = config.labels.get(label, RegexLabelSettings())
         if not settings.enabled:
             continue
-        pat = settings.custom_pattern or BUILTIN_REGEX_PATTERNS.get(label)
+        pat = settings.custom_pattern or pack.patterns.get(label)
         if not pat:
             continue
         out.append(_ResolvedRegex(label, re.compile(pat, re.IGNORECASE)))
@@ -429,7 +460,7 @@ class RegexNerPipe(ConfigurablePipe):
 
     def forward(self, doc: AnnotatedDocument) -> AnnotatedDocument:
         text = doc.document.text
-        found: list[PHISpan] = []
+        found: list[EntitySpan] = []
         seen: set[tuple[int, int, str]] = set()
         for r in self._resolved:
             for m in r.compiled.finditer(text):
@@ -437,7 +468,7 @@ class RegexNerPipe(ConfigurablePipe):
                 if key not in seen:
                     seen.add(key)
                     found.append(
-                        PHISpan(
+                        EntitySpan(
                             start=m.start(),
                             end=m.end(),
                             label=r.label,

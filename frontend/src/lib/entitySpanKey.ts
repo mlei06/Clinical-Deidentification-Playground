@@ -1,7 +1,7 @@
-import type { PHISpanResponse } from '../api/types';
+import type { EntitySpanResponse } from '../api/types';
 
 /** Stable key for a span within a document (used for list ↔ highlight sync). */
-export function phiSpanKey(s: PHISpanResponse): string {
+export function entitySpanKey(s: EntitySpanResponse): string {
   return `${s.start}-${s.end}-${s.label}`;
 }
 
@@ -9,7 +9,7 @@ export function phiSpanKey(s: PHISpanResponse): string {
 export function isRangeUncovered(
   start: number,
   end: number,
-  spans: PHISpanResponse[],
+  spans: EntitySpanResponse[],
 ): boolean {
   if (start >= end) return false;
   for (let i = start; i < end; i++) {

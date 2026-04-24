@@ -2,22 +2,22 @@
 
 from __future__ import annotations
 
-from clinical_deid.domain import AnnotatedDocument, Document, PHISpan
+from clinical_deid.domain import AnnotatedDocument, Document, EntitySpan
 from clinical_deid.pipes.combinators import Pipeline, ResolveSpans, ResolveSpansConfig
 from clinical_deid.pipes.regex_ner import RegexNerConfig, RegexNerPipe
 from clinical_deid.pipes.registry import load_pipeline
 from clinical_deid.pipes.whitelist import WhitelistConfig, WhitelistPipe
 
 
-def _doc(text: str, spans: list[PHISpan]) -> AnnotatedDocument:
+def _doc(text: str, spans: list[EntitySpan]) -> AnnotatedDocument:
     return AnnotatedDocument(document=Document(id="d", text=text), spans=spans)
 
 
 def test_resolve_spans_longest_non_overlapping_single_group() -> None:
     text = "abcdefghijkl"
     spans = [
-        PHISpan(start=0, end=3, label="A"),
-        PHISpan(start=2, end=8, label="B"),
+        EntitySpan(start=0, end=3, label="A"),
+        EntitySpan(start=2, end=8, label="B"),
     ]
     pipe = ResolveSpans(ResolveSpansConfig(strategy="longest_non_overlapping"))
     out = pipe.forward(_doc(text, spans)).spans
@@ -28,8 +28,8 @@ def test_resolve_spans_longest_non_overlapping_single_group() -> None:
 
 def test_resolve_spans_exact_dedupe() -> None:
     spans = [
-        PHISpan(start=0, end=3, label="X"),
-        PHISpan(start=0, end=3, label="X"),
+        EntitySpan(start=0, end=3, label="X"),
+        EntitySpan(start=0, end=3, label="X"),
     ]
     pipe = ResolveSpans(ResolveSpansConfig(strategy="exact_dedupe"))
     out = pipe.forward(_doc("abc", spans)).spans
@@ -63,4 +63,4 @@ def test_regex_then_resolve_longest() -> None:
     doc = pipe.forward(doc)
     resolver = ResolveSpans(ResolveSpansConfig(strategy="longest_non_overlapping"))
     doc2 = resolver.forward(doc)
-    assert all(isinstance(s, PHISpan) for s in doc2.spans)
+    assert all(isinstance(s, EntitySpan) for s in doc2.spans)

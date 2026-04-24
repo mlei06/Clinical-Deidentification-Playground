@@ -36,7 +36,7 @@ import {
   deleteInferenceRun,
 } from '../../api/inference';
 import { downloadBlob } from '../../lib/download';
-import { phiSpanKey } from '../../lib/phiSpanKey';
+import { entitySpanKey } from '../../lib/entitySpanKey';
 import { CANONICAL_LABELS } from '../../lib/canonicalLabels';
 import { labelFamilyLegend, labelFamilySwatch } from '../../lib/labelColors';
 import {
@@ -55,7 +55,7 @@ import {
 } from '../../lib/spanOverlapConflicts';
 import type {
   OutputMode,
-  PHISpanResponse,
+  EntitySpanResponse,
   ProcessResponse,
   SavedInferenceRunDetail,
 } from '../../api/types';
@@ -131,7 +131,7 @@ export default function InferenceView() {
   const [result, setResult] = useState<ProcessResponse | null>(null);
   const [snapshotMeta, setSnapshotMeta] = useState<{ id: string; saved_at: string } | null>(null);
   const [selectedRunId, setSelectedRunId] = useState('');
-  const [editedSpans, setEditedSpans] = useState<PHISpanResponse[] | null>(null);
+  const [editedSpans, setEditedSpans] = useState<EntitySpanResponse[] | null>(null);
   const [redactError, setRedactError] = useState<string | null>(null);
   const [activeSpanKey, setActiveSpanKey] = useState<string | null>(null);
   const [ghostSelection, setGhostSelection] = useState<{
@@ -149,7 +149,7 @@ export default function InferenceView() {
   } | null>(null);
   const [spanPopover, setSpanPopover] = useState<{
     key: string;
-    span: PHISpanResponse;
+    span: EntitySpanResponse;
     left: number;
     top: number;
   } | null>(null);
@@ -376,7 +376,7 @@ export default function InferenceView() {
     downloadBlob(`${base}_redacted.txt`, result.redacted_text, 'text/plain; charset=utf-8');
   };
 
-  const effectiveSpans: PHISpanResponse[] = editedSpans ?? result?.spans ?? [];
+  const effectiveSpans: EntitySpanResponse[] = editedSpans ?? result?.spans ?? [];
 
   const conflictSets = useMemo(() => {
     if (!result) return [] as SpanConflictSet[];
@@ -389,7 +389,7 @@ export default function InferenceView() {
   );
 
   const overlapSpanCandidatesByRange = useMemo(() => {
-    const m = new Map<string, PHISpanResponse[]>();
+    const m = new Map<string, EntitySpanResponse[]>();
     for (const c of conflictSets) {
       m.set(spanRangeKey(c.start, c.end), c.spans);
     }
@@ -416,7 +416,7 @@ export default function InferenceView() {
     return conflictsForFinalSpans(rangeMap, effectiveSpans);
   }, [result?.intermediary_trace, effectiveSpans]);
 
-  const handleEditedSpansChange = (spans: PHISpanResponse[]) => {
+  const handleEditedSpansChange = (spans: EntitySpanResponse[]) => {
     setEditedSpans(spans);
     setRedactError(null);
   };
@@ -495,14 +495,14 @@ export default function InferenceView() {
     );
   };
 
-  const replaceSpans = (next: PHISpanResponse[]) => {
+  const replaceSpans = (next: EntitySpanResponse[]) => {
     setEditedSpans(next);
     setRedactError(null);
   };
 
   /** Functional update avoids stale ``effectiveSpans`` when resolving from the popover after other edits. */
   const handleResolveOverlapConflict = useCallback(
-    (kept: PHISpanResponse) => {
+    (kept: EntitySpanResponse) => {
       setEditedSpans((prev) => {
         const base = prev ?? result?.spans ?? [];
         return resolveConflictKeepSpan(base, kept);
@@ -541,7 +541,7 @@ export default function InferenceView() {
 
   const handleOverlapConflictClick = (
     rangeKey: string,
-    _candidates: PHISpanResponse[],
+    _candidates: EntitySpanResponse[],
     anchor: DOMRect,
   ) => {
     const cs = conflictSets.find((c) => spanRangeKey(c.start, c.end) === rangeKey);
@@ -550,18 +550,18 @@ export default function InferenceView() {
     setOverlapConflictPopover({ conflict: cs, anchor });
   };
 
-  const updateSpanByKey = (key: string, patch: Partial<PHISpanResponse>) => {
-    replaceSpans(effectiveSpans.map((s) => (phiSpanKey(s) === key ? { ...s, ...patch } : s)));
+  const updateSpanByKey = (key: string, patch: Partial<EntitySpanResponse>) => {
+    replaceSpans(effectiveSpans.map((s) => (entitySpanKey(s) === key ? { ...s, ...patch } : s)));
   };
 
   const deleteSpanByKey = (key: string) => {
-    replaceSpans(effectiveSpans.filter((s) => phiSpanKey(s) !== key));
+    replaceSpans(effectiveSpans.filter((s) => entitySpanKey(s) !== key));
     setSpanPopover(null);
     if (activeSpanKey === key) setActiveSpanKey(null);
   };
 
   const addManualSpan = (label: string, sel: { start: number; end: number; text: string }) => {
-    const next: PHISpanResponse = {
+    const next: EntitySpanResponse = {
       start: sel.start,
       end: sel.end,
       label,
@@ -569,8 +569,8 @@ export default function InferenceView() {
       confidence: null,
       source: 'manual',
     };
-    const k = phiSpanKey(next);
-    if (effectiveSpans.some((s) => phiSpanKey(s) === k)) {
+    const k = entitySpanKey(next);
+    if (effectiveSpans.some((s) => entitySpanKey(s) === k)) {
       clearPendingSelection();
       return;
     }
@@ -854,7 +854,7 @@ export default function InferenceView() {
                       if (!span) return;
                       setConflictUI({
                         c,
-                        spanKey: phiSpanKey(span),
+                        spanKey: entitySpanKey(span),
                         left: Math.max(8, Math.min(anchor.left, window.innerWidth - 280)),
                         top: anchor.bottom + 6,
                       });

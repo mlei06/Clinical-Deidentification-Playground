@@ -13,7 +13,7 @@ from clinical_deid.api.schemas import (
     BatchProcessRequest,
     BatchProcessResponse,
     OutputMode,
-    PHISpanResponse,
+    EntitySpanResponse,
     ProcessRequest,
     ProcessResponse,
     RedactRequest,
@@ -70,7 +70,7 @@ def redact_document(
     sends the final set here for export.
     """
     span_responses = [
-        PHISpanResponse(
+        EntitySpanResponse(
             start=s.start, end=s.end, label=s.label,
             text=body.text[s.start : s.end],
         )
