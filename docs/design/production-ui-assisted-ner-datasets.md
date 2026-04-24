@@ -12,7 +12,7 @@ Backend contracts (aligned surrogate spans, server-side ingest) remain in [plans
 
 ### 1.2 Non-goals (v1 UI)
 
-- Replacing the Playground **Datasets** admin view for server-side registry CRUD (optional later: “Push dataset to server” with admin key).
+- Replacing the Playground **Datasets** admin view for server-side registry CRUD. *(Superseded for exports: the export bar can **Register on server** with an **admin** API key, calling `POST /datasets/upload` with `line_format=production_v1` — see [plans/playground-dataset-jsonl-upload.md](../plans/playground-dataset-jsonl-upload.md).)*
 - **Collaborative real-time** multi-user editing.
 - **Version history** per file (beyond undo in session) — future.
 

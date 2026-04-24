@@ -26,7 +26,7 @@ Do not expose the service to the public internet without TLS, auth, and rate lim
 
 Liveness. Always unauthenticated.
 
-**Response:** `status`, `label_space_name` (active `CLINICAL_DEID_LABEL_SPACE_NAME` — used for `POST /process` span label normalization), `risk_profile_name` (default for eval risk-weighted metrics when not overridden). Example: `{"status":"ok","label_space_name":"clinical_phi","risk_profile_name":"clinical_phi"}`.
+**Response:** `status`, `label_space_name` (active `CLINICAL_DEID_LABEL_SPACE_NAME` — used for `POST /process` span label normalization), `risk_profile_name` (default for eval risk-weighted metrics when not overridden), and optional `api_key_scope` (`"admin"` \| `"inference"` \| `null`). When auth is enabled, send the same `X-API-Key` the browser uses; the field reflects that key’s scope so SPAs can enable admin-only actions (e.g. dataset register). When auth is disabled, `api_key_scope` is `"admin"`. Example: `{"status":"ok","label_space_name":"clinical_phi","risk_profile_name":"clinical_phi","api_key_scope":"admin"}`.
 
 ---
 
@@ -47,6 +47,10 @@ Per-detector label bundle (bundle-mode detectors: Presidio, NeuroNER, Hugging Fa
 ### `POST /pipelines/pipe-types/{name}/labels`
 
 Compute label list for a detector given optional JSON config body.
+
+### `POST /pipelines/prefix-label-space`
+
+Symbolic **upstream** label set for a pipe at a given `step_index` in `config.pipes` (used by the pipeline builder to suggest `label_mapper` keys). Request body: `{ "config": { "pipes": [...] }, "step_index": <int> }`. Returns `{ "labels": [...], "error": null | str }` on non-fatal load failures.
 
 ### `GET /pipelines/ner/builtins`
 
@@ -74,7 +78,7 @@ Update or delete pipeline file.
 
 ### `POST /pipelines/{pipeline_name}/validate`
 
-Validate config (optional body overrides file).
+Validates a pipeline and returns `output_label_space` when the graph loads. Body: optional `config` (full pipeline JSON). **Omit `config` or send `{}` / `null`** to load the **saved** pipeline file from `data/pipelines/{name}.json` — this matches the Playground “Compute / refresh” action.
 
 ---
 
@@ -127,6 +131,20 @@ Base path: `/eval` — `POST /eval/run`, list/detail/compare runs (admin when au
 ## Datasets (admin)
 
 Base path: `/datasets` — register, browse, compose, transform, generate, export (see inline routes in OpenAPI or source).
+
+### `POST /datasets/upload`
+
+Multipart form (`Content-Type: multipart/form-data` — do **not** set `Content-Type: application/json` on the same request; let the client set the multipart boundary). **Admin** only.
+
+| Field | Required | Description |
+|--------|----------|-------------|
+| `name` | yes | New dataset name (same rules as `POST /datasets` — safe identifier, no `..`). |
+| `file` | yes | JSONL file. |
+| `description` | no | Plain string, stored in the dataset manifest. |
+| `metadata` | no | JSON **object** as a string (e.g. `{"k":"v"}`) — invalid JSON or non-object → 422. |
+| `line_format` | no | `annotated_jsonl` (default) — one Pydantic `AnnotatedDocument` per line. `production_v1` — each line is a Production UI export line (`schema_version: 1`); the server normalizes to `AnnotatedDocument` before import. |
+
+Returns **201** and the same **DatasetDetail** as `POST /datasets`. Rejects with **409** if the name exists, **422** for invalid corpus or name, **413** if the request exceeds `CLINICAL_DEID_MAX_BODY_BYTES` (and `Content-Length` is set — see [configuration](configuration.md)). Large JSONL in the browser may require raising that cap on the API.
 
 ### `POST /datasets/preview-labels`
 

@@ -1,6 +1,7 @@
 import { NavLink, Outlet } from 'react-router-dom';
 import {
   Blocks,
+  Network,
   Play,
   BarChart3,
   Database,
@@ -13,6 +14,7 @@ import { clsx } from 'clsx';
 
 const TABS = [
   { to: '/create', label: 'Create', icon: Blocks },
+  { to: '/pipelines', label: 'Pipelines', icon: Network },
   { to: '/inference', label: 'Inference', icon: Play },
   { to: '/production', label: 'Production', icon: ShieldCheck },
   { to: '/evaluate', label: 'Evaluate', icon: BarChart3 },

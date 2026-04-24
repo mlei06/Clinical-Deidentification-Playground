@@ -57,7 +57,7 @@ export function useLabelSpace(
   const selectModel = useCallback(
     (s: StoreState) => {
       if (!selectedNodeId) return undefined;
-      const m = s.nodes.find((n) => n.id === selectedNodeId)?.data.config?.model;
+      const m = s.pipes.find((n) => n.id === selectedNodeId)?.data.config?.model;
       return typeof m === 'string' ? m : undefined;
     },
     [selectedNodeId],
@@ -66,7 +66,7 @@ export function useLabelSpace(
   const selectEntityMap = useCallback(
     (s: StoreState) => {
       if (!selectedNodeId) return undefined;
-      const em = s.nodes.find((n) => n.id === selectedNodeId)?.data.config?.entity_map;
+      const em = s.pipes.find((n) => n.id === selectedNodeId)?.data.config?.entity_map;
       return em && typeof em === 'object' && !Array.isArray(em)
         ? (em as Record<string, string>)
         : undefined;

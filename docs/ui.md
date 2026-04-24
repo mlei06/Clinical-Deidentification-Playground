@@ -7,12 +7,22 @@ The Playground UI is a React + TypeScript single-page application (Vite, Tailwin
 ```bash
 cd frontend
 npm install
-npm run dev          # dev server on localhost:5173
+npm run dev          # default http://localhost:3000 (see frontend/vite.config.ts)
 ```
 
 The frontend expects the API at `localhost:8000`. Start it with `clinical-deid serve`.
 
 ## Views
+
+### Pipelines catalog (`/pipelines`)
+
+Read-only catalog of **saved** pipelines (files under `data/pipelines/`).
+
+- Filterable list by name; detail panel shows **description** (`config.description`), a **composition** table (each step’s `type` and a short config hint), and the **final output label space** (symbolic labels after remaps / `label_mapper` / filters).
+- Labels come from cached `output_label_space` in the JSON when the pipeline was last saved via the API, or use **Compute / refresh** to call `POST /pipelines/{name}/validate` and display the result without saving.
+- Header includes the server **label space** name from `GET /health` (`label_space_name`) — the pack used for `POST /process` span-label normalization (distinct from per-pipeline output labels).
+
+**API endpoints used:** `GET /pipelines`, `POST /pipelines/{name}/validate`, `GET /health`.
 
 ### Pipeline Builder (`/create`)
 
@@ -147,7 +157,7 @@ frontend/src/
     deploy.ts       # Deploy config
     types.ts        # Shared TypeScript types
   components/
-    create/         # Pipeline builder (canvas, pipe cards, config forms)
+    create/         # Pipeline builder (linear rail, pipe cards, config panel)
     inference/      # Text input, span highlighting, trace viewer
     evaluate/       # Eval dashboard, metrics tables, confusion matrix
     datasets/       # Register, list, detail, compose, transform, generate forms

@@ -129,6 +129,11 @@ def test_delete_pipeline(client) -> None:
 def test_validate_pipeline(client) -> None:
     client.post("/pipelines", json={"name": "val", "config": REGEX_WHITELIST})
 
+    # Empty body: validate the saved file on disk (OpenAPI: config optional)
+    r0 = client.post("/pipelines/val/validate", json={})
+    assert r0.status_code == 200, r0.text
+    assert r0.json()["valid"] is True
+
     r = client.post("/pipelines/val/validate", json={"config": LABEL_MAPPER_CONFIG})
     assert r.status_code == 200
     v = r.json()
@@ -252,6 +257,18 @@ def test_process_with_label_mapper_pipeline(client) -> None:
     # PHONE should be remapped to TELEPHONE
     phone_spans = [s for s in body["spans"] if s["label"] == "TELEPHONE"]
     assert len(phone_spans) >= 1
+
+
+def test_prefix_label_space_for_label_mapper(client) -> None:
+    r = client.post(
+        "/pipelines/prefix-label-space",
+        json={"config": LABEL_MAPPER_CONFIG, "step_index": 2},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body.get("error") is None
+    assert isinstance(body.get("labels"), list)
+    assert "PHONE" in body["labels"]
 
 
 # ---------------------------------------------------------------------------

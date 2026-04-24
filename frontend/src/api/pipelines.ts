@@ -7,6 +7,11 @@ import type {
   ValidatePipelineResponse,
 } from './types';
 
+export interface PrefixLabelSpaceResponse {
+  labels: string[];
+  error: string | null;
+}
+
 export function listPipelines(): Promise<PipelineDetail[]> {
   return apiFetch('/pipelines');
 }
@@ -81,4 +86,15 @@ export interface LabelSpaceBundle {
 
 export function fetchLabelSpaceBundle(pipeType: string): Promise<LabelSpaceBundle> {
   return apiFetch(`/pipelines/pipe-types/${encodeURIComponent(pipeType)}/label-space-bundle`);
+}
+
+/** Symbolic labels entering the pipe at *stepIndex* (``label_mapper`` UI). */
+export function fetchPrefixLabelSpace(
+  config: PipelineConfig,
+  stepIndex: number,
+): Promise<PrefixLabelSpaceResponse> {
+  return apiFetch('/pipelines/prefix-label-space', {
+    method: 'POST',
+    body: JSON.stringify({ config, step_index: stepIndex }),
+  });
 }

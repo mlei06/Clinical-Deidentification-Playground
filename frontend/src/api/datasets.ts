@@ -52,6 +52,24 @@ export function registerDataset(req: RegisterDatasetRequest): Promise<DatasetDet
   return apiFetch('/datasets', { method: 'POST', body: JSON.stringify(req) });
 }
 
+export function uploadDataset(params: {
+  name: string;
+  file: File;
+  description?: string;
+  metadata?: Record<string, unknown>;
+  lineFormat?: 'annotated_jsonl' | 'production_v1';
+}): Promise<DatasetDetail> {
+  const form = new FormData();
+  form.append('name', params.name);
+  form.append('file', params.file);
+  if (params.description) form.append('description', params.description);
+  if (params.metadata && Object.keys(params.metadata).length > 0) {
+    form.append('metadata', JSON.stringify(params.metadata));
+  }
+  form.append('line_format', params.lineFormat ?? 'annotated_jsonl');
+  return apiFetch('/datasets/upload', { method: 'POST', body: form });
+}
+
 export function importBrat(req: ImportBratRequest): Promise<DatasetDetail> {
   return apiFetch('/datasets/import/brat', { method: 'POST', body: JSON.stringify(req) });
 }

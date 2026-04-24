@@ -136,7 +136,7 @@ React 19 + TypeScript + Vite 8 + Tailwind CSS v4. Key libraries:
 - **@tanstack/react-query** — all API data fetching (queries + mutations)
 - **zustand** — client-side state (pipeline editor store)
 - **@rjsf/core** — auto-generated config forms from pipe JSON Schema
-- **react-router-dom v7** — SPA routing across 7 views
+- **react-router-dom v7** — SPA routing across 9 Playground views
 - **recharts** — eval dashboard charts
 
 The Vite dev server (port 3000) proxies `/api/*` to `localhost:8000` with path rewrite (strips `/api` prefix). Frontend code calls `/api/pipelines`, which hits `localhost:8000/pipelines`.
@@ -152,7 +152,7 @@ The Vite dev server (port 3000) proxies `/api/*` to `localhost:8000` with path r
 ```
 frontend/                # Vite + React + TypeScript playground UI
   src/components/
-    create/              # Visual pipeline builder (drag-and-drop canvas)
+    create/              # Visual pipeline builder (linear rail + config panel)
     inference/           # Text input, span highlighting, trace timeline
     evaluate/            # Eval dashboard, metrics, confusion matrix, comparison
     datasets/            # Discover/import JSONL, BRAT→JSONL, compose, transform, generate, export, refresh
@@ -300,7 +300,7 @@ Also computes: risk-weighted recall (HIPAA severity weights), per-label breakdow
 
 ## Current status
 
-The full pipe system (11 cataloged types), CLI, FastAPI, Playground UI (7 views), and Production UI (`frontend-production/`) are built and functional. Key capabilities: pipeline composition, multi-mode evaluation with HIPAA coverage, training data export, `clinical-deid train run` for HF fine-tuning (`[train]` extra), NeuroNER HTTP sidecar integration, LLM synthesis, optional API key auth, Docker image, and unified audit trail.
+The full pipe system (11 cataloged types), CLI, FastAPI, Playground UI (9 views), and Production UI (`frontend-production/`) are built and functional. Key capabilities: pipeline composition, multi-mode evaluation with HIPAA coverage, training data export, `clinical-deid train run` for HF fine-tuning (`[train]` extra), NeuroNER HTTP sidecar integration, LLM synthesis, optional API key auth, Docker image, and unified audit trail.
 
 ## What's not built yet
 

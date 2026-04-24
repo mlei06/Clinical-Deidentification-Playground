@@ -225,12 +225,12 @@ Merges or filters overlapping spans produced by detectors.
 | `max_confidence` | Greedy selection by highest confidence score |
 | `longest_non_overlapping` | Greedy selection by span length |
 
-#### `label_mapper` — Remap labels (deprecated)
+#### `label_mapper` — Remap all span labels on the document
 
-Prefer per-detector `label_mapping` / `remap` where available. Still accepted for backward compatibility:
+Applies to **every span** in `doc.spans` at that stage (not only the previous pipe). Use a **final** `label_mapper` after `resolve_spans` to map multiple detectors onto one gold vocabulary (e.g. eval). Per-detector `label_mapping` / `remap` only affects that detector’s new spans; use the pipeline `label_mapper` when you need one cross-cutting map.
 
 ```json
-{"type": "label_mapper", "config": {"mapping": {"NAME": "PATIENT"}}}
+{"type": "label_mapper", "config": {"mapping": {"NAME": "PATIENT"}, "drop_unmapped": false}}
 ```
 
 #### `label_filter` — Keep or drop labels

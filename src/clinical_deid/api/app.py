@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
 
@@ -23,7 +23,7 @@ async def lifespan(_app: FastAPI):
 
 def create_app() -> FastAPI:
     """Application factory — defers settings access until called."""
-    from clinical_deid.api.auth import auth_enabled, require_admin
+    from clinical_deid.api.auth import auth_enabled, get_api_key_scope_for_health, require_admin
     from clinical_deid.config import get_settings
 
     # With auth enabled, don't expose the anonymous /docs / /redoc / /openapi.json —
@@ -74,11 +74,14 @@ def create_app() -> FastAPI:
     application.include_router(deploy.router)
 
     @application.get("/health", response_model=HealthResponse)
-    def health() -> HealthResponse:
+    def health(
+        api_key_scope: str | None = Depends(get_api_key_scope_for_health),
+    ) -> HealthResponse:
         return HealthResponse(
             status="ok",
             label_space_name=settings.label_space_name,
             risk_profile_name=settings.risk_profile_name,
+            api_key_scope=api_key_scope,
         )
 
     return application

@@ -23,6 +23,8 @@ from clinical_deid.api.schemas import (
     ParseListFilesResponse,
     PipelineDetail,
     PipeTypeInfo,
+    PrefixLabelSpaceRequest,
+    PrefixLabelSpaceResponse,
     UpdatePipelineRequest,
     ValidatePipelineRequest,
     ValidatePipelineResponse,
@@ -39,6 +41,7 @@ from clinical_deid.pipes.regex_ner import builtin_regex_label_names
 from clinical_deid.pipes.label_space import (
     enrich_pipeline_config_with_label_space,
     effective_output_labels_from_pipeline,
+    try_effective_input_labels_before_step,
 )
 from clinical_deid.pipes.registry import (
     compute_base_labels,
@@ -199,6 +202,19 @@ def compute_pipe_labels(name: str, body: ComputeLabelsRequest | None = None) -> 
     config = body.config if body else None
     labels = compute_base_labels(name, config)
     return ComputeLabelsResponse(labels=labels)
+
+
+@router.post(
+    "/prefix-label-space",
+    response_model=PrefixLabelSpaceResponse,
+    dependencies=[require_admin],
+)
+def prefix_label_space(body: PrefixLabelSpaceRequest) -> PrefixLabelSpaceResponse:
+    """Symbolic span labels entering the pipe at *step_index* (for ``label_mapper`` UI hints)."""
+    labels, err = try_effective_input_labels_before_step(body.config, body.step_index)
+    if labels is None:
+        return PrefixLabelSpaceResponse(labels=[], error=err)
+    return PrefixLabelSpaceResponse(labels=labels, error=None)
 
 
 @router.get(

@@ -1,0 +1,98 @@
+{
+  "pipes": [
+    {
+      "type": "regex_ner",
+      "config": {
+        "source_name": "regex_ner",
+        "pattern_pack": "clinical_phi",
+        "skip_overlapping": false
+      }
+    },
+    {
+      "type": "whitelist",
+      "config": {
+        "source_name": "whitelist",
+        "skip_overlapping": false
+      }
+    },
+    {
+      "type": "blacklist",
+      "config": {
+        "dict_config": {
+          "disabled_dictionaries": [
+            "common_words",
+            "sno_edited",
+            "commonest_words"
+          ]
+        },
+        "match": "any_token",
+        "apply_to_labels": null,
+        "load_all_dictionaries": true
+      }
+    },
+    {
+      "type": "resolve_spans",
+      "config": {
+        "strategy": "label_priority",
+        "consensus_threshold": 2,
+        "label_priority": [
+          "NAME",
+          "PATIENT",
+          "FIRST_NAME",
+          "LAST_NAME",
+          "SSN",
+          "MRN",
+          "ID",
+          "DATE",
+          "DOB",
+          "PHONE",
+          "FAX",
+          "EMAIL",
+          "ADDRESS",
+          "STREET",
+          "CITY",
+          "STATE",
+          "ZIP",
+          "COUNTRY",
+          "HOSPITAL",
+          "ORGANIZATION",
+          "AGE",
+          "URL",
+          "IP",
+          "DEVICE",
+          "PLATE",
+          "VIN",
+          "ACCOUNT"
+        ]
+      }
+    }
+  ],
+  "output_label_space": [
+    "ACCOUNT",
+    "ADDRESS",
+    "AGE",
+    "DATE",
+    "DATE_TIME",
+    "DEVICE_ID",
+    "EMAIL",
+    "FAX",
+    "FIRST_NAME",
+    "HOSPITAL",
+    "ID",
+    "IP_ADDRESS",
+    "LAST_NAME",
+    "LICENSE",
+    "LOCATION",
+    "MRN",
+    "OHIP",
+    "ORGANIZATION",
+    "PHONE",
+    "POSTAL_CODE_CA",
+    "SIN",
+    "SSN",
+    "URL",
+    "VEHICLE_ID",
+    "ZIP_CODE_US"
+  ],
+  "output_label_space_updated_at": "2026-04-24T19:58:33.004907+00:00"
+}

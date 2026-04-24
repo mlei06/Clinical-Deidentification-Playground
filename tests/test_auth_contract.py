@@ -97,6 +97,19 @@ def test_health_is_open(secured_client):
     client, _ = secured_client
     resp = client.get("/health")
     assert resp.status_code == 200
+    assert resp.json().get("api_key_scope") is None
+
+
+def test_health_reflects_api_key_scope(secured_client):
+    client, _ = secured_client
+    assert (
+        client.get("/health", headers={"X-API-Key": ADMIN_KEY}).json()["api_key_scope"]
+        == "admin"
+    )
+    assert (
+        client.get("/health", headers={"X-API-Key": INFERENCE_KEY}).json()["api_key_scope"]
+        == "inference"
+    )
 
 
 def test_docs_require_admin_when_auth_enabled(secured_client):

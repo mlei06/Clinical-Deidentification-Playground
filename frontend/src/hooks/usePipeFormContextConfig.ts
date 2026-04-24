@@ -21,7 +21,7 @@ export function usePipeFormContextConfig(
   const selectedNodeId = ctxNodeId ?? formContext?.selectedNodeId;
   const selectConfig = useCallback(
     (s: ReturnType<typeof usePipelineEditorStore.getState>) =>
-      selectedNodeId ? s.nodes.find((n) => n.id === selectedNodeId)?.data.config : undefined,
+      selectedNodeId ? s.pipes.find((n) => n.id === selectedNodeId)?.data.config : undefined,
     [selectedNodeId],
   );
   const fromStore = usePipelineEditorStore(selectConfig);

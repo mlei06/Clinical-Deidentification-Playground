@@ -36,17 +36,31 @@ export async function apiFetch<T>(
   path: string,
   init?: RequestInit,
 ): Promise<T> {
+  const isFormData = init?.body instanceof FormData;
   const res = await fetch(`${BASE_URL}${path}`, {
     ...init,
     headers: authHeaders({
-      'Content-Type': 'application/json',
+      ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
       ...(init?.headers ?? {}),
     }),
   });
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({ detail: res.statusText }));
-    throw new ApiError(res.status, body.detail ?? res.statusText);
+    const raw = (body as { detail?: unknown }).detail;
+    const detail =
+      raw === undefined || raw === null
+        ? res.statusText
+        : typeof raw === 'string'
+          ? raw
+          : (() => {
+              try {
+                return JSON.stringify(raw);
+              } catch {
+                return res.statusText;
+              }
+            })();
+    throw new ApiError(res.status, detail);
   }
 
   if (res.status === 204) return undefined as T;

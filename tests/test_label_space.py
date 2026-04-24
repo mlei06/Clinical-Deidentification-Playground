@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from clinical_deid.pipes.label_space import (
     effective_output_labels_from_pipeline,
+    try_effective_input_labels_before_step,
     try_effective_output_labels_from_config,
 )
 from clinical_deid.pipes.registry import load_pipeline
@@ -38,3 +39,16 @@ def test_try_effective_from_config_empty_pipeline() -> None:
     labels, err = try_effective_output_labels_from_config({"pipes": []})
     assert err is None
     assert labels == []
+
+
+def test_input_labels_before_step_label_mapper() -> None:
+    cfg = {
+        "pipes": [
+            {"type": "regex_ner"},
+            {"type": "label_mapper", "config": {"mapping": {"PHONE": "TEL"}}},
+        ]
+    }
+    before, err = try_effective_input_labels_before_step(cfg, 1)
+    assert err is None
+    assert before  # non-empty: regex_ner effective labels
+    assert "PHONE" in before

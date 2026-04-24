@@ -10,11 +10,3 @@
   --color-preprocessor: #8b5cf6;
   --color-preprocessor-light: #ede9fe;
 }
-
-/* React Flow overrides */
-.react-flow__node {
-  cursor: grab;
-}
-.react-flow__node:active {
-  cursor: grabbing;
-}

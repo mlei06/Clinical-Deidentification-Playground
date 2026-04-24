@@ -10,6 +10,8 @@ export interface HealthResponse {
   status: string;
   label_space_name: string;
   risk_profile_name: string;
+  /** Present when the same ``X-API-Key`` the UI uses is sent; use to gate admin-only actions. */
+  api_key_scope?: 'admin' | 'inference' | null;
 }
 
 // Domain

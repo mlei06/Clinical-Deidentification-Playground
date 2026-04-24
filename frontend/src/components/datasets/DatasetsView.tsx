@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import RegisterForm from './RegisterForm';
 import ImportBratForm from './ImportBratForm';
+import UploadJsonlForm from './UploadJsonlForm';
 import FormCard from './FormCard';
 import DatasetList from './DatasetList';
 import DatasetDetail from './DatasetDetail';
@@ -76,9 +77,12 @@ export default function DatasetsView() {
       )}
 
       {pillar === 'ingestion' && (
-        <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
-          <FormCard title="Import JSONL">
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2 xl:grid-cols-3">
+          <FormCard title="Import JSONL (server path)">
             <RegisterForm onRegistered={handleCreated} />
+          </FormCard>
+          <FormCard title="Upload JSONL">
+            <UploadJsonlForm onRegistered={handleCreated} />
           </FormCard>
           <FormCard title="Convert BRAT to JSONL">
             <ImportBratForm onImported={handleCreated} />

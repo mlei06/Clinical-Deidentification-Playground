@@ -1,6 +1,9 @@
-import { useState } from 'react';
-import { Download, Loader2, Package } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Download, Loader2, Package, UploadCloud } from 'lucide-react';
 import JSZip from 'jszip';
+import { ApiError } from '../../api/client';
+import { uploadDataset } from '../../api/datasets';
+import { getHealth } from '../../api/health';
 import { downloadBlob } from '../../lib/download';
 import { redactDocument } from '../../api/production';
 import {
@@ -137,6 +140,38 @@ async function buildLine(
   };
 }
 
+async function buildJsonlString(
+  files: DatasetFile[],
+  dataset: Dataset,
+  reviewer: string,
+  exportedAt: string,
+): Promise<string> {
+  const lines: string[] = [];
+  for (const f of files) {
+    const line = await buildLine(f, dataset, reviewer, exportedAt);
+    lines.push(JSON.stringify(line));
+  }
+  return lines.join('\n') + '\n';
+}
+
+function registerOnServerTitle(
+  healthLoaded: boolean,
+  scope: 'admin' | 'inference' | null | undefined,
+  chosenCount: number,
+): string {
+  if (!healthLoaded) return 'Checking API key scope…';
+  if (scope === 'inference') {
+    return 'Register on the server requires an admin API key. The configured key is inference-only.';
+  }
+  if (scope !== 'admin') {
+    return 'Set VITE_API_KEY to an admin API key, or download and register from the Playground Datasets tab.';
+  }
+  if (chosenCount === 0) {
+    return 'No files in the current export scope to register.';
+  }
+  return 'Register this export on the Datasets API (uses production_v1 line format).';
+}
+
 export default function DatasetExportBar({ dataset, reviewer }: DatasetExportBarProps) {
   const lastScope = useProductionStore((s) => s.lastExportScope);
   const setLastScope = useProductionStore((s) => s.setLastExportScope);
@@ -146,11 +181,41 @@ export default function DatasetExportBar({ dataset, reviewer }: DatasetExportBar
   const [isExporting, setIsExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastSummary, setLastSummary] = useState<string | null>(null);
+  const [apiKeyScope, setApiKeyScope] = useState<'admin' | 'inference' | null | undefined>(
+    undefined,
+  );
+  const [healthLoaded, setHealthLoaded] = useState(false);
+  const [registerOpen, setRegisterOpen] = useState(false);
+  const [regName, setRegName] = useState('');
+  const [regDescription, setRegDescription] = useState('');
+  const [isRegistering, setIsRegistering] = useState(false);
+  const [regError, setRegError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    getHealth()
+      .then((h) => {
+        if (cancelled) return;
+        setApiKeyScope(h.api_key_scope ?? null);
+        setHealthLoaded(true);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setApiKeyScope(null);
+        setHealthLoaded(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const resolvedCount = dataset.files.filter((f) => f.resolved).length;
   const chosen = scope === 'resolved'
     ? dataset.files.filter((f) => f.resolved)
     : dataset.files;
+
+  const canRegisterOnServer = healthLoaded && apiKeyScope === 'admin' && chosen.length > 0;
+  const registerTitle = registerOnServerTitle(healthLoaded, apiKeyScope, chosen.length);
 
   const setScopeAndRemember = (s: 'all' | 'resolved') => {
     setScope(s);
@@ -166,12 +231,8 @@ export default function DatasetExportBar({ dataset, reviewer }: DatasetExportBar
     setIsExporting(true);
     const exportedAt = new Date().toISOString();
     try {
-      const lines: string[] = [];
-      for (const f of chosen) {
-        const line = await buildLine(f, dataset, reviewer, exportedAt);
-        lines.push(JSON.stringify(line));
-      }
-      const jsonl = lines.join('\n') + '\n';
+      const jsonl = await buildJsonlString(chosen, dataset, reviewer, exportedAt);
+      const lineCount = jsonl ? jsonl.trim().split('\n').filter(Boolean).length : 0;
       const stamp = exportedAt.slice(0, 10);
       const stem = safeStem(dataset.name);
 
@@ -187,7 +248,7 @@ export default function DatasetExportBar({ dataset, reviewer }: DatasetExportBar
               dataset_id: dataset.id,
               export_output_type: dataset.exportOutputType,
               scope,
-              line_count: lines.length,
+              line_count: lineCount,
               reviewer: reviewer || null,
               exported_at: exportedAt,
             },
@@ -205,12 +266,55 @@ export default function DatasetExportBar({ dataset, reviewer }: DatasetExportBar
         );
       }
       setLastSummary(
-        `${lines.length} line(s) · ${dataset.exportOutputType} · ${scope}`,
+        `${lineCount} line(s) · ${dataset.exportOutputType} · ${scope}`,
       );
     } catch (err) {
       setError(err instanceof Error ? err.message : 'export failed');
     } finally {
       setIsExporting(false);
+    }
+  };
+
+  const openRegisterModal = () => {
+    if (!canRegisterOnServer) return;
+    setRegError(null);
+    setError(null);
+    setRegName(safeStem(dataset.name).toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'dataset');
+    setRegDescription(`Production export: ${dataset.name} (${dataset.exportOutputType})`);
+    setRegisterOpen(true);
+  };
+
+  const handleRegisterOnServer = async () => {
+    if (!regName.trim()) {
+      setRegError('Dataset name is required.');
+      return;
+    }
+    setRegError(null);
+    setIsRegistering(true);
+    const exportedAt = new Date().toISOString();
+    try {
+      const jsonl = await buildJsonlString(chosen, dataset, reviewer, exportedAt);
+      const blob = new Blob([jsonl], { type: 'application/x-ndjson' });
+      const res = await uploadDataset({
+        name: regName.trim(),
+        file: blob,
+        filename: `${safeStem(dataset.name)}.jsonl`,
+        description: regDescription.trim() || undefined,
+        lineFormat: 'production_v1',
+      });
+      setRegisterOpen(false);
+      setLastSummary(
+        `Registered on server: ${res.name} · ${res.document_count} document(s)`,
+      );
+    } catch (err) {
+      if (err instanceof ApiError) {
+        const d = err.detail;
+        setRegError(typeof d === 'string' ? d : JSON.stringify(d));
+      } else {
+        setRegError(err instanceof Error ? err.message : 'register failed');
+      }
+    } finally {
+      setIsRegistering(false);
     }
   };
 
@@ -253,6 +357,16 @@ export default function DatasetExportBar({ dataset, reviewer }: DatasetExportBar
         {lastSummary && <span className="text-[11px] text-gray-500">{lastSummary}</span>}
         <button
           type="button"
+          title={registerTitle}
+          onClick={openRegisterModal}
+          disabled={!canRegisterOnServer}
+          className="flex items-center gap-1 rounded border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-800 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          <UploadCloud size={12} />
+          Register on server
+        </button>
+        <button
+          type="button"
           onClick={handleExport}
           disabled={chosen.length === 0 || isExporting}
           className="flex items-center gap-1 rounded bg-gray-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-gray-800 disabled:opacity-40"
@@ -270,6 +384,72 @@ export default function DatasetExportBar({ dataset, reviewer }: DatasetExportBar
       {error && (
         <div className="basis-full rounded border border-red-200 bg-red-50 px-2 py-1 text-xs text-red-700">
           {error}
+        </div>
+      )}
+
+      {registerOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="register-dataset-title"
+        >
+          <div className="w-full max-w-md rounded-lg border border-gray-200 bg-white p-4 shadow-lg">
+            <h2 id="register-dataset-title" className="text-sm font-semibold text-gray-900">
+              Register on server
+            </h2>
+            <p className="mt-1 text-[11px] text-gray-500">
+              Creates a new dataset on the API from this export (line_format=production_v1). Requires
+              an admin API key.
+            </p>
+            <div className="mt-3 space-y-2">
+              <label className="block text-[11px] font-medium text-gray-600" htmlFor="reg-name">
+                Dataset name
+              </label>
+              <input
+                id="reg-name"
+                type="text"
+                value={regName}
+                onChange={(e) => setRegName(e.target.value)}
+                className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm"
+                autoFocus
+              />
+              <label className="block text-[11px] font-medium text-gray-600" htmlFor="reg-desc">
+                Description
+              </label>
+              <input
+                id="reg-desc"
+                type="text"
+                value={regDescription}
+                onChange={(e) => setRegDescription(e.target.value)}
+                className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm"
+              />
+            </div>
+            {regError && (
+              <div className="mt-2 rounded border border-red-200 bg-red-50 px-2 py-1 text-xs text-red-800">
+                {regError}
+              </div>
+            )}
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setRegisterOpen(false)}
+                className="rounded border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700"
+                disabled={isRegistering}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleRegisterOnServer}
+                disabled={isRegistering}
+                className="inline-flex items-center gap-1 rounded bg-gray-900 px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50"
+              >
+                {isRegistering ? <Loader2 size={12} className="animate-spin" /> : <UploadCloud size={12} />}
+                Register
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

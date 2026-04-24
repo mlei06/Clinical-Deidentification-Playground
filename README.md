@@ -94,12 +94,14 @@ Pipeline commands (`run`, `batch`, `eval`) support `--profile` (fast/balanced/ac
 
 ## Frontend (Playground UI)
 
-The frontend is a React + TypeScript app (Vite, Tailwind CSS) with seven views:
+The frontend is a React + TypeScript app (Vite, Tailwind CSS) with nine top-level views:
 
 | View | Route | What it does |
 |------|-------|-------------|
 | **Pipeline Builder** | `/create` | Visual drag-and-drop pipeline composer |
+| **Pipelines** | `/pipelines` | Browse saved pipelines: description, pipe chain, output label space |
 | **Inference** | `/inference` | Paste text, see spans + redacted output + trace |
+| **Production** | `/production` | Dataset-centric assisted NER workspace (separate product surface) |
 | **Evaluate** | `/evaluate` | Run evals, view metrics/confusion matrix, compare runs |
 | **Datasets** | `/datasets` | Register, browse, compose, transform, generate datasets |
 | **Dictionaries** | `/dictionaries` | Upload/manage whitelist & blacklist term lists |
@@ -112,7 +114,7 @@ npm install
 npm run dev          # default http://localhost:3000 (see frontend/vite.config.ts)
 ```
 
-Configure `VITE_API_BASE_URL` / `VITE_API_KEY` via `frontend/.env.local` when the API is not proxied under `/api`. The dev server proxies `/api` to `localhost:8000` by default.
+Configure `VITE_API_BASE_URL` / `VITE_API_KEY` via `frontend/.env.local` when the API is not proxied under `/api`. The dev server proxies `/api` to `localhost:8000` by default. For **Datasets → Upload JSONL** (or large multipart bodies), ensure `CLINICAL_DEID_MAX_BODY_BYTES` on the API is high enough, or you will get **413**.
 
 ## Run the API
 
@@ -147,7 +149,8 @@ Default SQLite database: `./data/app.sqlite` (audit log only). Override with `CL
 | Dictionaries | `POST` | `/dictionaries` | Upload a new dictionary file |
 | Dictionaries | `DELETE` | `/dictionaries/{kind}/{name}` | Delete a dictionary |
 | Datasets | `GET` | `/datasets` | List registered datasets |
-| Datasets | `POST` | `/datasets` | Register dataset from local path |
+| Datasets | `POST` | `/datasets` | Register dataset from local path on the API host |
+| Datasets | `POST` | `/datasets/upload` | Multipart JSONL upload (browser or Production **Register on server**; admin key; see [docs/api.md](docs/api.md)) |
 | Datasets | `GET` | `/datasets/{name}` | Dataset detail + analytics |
 | Datasets | `PUT` | `/datasets/{name}` | Update description/metadata |
 | Datasets | `DELETE` | `/datasets/{name}` | Delete dataset directory under corpora |

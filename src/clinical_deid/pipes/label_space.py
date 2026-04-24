@@ -66,6 +66,33 @@ def try_effective_output_labels_from_config(config: dict) -> tuple[list[str] | N
         return None, str(exc)
 
 
+def try_effective_input_labels_before_step(
+    full_config: dict, step_index: int
+) -> tuple[list[str] | None, str | None]:
+    """Symbolic label set **entering** the pipe at *step_index* (i.e. after ``pipes[:step_index]``).
+
+    Used by the pipeline builder to suggest ``label_mapper`` mapping keys. This is an upper bound
+    (same caveats as :func:`effective_output_labels_from_pipeline`).
+    """
+    pipes = full_config.get("pipes")
+    if not isinstance(pipes, list):
+        return None, "config must contain a 'pipes' array"
+    if step_index < 0:
+        return None, "step_index must be non-negative"
+    if step_index > len(pipes):
+        return None, f"step_index must be <= len(pipes) ({len(pipes)})"
+    prefix = {k: v for k, v in full_config.items() if k != "pipes"}
+    prefix["pipes"] = pipes[:step_index]
+    try:
+        from clinical_deid.pipes.registry import load_pipeline
+
+        pl = load_pipeline(prefix)
+        labs = effective_output_labels_from_pipeline(pl)
+        return sorted(labs), None
+    except Exception as exc:
+        return None, str(exc)
+
+
 def enrich_pipeline_config_with_label_space(config: dict) -> dict:
     """Return a copy of *config* with ``output_label_space`` / ``output_label_space_updated_at`` set."""
     from datetime import datetime, timezone

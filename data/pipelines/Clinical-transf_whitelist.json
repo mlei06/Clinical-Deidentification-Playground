@@ -1,0 +1,69 @@
+{
+  "pipes": [
+    {
+      "type": "huggingface_ner",
+      "config": {
+        "model": "mimic-clinicalbert-sentence",
+        "segmentation": "auto",
+        "source_name": "huggingface_ner",
+        "skip_overlapping": false
+      }
+    },
+    {
+      "type": "whitelist",
+      "config": {
+        "source_name": "whitelist",
+        "skip_overlapping": false
+      }
+    },
+    {
+      "type": "resolve_spans",
+      "config": {
+        "strategy": "left_to_right",
+        "consensus_threshold": 2,
+        "label_priority": [
+          "NAME",
+          "PATIENT",
+          "FIRST_NAME",
+          "LAST_NAME",
+          "SSN",
+          "MRN",
+          "ID",
+          "DATE",
+          "DOB",
+          "PHONE",
+          "FAX",
+          "EMAIL",
+          "ADDRESS",
+          "STREET",
+          "CITY",
+          "STATE",
+          "ZIP",
+          "COUNTRY",
+          "HOSPITAL",
+          "ORGANIZATION",
+          "AGE",
+          "URL",
+          "IP",
+          "DEVICE",
+          "PLATE",
+          "VIN",
+          "ACCOUNT"
+        ]
+      }
+    }
+  ],
+  "output_label_space": [
+    "AGE",
+    "DATE",
+    "FIRST_NAME",
+    "HOSPITAL",
+    "ID",
+    "LAST_NAME",
+    "LOCATION",
+    "NAME",
+    "ORGANIZATION",
+    "PHONE"
+  ],
+  "output_label_space_updated_at": "2026-04-24T20:50:36.643631+00:00"
+}

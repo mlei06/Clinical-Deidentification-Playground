@@ -89,6 +89,24 @@ export function useRegisterDataset() {
   });
 }
 
+export function useUploadDataset() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (req: {
+      name: string;
+      file: File;
+      description?: string;
+      metadata?: Record<string, unknown>;
+      lineFormat?: 'annotated_jsonl' | 'production_v1';
+    }) => api.uploadDataset(req),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['datasets'] });
+      qc.invalidateQueries({ queryKey: ['datasets', 'import-sources'] });
+      qc.invalidateQueries({ queryKey: ['datasets', 'import-sources', 'brat'] });
+    },
+  });
+}
+
 export function useImportBrat() {
   const qc = useQueryClient();
   return useMutation({

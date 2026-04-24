@@ -1,4 +1,4 @@
-import { useMemo, useState, useCallback, useEffect } from 'react';
+import { useMemo, useState, useCallback, useEffect, useRef } from 'react';
 import { clsx } from 'clsx';
 import {
   Trash2,
@@ -9,6 +9,7 @@ import {
   Copy,
   AlertTriangle,
   Loader2,
+  ArrowRightLeft,
 } from 'lucide-react';
 import LabelBadge from '../shared/LabelBadge';
 import { CANONICAL_LABELS } from '../../lib/canonicalLabels';
@@ -39,6 +40,11 @@ interface SpanEditorProps {
   onQuickResolveLabelPriority?: () => void;
   /** Commit current spans and regenerate the Output pane via ``/process/redact``. */
   onUpdateOutput?: () => void;
+  /**
+   * Labels offered in per-row selects and in “Map group to…”.
+   * Defaults to the canonical set (union with pipeline + current spans in InferenceView).
+   */
+  mapTargetLabels?: readonly string[];
 }
 
 export default function SpanEditor({
@@ -59,12 +65,19 @@ export default function SpanEditor({
   onDropConflict,
   onQuickResolveLabelPriority,
   onUpdateOutput,
+  mapTargetLabels: mapTargetLabelsProp = CANONICAL_LABELS,
 }: SpanEditorProps) {
+  const mapTargetLabels = mapTargetLabelsProp;
   const DROP_ALL_CHOICE = '__drop_all__';
   const [collapsedLabels, setCollapsedLabels] = useState<Set<string>>(new Set());
   const [collapsedConflicts, setCollapsedConflicts] = useState(false);
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
   const [conflictChoice, setConflictChoice] = useState<Record<string, string>>({});
+  const [openMapGroup, setOpenMapGroup] = useState<string | null>(null);
+  const [remapFeedback, setRemapFeedback] = useState<
+    { kind: 'loading' } | { kind: 'ok'; from: string; to: string; count: number } | null
+  >(null);
+  const mapGroupMenuRef = useRef<HTMLDivElement>(null);
 
   const toggleLabel = (label: string) => {
     setCollapsedLabels((prev) => {
@@ -106,6 +119,16 @@ export default function SpanEditor({
       return next;
     });
   }, [conflictSets]);
+
+  useEffect(() => {
+    if (!openMapGroup) return;
+    const onDown = (e: MouseEvent) => {
+      if (mapGroupMenuRef.current?.contains(e.target as Node)) return;
+      setOpenMapGroup(null);
+    };
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, [openMapGroup]);
 
   const toggleSelect = useCallback((key: string) => {
     setSelectedKeys((prev) => {
@@ -156,6 +179,18 @@ export default function SpanEditor({
       keys.forEach((k) => next.delete(k));
       return next;
     });
+  };
+
+  const remapGroup = (fromLabel: string, toLabel: string) => {
+    setOpenMapGroup(null);
+    if (fromLabel === toLabel) return;
+    setRemapFeedback({ kind: 'loading' });
+    const n = spans.filter((s) => s.label === fromLabel).length;
+    onChange(spans.map((s) => (s.label === fromLabel ? { ...s, label: toLabel } : s)));
+    window.setTimeout(() => {
+      setRemapFeedback({ kind: 'ok', from: fromLabel, to: toLabel, count: n });
+      window.setTimeout(() => setRemapFeedback(null), 2200);
+    }, 200);
   };
 
   const confirmConflictResolution = (cs: SpanConflictSet) => {
@@ -240,6 +275,26 @@ export default function SpanEditor({
       {error && (
         <div className="shrink-0 rounded border border-red-200 bg-red-50 px-2 py-1.5 text-red-700">
           {error}
+        </div>
+      )}
+
+      {remapFeedback?.kind === 'loading' && (
+        <div
+          className="flex shrink-0 items-center gap-1.5 rounded border border-gray-200 bg-gray-50 px-2 py-1.5 text-[10px] text-gray-700"
+          role="status"
+        >
+          <Loader2 size={12} className="shrink-0 animate-spin" />
+          Remapping group…
+        </div>
+      )}
+      {remapFeedback?.kind === 'ok' && (
+        <div
+          className="shrink-0 rounded border border-emerald-200 bg-emerald-50 px-2 py-1.5 text-[10px] text-emerald-900"
+          role="status"
+        >
+          Mapped {remapFeedback.count} span{remapFeedback.count === 1 ? '' : 's'}:{' '}
+          <span className="font-mono">{remapFeedback.from}</span> →{' '}
+          <span className="font-mono">{remapFeedback.to}</span>
         </div>
       )}
 
@@ -438,6 +493,46 @@ export default function SpanEditor({
                       <LabelBadge label={label} />
                       <span className="text-gray-400">({items.length})</span>
                     </button>
+                    <div
+                      className="relative flex shrink-0"
+                      ref={openMapGroup === label ? mapGroupMenuRef : null}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => setOpenMapGroup((g) => (g === label ? null : label))}
+                        className="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] font-medium text-gray-600 hover:bg-gray-200/80"
+                        title="Map all spans in this group to another label"
+                        aria-expanded={openMapGroup === label}
+                      >
+                        <ArrowRightLeft size={12} className="shrink-0" />
+                        <span className="hidden min-[360px]:inline">Map group to…</span>
+                      </button>
+                      {openMapGroup === label && (
+                        <div
+                          className="absolute right-0 top-full z-20 mt-0.5 max-h-48 min-w-[11rem] overflow-y-auto rounded border border-gray-200 bg-white py-1 shadow-lg"
+                          role="listbox"
+                          aria-label={`Target labels for ${label}`}
+                        >
+                          {mapTargetLabels.filter((t) => t !== label).length === 0 ? (
+                            <p className="px-2.5 py-2 text-[10px] text-gray-500">No other labels</p>
+                          ) : (
+                            mapTargetLabels
+                              .filter((t) => t !== label)
+                              .map((t) => (
+                                <button
+                                  key={t}
+                                  type="button"
+                                  role="option"
+                                  className="block w-full px-2.5 py-1.5 text-left font-mono text-[10px] text-gray-800 hover:bg-gray-50"
+                                  onClick={() => remapGroup(label, t)}
+                                >
+                                  {t}
+                                </button>
+                              ))
+                          )}
+                        </div>
+                      )}
+                    </div>
                     {!collapsed && (
                       <button
                         type="button"
@@ -508,7 +603,7 @@ export default function SpanEditor({
                                   className="max-w-[100px] rounded border border-gray-200 bg-white px-0.5 py-0.5 text-[9px] text-gray-800"
                                   title="Change label"
                                 >
-                                  {CANONICAL_LABELS.map((l) => (
+                                  {mapTargetLabels.map((l) => (
                                     <option key={l} value={l}>
                                       {l}
                                     </option>

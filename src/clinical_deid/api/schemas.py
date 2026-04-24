@@ -23,6 +23,14 @@ class HealthResponse(BaseModel):
     risk_profile_name: str = Field(
         description="Default risk profile (``CLINICAL_DEID_RISK_PROFILE_NAME``) for eval when not overridden."
     )
+    api_key_scope: str | None = Field(
+        default=None,
+        description=(
+            "If the request includes ``X-API-Key`` / ``Authorization: Bearer``, reflects ``admin`` "
+            "or ``inference``; ``null`` when auth is on but no/invalid key. When API auth is off, "
+            "``admin``. SPAs can send the browser key to gate admin-only actions."
+        ),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -45,7 +53,13 @@ class PipelineDetail(BaseModel):
 
 
 class ValidatePipelineRequest(BaseModel):
-    config: dict[str, Any]
+    """Body for ``POST /pipelines/{name}/validate``.
+
+    Omit *config* or send ``null`` to validate the **saved** pipeline file on disk.
+    Send *config* to validate an unsaved config (same shape as a pipeline JSON file).
+    """
+
+    config: dict[str, Any] | None = None
 
 
 class ValidatePipelineResponse(BaseModel):
@@ -212,6 +226,31 @@ class ComputeLabelsResponse(BaseModel):
     labels: list[str] = Field(
         ...,
         description="Canonical detector labels after entity_map (inputs to label_mapping).",
+    )
+
+
+class PrefixLabelSpaceRequest(BaseModel):
+    """Compute symbolic labels entering the pipe at *step_index* in *config*."""
+
+    config: dict[str, Any] = Field(
+        ...,
+        description="Full pipeline JSON (``pipes`` array in linear order).",
+    )
+    step_index: int = Field(
+        ...,
+        ge=0,
+        description="0-based index of the pipe being edited; upstream labels = symbolic output of ``pipes[:step_index]``.",
+    )
+
+
+class PrefixLabelSpaceResponse(BaseModel):
+    labels: list[str] = Field(
+        default_factory=list,
+        description="Sorted symbolic labels after upstream steps (expected span labels before this step).",
+    )
+    error: str | None = Field(
+        default=None,
+        description="Set when the prefix failed to load or *step_index* is invalid.",
     )
 
 

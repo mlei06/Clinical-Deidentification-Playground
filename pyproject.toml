@@ -73,6 +73,11 @@ pythonpath = ["src"]
 markers = [
     "train: requires the [train] extra (transformers, torch, datasets, seqeval)",
 ]
+# HuggingFace transformers BERT still uses tokenizers' WordPiece in a way that
+# triggers this deprecation; fix will come from upstream (not our code).
+filterwarnings = [
+    "ignore:.*WordPiece\\.__init__ will not create from files anymore.*:DeprecationWarning",
+]
 
 [tool.ruff]
 target-version = "py311"

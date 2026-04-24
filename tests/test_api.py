@@ -10,3 +10,5 @@ def test_health(client) -> None:
     assert data["status"] == "ok"
     assert "label_space_name" in data
     assert "risk_profile_name" in data
+    # No API keys configured → auth off → scope reported as admin for UIs.
+    assert data.get("api_key_scope") == "admin"

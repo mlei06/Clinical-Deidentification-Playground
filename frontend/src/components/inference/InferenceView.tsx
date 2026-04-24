@@ -38,6 +38,7 @@ import {
 import { downloadBlob } from '../../lib/download';
 import { entitySpanKey } from '../../lib/entitySpanKey';
 import { CANONICAL_LABELS } from '../../lib/canonicalLabels';
+import { usePipeline } from '../../hooks/usePipelines';
 import { labelFamilyLegend, labelFamilySwatch } from '../../lib/labelColors';
 import {
   buildConflictMapFromTrace,
@@ -377,6 +378,16 @@ export default function InferenceView() {
   };
 
   const effectiveSpans: EntitySpanResponse[] = editedSpans ?? result?.spans ?? [];
+
+  const { data: pipelineDetail } = usePipeline(pipeline || null);
+  const mapTargetLabels = useMemo(() => {
+    const set = new Set<string>(CANONICAL_LABELS);
+    for (const s of effectiveSpans) set.add(s.label);
+    for (const l of pipelineDetail?.config?.output_label_space ?? []) {
+      if (l) set.add(l);
+    }
+    return [...set].sort((a, b) => a.localeCompare(b));
+  }, [effectiveSpans, pipelineDetail?.config?.output_label_space]);
 
   const conflictSets = useMemo(() => {
     if (!result) return [] as SpanConflictSet[];
@@ -914,6 +925,7 @@ export default function InferenceView() {
                   isApplying={redactMutation.isPending}
                   isDirty={isDirty}
                   error={redactError}
+                  mapTargetLabels={mapTargetLabels}
                   ghostSelection={ghostSelection}
                   onClearGhostSelection={clearPendingSelection}
                   onNavigateToGhost={() => {
@@ -968,7 +980,7 @@ export default function InferenceView() {
             }}
           >
             <option value="">Choose label…</option>
-            {CANONICAL_LABELS.map((l) => (
+            {mapTargetLabels.map((l) => (
               <option key={l} value={l}>
                 {l}
               </option>

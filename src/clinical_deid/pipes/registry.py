@@ -127,13 +127,15 @@ _CATALOG: list[PipeCatalogEntry] = [
     ),
     PipeCatalogEntry(
         name="label_mapper",
-        description="Remap span labels (e.g. PATIENT → PERSON)",
+        description=(
+            "Remap all span labels on the document (e.g. unify detectors: PATIENT → PERSON). "
+            "Use after merge/resolve; per-detector label_mapping only affects that detector's output."
+        ),
         role="span_transformer",
         extra=None,
         install_hint="Included by default",
         config_path="clinical_deid.pipes.combinators:LabelMapperConfig",
         pipe_path="clinical_deid.pipes.combinators:LabelMapper",
-        deprecated=True,
     ),
     PipeCatalogEntry(
         name="label_filter",

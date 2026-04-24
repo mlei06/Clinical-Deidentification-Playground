@@ -131,6 +131,36 @@ def require_admin_or_inference_dep(
     raise HTTPException(status_code=401, detail="invalid API key")
 
 
+def get_api_key_scope_for_health(
+    authorization: str | None = Header(default=None),
+    x_api_key: str | None = Header(default=None, alias="X-API-Key"),
+) -> Scope | None:
+    """Reflect which scope the request key has, without requiring a key.
+
+    Used by ``GET /health`` so UIs can enable admin-only actions (e.g. dataset
+    register) when ``VITE_API_KEY`` is an admin key, and keep them disabled for
+    inference-scoped keys.
+
+    - When auth is **disabled** (no keys configured), returns ``"admin"`` so
+      local dev matches full access.
+    - When auth is **enabled** and no key is sent, returns ``None``.
+    - When auth is **enabled** and the key is unknown, returns ``None``.
+    """
+    if not auth_enabled():
+        return "admin"
+
+    key = _extract_key(authorization, x_api_key)
+    if not key:
+        return None
+
+    s = get_settings()
+    if key in s.admin_api_keys:
+        return "admin"
+    if key in s.inference_api_keys:
+        return "inference"
+    return None
+
+
 # Convenient ``Depends(...)`` sentinels for route signatures.
 require_admin = Depends(require_admin_dep)
 require_inference = Depends(require_inference_dep)

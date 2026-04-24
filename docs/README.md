@@ -8,12 +8,14 @@
 | [deployment.md](deployment.md) | Single-API production layout, Docker, volumes, security |
 | [docker-quickstart.md](docker-quickstart.md) | Build, env vars, volume mounts, and pointing a frontend at the API |
 | [staging-smoke.md](staging-smoke.md) | Post-deploy manual checks |
+| [testing-plan-dataset-upload.md](testing-plan-dataset-upload.md) | **QA plan:** dataset upload, Production register, run API/Playground/Production, pytest/curl matrix |
 | [pipes-and-pipelines.md](pipes-and-pipelines.md) | Pipe types, composition, registry |
 | [models.md](models.md) | Filesystem model registry (`models/{framework}/{name}/`) |
 | [evaluation.md](evaluation.md) | Metrics, matching modes, eval API |
 | [data-ingestion.md](data-ingestion.md) | Dataset formats, registration, transforms |
 | [plans/ner-dataset-creation.md](plans/ner-dataset-creation.md) | **Roadmap:** NER dataset workflow (ingest → review → BRAT/JSONL → surrogate alignment) |
-| [plans/eval-label-space-alignment-ui.md](plans/eval-label-space-alignment-ui.md) | **Roadmap:** Evaluate UI — gold vs pipeline label alignment panel |
+| [plans/eval-label-space-alignment-ui.md](plans/eval-label-space-alignment-ui.md) | **Roadmap:** Evaluation UI (label alignment, sampled eval, save subset, per-doc inspection) |
+| [plans/playground-dataset-jsonl-upload.md](plans/playground-dataset-jsonl-upload.md) | **Roadmap:** Playground JSONL upload + remote API deployment for Datasets |
 | [design/production-ui-assisted-ner-datasets.md](design/production-ui-assisted-ner-datasets.md) | **Design spec:** Production UI as the home for assisted NER dataset creation |
 | [ui.md](ui.md) | Playground UI views |
 | [synthesis.md](synthesis.md) | LLM note synthesis |

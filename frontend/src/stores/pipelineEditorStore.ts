@@ -1,9 +1,9 @@
 import { create } from 'zustand';
-import type { Node, Edge, OnNodesChange, OnEdgesChange } from '@xyflow/react';
-import { applyNodeChanges, applyEdgeChanges } from '@xyflow/react';
-import type { PipeTypeInfo, PipelineDetail } from '../api/types';
-import { pipelineToFlow } from '../lib/pipelineToFlow';
-import { flowToPipeline } from '../lib/flowToPipeline';
+import type { PipelineConfig, PipeTypeInfo, PipelineDetail } from '../api/types';
+import { pipelineToSequence, type PipelineSequenceEntry } from '../lib/pipelineToSequence';
+import { sequenceToPipelineConfig } from '../lib/flowToPipeline';
+
+export type { PipelineSequenceEntry };
 
 export interface PipeNodeData {
   pipeType: string;
@@ -18,21 +18,19 @@ export interface PipeNodeData {
 }
 
 interface PipelineEditorState {
-  nodes: Node<PipeNodeData>[];
-  edges: Edge[];
+  pipes: PipelineSequenceEntry[];
   selectedNodeId: string | null;
   pipelineName: string;
   pipelineDescription: string;
   isDirty: boolean;
 
-  onNodesChange: OnNodesChange;
-  onEdgesChange: OnEdgesChange;
-  addPipe: (pipeType: PipeTypeInfo, afterNodeId?: string) => void;
-  removePipe: (nodeId: string) => void;
-  updatePipeConfig: (nodeId: string, config: Record<string, unknown>) => void;
-  selectNode: (nodeId: string | null) => void;
+  addPipeAt: (pipeType: PipeTypeInfo, index: number) => void;
+  removePipe: (id: string) => void;
+  movePipe: (fromIndex: number, toIndex: number) => void;
+  updatePipeConfig: (id: string, config: Record<string, unknown>) => void;
+  selectNode: (id: string | null) => void;
   loadFromPipeline: (detail: PipelineDetail, pipeTypes: PipeTypeInfo[]) => void;
-  toPipelineConfig: () => ReturnType<typeof flowToPipeline>;
+  toPipelineConfig: () => PipelineConfig;
   setPipelineName: (name: string) => void;
   setPipelineDescription: (description: string) => void;
   reset: () => void;
@@ -40,128 +38,88 @@ interface PipelineEditorState {
 
 let nextId = 0;
 
+function buildData(pipeType: PipeTypeInfo): PipeNodeData {
+  return {
+    pipeType: pipeType.name,
+    role: pipeType.role,
+    label: pipeType.name.replace(/_/g, ' '),
+    description: pipeType.description,
+    config: {},
+    configSchema: (pipeType.config_schema as Record<string, unknown>) ?? null,
+    installed: pipeType.installed,
+    baseLabels: pipeType.base_labels ?? [],
+  };
+}
+
+function assignSequentialIds(
+  raw: ReturnType<typeof pipelineToSequence>,
+): PipelineSequenceEntry[] {
+  return raw.map((e) => ({
+    id: `pipe-${nextId++}`,
+    data: e.data,
+  }));
+}
+
 export const usePipelineEditorStore = create<PipelineEditorState>((set, get) => ({
-  nodes: [],
-  edges: [],
+  pipes: [],
   selectedNodeId: null,
   pipelineName: '',
   pipelineDescription: '',
   isDirty: false,
 
-  onNodesChange: (changes) =>
-    set((s) => ({
-      nodes: applyNodeChanges(changes, s.nodes) as Node<PipeNodeData>[],
-      isDirty: true,
-    })),
-
-  onEdgesChange: (changes) =>
-    set((s) => ({
-      edges: applyEdgeChanges(changes, s.edges),
-      isDirty: true,
-    })),
-
-  addPipe: (pipeType, afterNodeId) => {
+  addPipeAt: (pipeType, index) => {
     const id = `pipe-${nextId++}`;
-    const { nodes, edges } = get();
-
-    // Determine Y position
-    let y = 0;
-    let insertAfterIdx = -1;
-    if (afterNodeId) {
-      insertAfterIdx = nodes.findIndex((n) => n.id === afterNodeId);
-    }
-    if (nodes.length > 0) {
-      const refNode = insertAfterIdx >= 0 ? nodes[insertAfterIdx] : nodes[nodes.length - 1];
-      y = refNode.position.y + 120;
-    }
-
-    const newNode: Node<PipeNodeData> = {
-      id,
-      type: 'pipeNode',
-      position: { x: 250, y },
-      data: {
-        pipeType: pipeType.name,
-        role: pipeType.role,
-        label: pipeType.name.replace(/_/g, ' '),
-        description: pipeType.description,
-        config: {},
-        configSchema: (pipeType.config_schema as Record<string, unknown>) ?? null,
-        installed: pipeType.installed,
-        baseLabels: pipeType.base_labels ?? [],
-      },
-    };
-
-    // Auto-connect to last node
-    const newEdges = [...edges];
-    if (nodes.length > 0) {
-      const lastNode = nodes[nodes.length - 1];
-      newEdges.push({
-        id: `edge-${lastNode.id}-${id}`,
-        source: lastNode.id,
-        target: id,
-        type: 'smoothstep',
-      });
-    }
-
-    set({
-      nodes: [...nodes, newNode],
-      edges: newEdges,
-      selectedNodeId: id,
-      isDirty: true,
-    });
+    const entry: PipelineSequenceEntry = { id, data: buildData(pipeType) };
+    const pipes = [...get().pipes];
+    const i = Math.max(0, Math.min(index, pipes.length));
+    pipes.splice(i, 0, entry);
+    set({ pipes, selectedNodeId: id, isDirty: true });
   },
 
-  removePipe: (nodeId) => {
-    const { nodes, edges } = get();
-    const inEdge = edges.find((e) => e.target === nodeId);
-    const outEdge = edges.find((e) => e.source === nodeId);
-
-    let newEdges = edges.filter((e) => e.source !== nodeId && e.target !== nodeId);
-
-    // Reconnect neighbors
-    if (inEdge && outEdge) {
-      newEdges.push({
-        id: `edge-${inEdge.source}-${outEdge.target}`,
-        source: inEdge.source,
-        target: outEdge.target,
-        type: 'smoothstep',
-      });
-    }
-
-    set({
-      nodes: nodes.filter((n) => n.id !== nodeId),
-      edges: newEdges,
-      selectedNodeId: null,
-      isDirty: true,
-    });
-  },
-
-  updatePipeConfig: (nodeId, config) =>
+  removePipe: (id) => {
     set((s) => ({
-      nodes: s.nodes.map((n) =>
-        n.id === nodeId
+      pipes: s.pipes.filter((p) => p.id !== id),
+      selectedNodeId: s.selectedNodeId === id ? null : s.selectedNodeId,
+      isDirty: true,
+    }));
+  },
+
+  movePipe: (fromIndex, toIndex) => {
+    const { pipes: list } = get();
+    if (fromIndex < 0 || fromIndex >= list.length) return;
+    if (toIndex < 0 || toIndex > list.length - 1) return;
+    if (fromIndex === toIndex) return;
+    const pipes = [...list];
+    const [row] = pipes.splice(fromIndex, 1);
+    pipes.splice(toIndex, 0, row);
+    set({ pipes, isDirty: true });
+  },
+
+  updatePipeConfig: (id, config) =>
+    set((s) => ({
+      pipes: s.pipes.map((p) =>
+        p.id === id
           ? {
-              ...n,
+              ...p,
               data: {
-                ...n.data,
-                // Shallow clone: @rjsf/core often mutates formData in place, so keeping the same
-                // reference breaks useMemo deps and label-space queries when e.g. model changes.
+                ...p.data,
                 config: { ...config },
               },
             }
-          : n,
+          : p,
       ),
       isDirty: true,
     })),
 
-  selectNode: (nodeId) => set({ selectedNodeId: nodeId }),
+  selectNode: (id) => set({ selectedNodeId: id }),
 
   loadFromPipeline: (detail, pipeTypes) => {
-    const { nodes, edges } = pipelineToFlow(detail.config, pipeTypes);
-    nextId = nodes.length;
+    const raw = pipelineToSequence(detail.config, pipeTypes);
+    nextId = 0;
+    const pipes = assignSequentialIds(raw);
+    nextId = pipes.length;
     set({
-      nodes,
-      edges,
+      pipes,
       pipelineName: detail.name,
       pipelineDescription: detail.config.description ?? '',
       selectedNodeId: null,
@@ -170,10 +128,9 @@ export const usePipelineEditorStore = create<PipelineEditorState>((set, get) => 
   },
 
   toPipelineConfig: () => {
-    const { nodes, edges, pipelineDescription } = get();
-    const config = flowToPipeline(nodes, edges);
+    const { pipes, pipelineDescription } = get();
     const trimmed = pipelineDescription.trim();
-    return trimmed ? { ...config, description: trimmed } : config;
+    return sequenceToPipelineConfig(pipes, trimmed ? { description: trimmed } : undefined);
   },
 
   setPipelineName: (name) => set({ pipelineName: name }),
@@ -183,8 +140,7 @@ export const usePipelineEditorStore = create<PipelineEditorState>((set, get) => 
 
   reset: () =>
     set({
-      nodes: [],
-      edges: [],
+      pipes: [],
       selectedNodeId: null,
       pipelineName: '',
       pipelineDescription: '',

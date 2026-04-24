@@ -21,6 +21,7 @@ from clinical_deid.api.routers.datasets import list_and_import  # noqa: E402, F4
 from clinical_deid.api.routers.datasets import compose_transform  # noqa: E402, F401
 from clinical_deid.api.routers.datasets import generate  # noqa: E402, F401
 from clinical_deid.api.routers.datasets import preview_labels  # noqa: E402, F401
+from clinical_deid.api.routers.datasets import upload  # noqa: E402, F401
 from clinical_deid.api.routers.datasets import by_name  # noqa: E402, F401
 
 __all__ = ["router"]

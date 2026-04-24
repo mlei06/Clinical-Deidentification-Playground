@@ -1,27 +1,21 @@
-import type { Node, Edge } from '@xyflow/react';
 import type { PipelineConfig, PipeTypeInfo } from '../api/types';
 import type { PipeNodeData } from '../stores/pipelineEditorStore';
 
-const NODE_GAP = 120;
-const NODE_X = 250;
+/** One row in the pipeline builder (order = execution order, top to bottom). */
+export interface PipelineSequenceEntry {
+  id: string;
+  data: PipeNodeData;
+}
 
-export function pipelineToFlow(
+export function pipelineToSequence(
   config: PipelineConfig,
   pipeTypes: PipeTypeInfo[],
-): { nodes: Node<PipeNodeData>[]; edges: Edge[] } {
+): PipelineSequenceEntry[] {
   const catalog = new Map(pipeTypes.map((p) => [p.name, p]));
-  const nodes: Node<PipeNodeData>[] = [];
-  const edges: Edge[] = [];
-
-  for (let i = 0; i < config.pipes.length; i++) {
-    const step = config.pipes[i];
+  return config.pipes.map((step, i) => {
     const info = catalog.get(step.type);
-    const nodeId = `pipe-${i}`;
-
-    nodes.push({
-      id: nodeId,
-      type: 'pipeNode',
-      position: { x: NODE_X, y: i * NODE_GAP },
+    return {
+      id: `pipe-${i}`,
       data: {
         pipeType: step.type,
         role: info?.role ?? 'detector',
@@ -32,17 +26,6 @@ export function pipelineToFlow(
         installed: info?.installed ?? false,
         baseLabels: info?.base_labels ?? [],
       },
-    });
-
-    if (i > 0) {
-      edges.push({
-        id: `edge-${i - 1}-${i}`,
-        source: `pipe-${i - 1}`,
-        target: nodeId,
-        type: 'smoothstep',
-      });
-    }
-  }
-
-  return { nodes, edges };
+    };
+  });
 }

@@ -1,5 +1,5 @@
 import { useMemo, useState, useCallback, useRef, useEffect } from 'react';
-import { X, Trash2, Info } from 'lucide-react';
+import { X, Info } from 'lucide-react';
 import { usePipelineEditorStore } from '../../stores/pipelineEditorStore';
 import { labelColor } from '../../lib/labelColors';
 import SchemaForm from './SchemaForm';
@@ -49,15 +49,19 @@ function SurrogateStrategies({ strategies }: { strategies: Record<string, string
 }
 
 export default function PipeConfigPanel() {
-  const { nodes, selectedNodeId, updatePipeConfig, removePipe, selectNode } =
+  const { pipes, selectedNodeId, updatePipeConfig, selectNode, toPipelineConfig, pipelineDescription } =
     usePipelineEditorStore();
 
   const node = useMemo(
-    () => nodes.find((n) => n.id === selectedNodeId),
-    [nodes, selectedNodeId],
+    () => pipes.find((n) => n.id === selectedNodeId),
+    [pipes, selectedNodeId],
   );
 
   const data = node?.data;
+  const selectedPipeOrderIndex = useMemo(
+    () => (node ? pipes.findIndex((p) => p.id === node.id) : -1),
+    [node, pipes],
+  );
 
   const formContext: SchemaFormContext = useMemo(
     () => ({
@@ -65,8 +69,10 @@ export default function PipeConfigPanel() {
       baseLabels: data?.baseLabels ?? [],
       config: data?.config ?? {},
       selectedNodeId: node?.id,
+      fullPipelineConfig: toPipelineConfig(),
+      selectedPipeOrderIndex: selectedPipeOrderIndex >= 0 ? selectedPipeOrderIndex : undefined,
     }),
-    [data?.pipeType, data?.baseLabels, data?.config, node?.id],
+    [data?.pipeType, data?.baseLabels, data?.config, node?.id, pipes, pipelineDescription, toPipelineConfig, selectedPipeOrderIndex],
   );
 
   const surrogateStrategies = useMemo(() => {
@@ -115,12 +121,10 @@ export default function PipeConfigPanel() {
 
   return (
     <div className="relative flex shrink-0 flex-col overflow-y-auto border-l border-gray-200 bg-white" style={{ width }}>
-      {/* Resize handle */}
       <div
         onMouseDown={onMouseDown}
         className="absolute inset-y-0 left-0 z-10 w-1 cursor-col-resize hover:bg-blue-400/40 active:bg-blue-400/60"
       />
-      {/* Header */}
       <div className="flex items-center gap-2 border-b border-gray-200 px-4 py-3">
         <div className="min-w-0 flex-1">
           <div className="text-sm font-semibold text-gray-900">{data.label}</div>
@@ -134,14 +138,12 @@ export default function PipeConfigPanel() {
         </button>
       </div>
 
-      {/* Description */}
       {data.description && (
         <div className="border-b border-gray-100 px-4 py-2 text-xs text-gray-500">
           {data.description}
         </div>
       )}
 
-      {/* Config form + strategies */}
       <div className="flex-1 overflow-y-auto p-4">
         {data.configSchema ? (
           <PipeEditorNodeContext.Provider value={node.id}>
@@ -156,24 +158,11 @@ export default function PipeConfigPanel() {
           <div className="text-xs text-gray-400">No configuration options</div>
         )}
 
-        {surrogateStrategies && (
-          <SurrogateStrategies strategies={surrogateStrategies} />
-        )}
+        {surrogateStrategies && <SurrogateStrategies strategies={surrogateStrategies} />}
 
         {data.pipeType === 'huggingface_ner' && typeof data.config?.model === 'string' && (
           <HuggingfaceModelInfo selectedModel={data.config.model as string} />
         )}
-      </div>
-
-      {/* Footer */}
-      <div className="border-t border-gray-200 p-3">
-        <button
-          onClick={() => removePipe(node.id)}
-          className="flex w-full items-center justify-center gap-1.5 rounded-md border border-red-200 px-3 py-1.5 text-xs font-medium text-red-600 transition-colors hover:bg-red-50"
-        >
-          <Trash2 size={13} />
-          Remove Pipe
-        </button>
       </div>
     </div>
   );

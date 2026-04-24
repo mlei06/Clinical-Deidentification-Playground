@@ -1340,3 +1340,93 @@ def test_preview_corpus_labels_rejects_outside_corpora(client, tmp_path):
     outside.write_text("{}\n", encoding="utf-8")
     r = client.post("/datasets/preview-labels", json={"path": str(outside)})
     assert r.status_code == 400, r.text
+
+
+# ---------------------------------------------------------------------------
+# Multipart upload (POST /datasets/upload)
+# ---------------------------------------------------------------------------
+
+
+def test_upload_annotated_jsonl_multipart(client, tmp_path):
+    path = _write_sample_jsonl(tmp_path / "upload-source.jsonl", count=3)
+    content = path.read_bytes()
+    resp = client.post(
+        "/datasets/upload",
+        files={"file": ("corpus.jsonl", content, "application/x-ndjson")},
+        data={
+            "name": "multipart-corpus",
+            "description": "from multipart",
+            "metadata": json.dumps({"provenance": "test"}),
+            "line_format": "annotated_jsonl",
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert body["name"] == "multipart-corpus"
+    assert body["document_count"] == 3
+    assert body["metadata"].get("provenance") == "test"
+    listed = client.get("/datasets")
+    assert listed.status_code == 200
+    assert "multipart-corpus" in {d["name"] for d in listed.json()}
+
+
+def test_upload_annotated_jsonl_multipart_duplicate_409(client, tmp_path):
+    path = _write_sample_jsonl(tmp_path / "u.jsonl", count=1)
+    content = path.read_bytes()
+    kwargs = {
+        "files": {"file": ("u.jsonl", content, "text/plain")},
+        "data": {"name": "dup-multipart", "line_format": "annotated_jsonl"},
+    }
+    assert client.post("/datasets/upload", **kwargs).status_code == 201
+    r2 = client.post("/datasets/upload", **kwargs)
+    assert r2.status_code == 409
+
+
+def test_upload_invalid_name_422(client, tmp_path):
+    path = _write_sample_jsonl(tmp_path / "u.jsonl", count=1)
+    b = path.read_bytes()
+    r1 = client.post(
+        "/datasets/upload",
+        files={"file": ("u.jsonl", b, "text/plain")},
+        data={"name": "bad..name", "line_format": "annotated_jsonl"},
+    )
+    assert r1.status_code == 422
+    r2 = client.post(
+        "/datasets/upload",
+        files={"file": ("u.jsonl", b, "text/plain")},
+        data={"name": "no spaces", "line_format": "annotated_jsonl"},
+    )
+    assert r2.status_code == 422
+
+
+def test_upload_production_v1_line_multipart(client, tmp_path):
+    line = {
+        "schema_version": 1,
+        "output_type": "annotated",
+        "id": "doc-1",
+        "source_label": "src",
+        "text": "Hello world",
+        "spans": [
+            {"start": 0, "end": 5, "label": "L", "confidence": 0.5, "source": "g"},
+        ],
+        "resolved": True,
+        "metadata": {"note": "n"},
+    }
+    content = (json.dumps(line) + "\n").encode("utf-8")
+    resp = client.post(
+        "/datasets/upload",
+        files={"file": ("export.jsonl", content, "application/jsonl")},
+        data={"name": "prod-export", "line_format": "production_v1"},
+    )
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["document_count"] == 1
+    assert "L" in resp.json()["labels"]
+
+
+def test_upload_empty_file_422(client, tmp_path):
+    r = client.post(
+        "/datasets/upload",
+        files={"file": ("e.jsonl", b"", "text/plain")},
+        data={"name": "empty-up", "line_format": "annotated_jsonl"},
+    )
+    assert r.status_code == 422
