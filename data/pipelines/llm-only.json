@@ -3,7 +3,7 @@
     {
       "type": "llm_ner",
       "config": {
-        "model": "gpt-4o-mini",
+        "model": "gpt-5-mini",
         "temperature": 0,
         "labels": [
           "PATIENT",
@@ -40,5 +40,5 @@
     "PHONE",
     "SSN"
   ],
-  "output_label_space_updated_at": "2026-04-25T11:54:29.809944+00:00"
+  "output_label_space_updated_at": "2026-04-25T12:06:46.626286+00:00"
 }

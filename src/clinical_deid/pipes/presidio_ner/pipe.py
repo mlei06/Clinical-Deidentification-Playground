@@ -285,16 +285,6 @@ class PresidioNerConfig(BaseModel):
         ),
     )
 
-    score_threshold: float = Field(
-        default=0.35,
-        description="Minimum Presidio score to keep a result.",
-        json_schema_extra=field_ui(
-            ui_group="Model",
-            ui_order=2,
-            ui_widget="slider",
-        ),
-    )
-
     entities: list[str] | None = Field(
         default=None,
         description="Presidio entity types to detect. ``None`` means all supported entities.",
@@ -402,7 +392,6 @@ class PresidioNerPipe(ConfigurablePipe):
             text=text,
             entities=self._config.entities,
             language=self._config.language,
-            score_threshold=self._config.score_threshold,
         )
 
         found: list[EntitySpan] = []

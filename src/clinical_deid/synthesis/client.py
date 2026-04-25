@@ -36,16 +36,26 @@ class OpenAICompatibleChatClient:
         self.base_url = base_url.rstrip("/")
         self.timeout_s = timeout_s
         self.default_headers = default_headers or {}
+        self._http: Any = None
+
+    def _client(self) -> Any:
+        if self._http is None:
+            try:
+                import httpx
+            except ImportError as e:
+                raise ImportError(
+                    "OpenAICompatibleChatClient requires httpx; "
+                    "install with: pip install clinical-deid-playground[llm]"
+                ) from e
+            self._http = httpx.Client(timeout=self.timeout_s)
+        return self._http
+
+    def close(self) -> None:
+        if self._http is not None:
+            self._http.close()
+            self._http = None
 
     def complete(self, messages: list[ChatMessage], **kwargs: Any) -> str:
-        try:
-            import httpx
-        except ImportError as e:
-            raise ImportError(
-                "OpenAICompatibleChatClient requires httpx; "
-                "install with: pip install clinical-deid-playground[llm]"
-            ) from e
-
         payload: dict[str, Any] = {
             "model": self.model,
             "messages": [m.model_dump() for m in messages],
@@ -54,6 +64,8 @@ class OpenAICompatibleChatClient:
             payload["temperature"] = kwargs["temperature"]
         if "max_tokens" in kwargs:
             payload["max_tokens"] = kwargs["max_tokens"]
+        if "response_format" in kwargs:
+            payload["response_format"] = kwargs["response_format"]
 
         headers = {
             "Authorization": f"Bearer {self.api_key}",
@@ -61,10 +73,10 @@ class OpenAICompatibleChatClient:
             **self.default_headers,
         }
         url = f"{self.base_url}/chat/completions"
-        with httpx.Client(timeout=self.timeout_s) as client:
-            r = client.post(url, json=payload, headers=headers)
-            r.raise_for_status()
-            data = r.json()
+        client = self._client()
+        r = client.post(url, json=payload, headers=headers)
+        r.raise_for_status()
+        data = r.json()
 
         choices = data.get("choices") or []
         if not choices:

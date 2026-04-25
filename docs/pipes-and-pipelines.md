@@ -135,7 +135,6 @@ Wraps the Presidio Analyzer for NER-based detection.
   "type": "presidio_ner",
   "config": {
     "model": "spacy/en_core_web_lg",
-    "score_threshold": 0.4,
     "entities": {
       "PERSON": "PATIENT",
       "DATE_TIME": "DATE",
@@ -148,7 +147,6 @@ Wraps the Presidio Analyzer for NER-based detection.
 | Config field | Purpose |
 |-------------|---------|
 | `model` | Presidio model string (e.g. `spacy/en_core_web_lg`, `HuggingFace/obi/deid_roberta_i2b2`) |
-| `score_threshold` | Minimum confidence score (0.0–1.0) |
 | `entities` | Map Presidio entity types to your label set |
 
 #### `huggingface_ner` — Hugging Face token classification

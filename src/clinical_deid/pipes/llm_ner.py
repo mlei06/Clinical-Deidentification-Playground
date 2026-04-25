@@ -33,15 +33,16 @@ _DEFAULT_PROMPT_TEMPLATE = """\
 You are a clinical de-identification system. Identify all Protected Health Information (PHI) \
 in the following clinical text.
 
-Return a JSON array of objects, each with keys: "start" (int, character offset), \
-"end" (int, character offset), "label" (string, one of: {labels}).
+Return a JSON object with a single key "spans" whose value is an array of objects, each with \
+keys: "start" (int, character offset), "end" (int, character offset), "label" (string, one of: \
+{labels}).
 
 Rules:
 - Offsets are 0-based character positions in the original text.
 - "start" is inclusive, "end" is exclusive.
 - Only use the labels listed above.
-- If no PHI is found, return an empty array: []
-- Return ONLY the JSON array, no other text.
+- If no PHI is found, return: {{"spans": []}}
+- Return ONLY the JSON object, no other text.
 
 Clinical text:
 ---
@@ -49,20 +50,42 @@ Clinical text:
 ---
 """
 
+_FIXED_TEMPERATURE_MODEL_PREFIXES: tuple[str, ...] = (
+    "gpt-5",
+    "o1",
+    "o3",
+    "o4",
+)
+
+
+def _supports_custom_temperature(model: str) -> bool:
+    return not model.startswith(_FIXED_TEMPERATURE_MODEL_PREFIXES)
+
+
 KnownLlmModel = Literal[
+    "gpt-5",
+    "gpt-5-mini",
+    "gpt-5-nano",
+    "gpt-4.1",
+    "gpt-4.1-mini",
+    "gpt-4.1-nano",
+    "o3",
+    "o4-mini",
     "gpt-4o",
     "gpt-4o-mini",
-    "gpt-4-turbo",
-    "gpt-3.5-turbo",
-    "o3-mini",
 ]
 
 _MODEL_DESCRIPTIONS: dict[str, str] = {
-    "gpt-4o": "GPT-4o — fast, high accuracy, good for production use.",
-    "gpt-4o-mini": "GPT-4o Mini — cheapest, good accuracy for structured extraction.",
-    "gpt-4-turbo": "GPT-4 Turbo — high accuracy, 128k context window.",
-    "gpt-3.5-turbo": "GPT-3.5 Turbo — fastest and cheapest, lower accuracy.",
-    "o3-mini": "o3-mini — reasoning model, high accuracy on complex cases.",
+    "gpt-5": "GPT-5 — flagship model, highest accuracy on complex extraction.",
+    "gpt-5-mini": "GPT-5 Mini — strong accuracy at a fraction of the cost.",
+    "gpt-5-nano": "GPT-5 Nano — cheapest GPT-5 tier, fast structured extraction.",
+    "gpt-4.1": "GPT-4.1 — high accuracy, large 1M-token context window.",
+    "gpt-4.1-mini": "GPT-4.1 Mini — balanced speed and accuracy, long context.",
+    "gpt-4.1-nano": "GPT-4.1 Nano — cheapest 4.1-tier, fast lightweight extraction.",
+    "o3": "o3 — reasoning model, best on hard cases requiring multi-step inference.",
+    "o4-mini": "o4-mini — reasoning model, fast and inexpensive for tricky cases.",
+    "gpt-4o": "GPT-4o — legacy flagship, fast and accurate.",
+    "gpt-4o-mini": "GPT-4o Mini — legacy small model, low-cost structured extraction.",
 }
 
 
@@ -188,18 +211,21 @@ def _parse_llm_response(raw: str, text_length: int) -> list[dict[str, Any]]:
             lines = lines[:-1]
         cleaned = "\n".join(lines).strip()
 
-    # Try parsing as JSON array
+    # Try parsing as JSON
     try:
         parsed = json.loads(cleaned)
     except json.JSONDecodeError:
-        # Try to find a JSON array in the text
-        match = re.search(r"\[.*\]", cleaned, re.DOTALL)
+        # Try to find a JSON object or array in the text
+        match = re.search(r"\{.*\}|\[.*\]", cleaned, re.DOTALL)
         if match:
             parsed = json.loads(match.group())
         else:
             logger.warning("Could not parse LLM response as JSON (response length: %d chars)", len(cleaned))
             return []
 
+    # Accept either {"spans": [...]} or a bare [...] for back-compat.
+    if isinstance(parsed, dict):
+        parsed = parsed.get("spans", [])
     if not isinstance(parsed, list):
         return []
 
@@ -227,6 +253,7 @@ class LlmNerPipe(ConfigurablePipe):
 
     def __init__(self, config: LlmNerConfig | None = None) -> None:
         self._config = config or LlmNerConfig()
+        self._cached_client: Any = None
 
     @property
     def base_labels(self) -> set[str]:
@@ -237,20 +264,31 @@ class LlmNerPipe(ConfigurablePipe):
         return set(self._config.labels)
 
     def _get_client(self):
+        if self._cached_client is not None:
+            return self._cached_client
+
         from clinical_deid.synthesis.client import OpenAICompatibleChatClient
 
         api_key = os.environ.get(self._config.api_key_env, "")
+        if not api_key and self._config.api_key_env in {
+            "OPENAI_API_KEY",
+            "CLINICAL_DEID_OPENAI_API_KEY",
+        }:
+            from clinical_deid.config import get_settings
+
+            api_key = get_settings().openai_api_key or ""
         if not api_key:
             raise RuntimeError(
                 f"LLM NER requires API key in environment variable "
                 f"{self._config.api_key_env!r}"
             )
         base_url = self._config.base_url or "https://api.openai.com/v1"
-        return OpenAICompatibleChatClient(
+        self._cached_client = OpenAICompatibleChatClient(
             model=self._config.model,
             api_key=api_key,
             base_url=base_url,
         )
+        return self._cached_client
 
     def forward(self, doc: AnnotatedDocument) -> AnnotatedDocument:
         from clinical_deid.synthesis.types import ChatMessage
@@ -273,11 +311,14 @@ class LlmNerPipe(ConfigurablePipe):
         client = self._get_client()
         messages = [ChatMessage(role="user", content=prompt)]
 
+        complete_kwargs: dict[str, Any] = {
+            "response_format": {"type": "json_object"},
+        }
+        if _supports_custom_temperature(self._config.model):
+            complete_kwargs["temperature"] = self._config.temperature
+
         try:
-            raw_response = client.complete(
-                messages,
-                temperature=self._config.temperature,
-            )
+            raw_response = client.complete(messages, **complete_kwargs)
         except Exception:
             logger.exception("LLM NER call failed")
             return doc
