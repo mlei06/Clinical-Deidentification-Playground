@@ -1,17 +1,4 @@
 {
-  "modes": {
-    "fast": {
-      "pipeline": "clinical-fast-physionet-label-space",
-      "description": "Regex + whitelist + blacklist. No ML, lowest latency."
-    },
-    "balanced": {
-      "pipeline": "presidio-plus-regex",
-      "description": "Presidio NER + regex + whitelist. Good accuracy/speed tradeoff."
-    },
-    "accurate": {
-      "pipeline": "full-ensemble",
-      "description": "All detectors + consistency propagation. Highest quality."
-    }
-  },
-  "default_mode": "balanced"
+  "modes": {},
+  "default_mode": null
 }
