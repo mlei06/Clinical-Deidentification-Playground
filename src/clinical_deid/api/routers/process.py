@@ -27,6 +27,7 @@ from clinical_deid.api.services.inference import (
     log_audit,
     process_single,
 )
+from clinical_deid.domain import EntitySpan
 from clinical_deid.config import get_settings
 from clinical_deid.mode_config import load_mode_config
 from clinical_deid.tables import AuditLogRecord
@@ -76,11 +77,56 @@ def redact_document(
         )
         for s in body.spans
     ]
-    output_text = apply_output_mode(
-        body.text, span_responses, body.output_mode,
-        surrogate_seed=body.surrogate_seed,
-        surrogate_consistency=body.surrogate_consistency,
-    )
+
+    surrogate_text: str | None = None
+    surrogate_spans: list[EntitySpanResponse] | None = None
+
+    if body.output_mode == OutputMode.surrogate and body.include_surrogate_spans:
+        try:
+            from clinical_deid.pipes.surrogate.align import surrogate_text_with_spans
+        except ImportError as exc:
+            raise HTTPException(
+                status_code=400,
+                detail=f"surrogate mode requires faker: {exc}",
+            ) from exc
+        phi_spans = [
+            EntitySpan(
+                start=s.start,
+                end=s.end,
+                label=s.label,
+                confidence=s.confidence,
+                source=s.source,
+            )
+            for s in span_responses
+        ]
+        try:
+            st, aligned = surrogate_text_with_spans(
+                body.text,
+                phi_spans,
+                seed=body.surrogate_seed,
+                consistency=body.surrogate_consistency,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        output_text = st
+        surrogate_text = st
+        surrogate_spans = [
+            EntitySpanResponse(
+                start=s.start,
+                end=s.end,
+                label=s.label,
+                text=st[s.start : s.end],
+                confidence=s.confidence,
+                source=s.source,
+            )
+            for s in aligned
+        ]
+    else:
+        output_text = apply_output_mode(
+            body.text, span_responses, body.output_mode,
+            surrogate_seed=body.surrogate_seed,
+            surrogate_consistency=body.surrogate_consistency,
+        )
 
     try:
         import getpass
@@ -108,6 +154,8 @@ def redact_document(
         output_text=output_text,
         output_mode=body.output_mode,
         span_count=len(body.spans),
+        surrogate_text=surrogate_text,
+        surrogate_spans=surrogate_spans,
     )
 
 

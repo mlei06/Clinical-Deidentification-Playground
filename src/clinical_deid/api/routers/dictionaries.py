@@ -1,7 +1,9 @@
 """Dictionary CRUD — upload, list, get, delete term-list files.
 
-Dictionaries are stored under ``dictionaries/`` and referenced by name
-in whitelist / blacklist pipe configs.
+Whitelist and blacklist each use a flat pool of files under ``dictionaries/``.
+Dictionary names (file stems) are selected per NER label in the whitelist pipe
+config; the optional ``label`` query parameter is accepted for API compatibility
+and is ignored.
 """
 
 from __future__ import annotations
@@ -45,7 +47,7 @@ def list_dictionaries(
     kind: Annotated[DictKind | None, Query()] = None,
     label: Annotated[str | None, Query()] = None,
 ) -> list[DictionaryInfoResponse]:
-    """List all stored dictionaries, optionally filtered by kind and/or label."""
+    """List all stored dictionaries, optionally filtered by kind."""
     return [_info_response(d) for d in _store().list_dictionaries(kind=kind, label=label)]
 
 
@@ -55,7 +57,7 @@ def get_dictionary(
     name: str,
     label: Annotated[str | None, Query()] = None,
 ) -> DictionaryTermsResponse:
-    """Get a dictionary's terms by kind and name. For whitelist, pass ``?label=HOSPITAL``."""
+    """Get a dictionary's terms by kind and name."""
     try:
         terms = _store().get_terms(kind, name, label=label)
     except FileNotFoundError as exc:

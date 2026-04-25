@@ -54,6 +54,7 @@ export interface RedactRequest {
   text: string;
   spans: { start: number; end: number; label: string }[];
   output_mode: OutputMode;
+  include_surrogate_spans?: boolean;
   surrogate_seed?: number | null;
   surrogate_consistency?: boolean;
 }
@@ -62,6 +63,8 @@ export interface RedactResponse {
   output_text: string;
   output_mode: OutputMode;
   span_count: number;
+  surrogate_text?: string | null;
+  surrogate_spans?: EntitySpanResponse[] | null;
 }
 
 export interface ModeInfo {

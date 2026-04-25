@@ -3,7 +3,7 @@
     {
       "type": "huggingface_ner",
       "config": {
-        "model": "physionet-clinicalbert-v1",
+        "model": "physionet-train-clinicalbert",
         "segmentation": "auto",
         "source_name": "huggingface_ner",
         "skip_overlapping": false

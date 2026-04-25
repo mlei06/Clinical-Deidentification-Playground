@@ -1,7 +1,7 @@
 {
   "modes": {
     "fast": {
-      "pipeline": "regex-whitelist-blacklist",
+      "pipeline": "clinical-fast-physionet-label-space",
       "description": "Regex + whitelist + blacklist. No ML, lowest latency."
     },
     "balanced": {
@@ -13,6 +13,5 @@
       "description": "All detectors + consistency propagation. Highest quality."
     }
   },
-  "default_mode": "balanced",
-  "allowed_pipelines": null
+  "default_mode": "balanced"
 }

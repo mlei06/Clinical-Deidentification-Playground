@@ -8,7 +8,7 @@ import secrets
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from clinical_deid.api.auth import require_admin
 from clinical_deid.api.deps import SessionDep
@@ -96,6 +96,30 @@ class EvalRunRequest(BaseModel):
     #: Only enable for admin-controlled debugging — the payload contains raw
     #: document text and is not redacted.
     include_per_document_spans: bool = False
+    #: For this run only, rename **predicted** span labels to match the gold
+    #: dataset tagset (same role as a ``label_mapper`` step, without persisting
+    #: the pipeline). Keys = pipeline output labels; values = target strings.
+    eval_pred_label_remap: dict[str, str] | None = Field(
+        default=None,
+        description=(
+            "Optional: map pipeline span labels to gold label strings for metrics only. "
+            "Omitted or empty leaves predictions unchanged."
+        ),
+    )
+
+    @field_validator("eval_pred_label_remap")
+    @classmethod
+    def _normalize_remap(
+        cls, v: dict[str, str] | None
+    ) -> dict[str, str] | None:
+        if not v:
+            return None
+        for k, val in v.items():
+            if not str(k).strip():
+                raise ValueError("eval_pred_label_remap keys must be non-empty")
+            if not str(val).strip():
+                raise ValueError("eval_pred_label_remap values must be non-empty")
+        return v
 
 
 class EvalRunSummary(BaseModel):
@@ -410,7 +434,10 @@ def run_evaluation(session: SessionDep, body: EvalRunRequest) -> EvalRunDetail:
     else:
         eval_risk_profile = default_risk_profile()
 
-    result = evaluate_pipeline(pipe_chain, documents, risk_profile=eval_risk_profile)
+    rem = body.eval_pred_label_remap
+    result = evaluate_pipeline(
+        pipe_chain, documents, risk_profile=eval_risk_profile, pred_label_remap=rem
+    )
 
     # Optional: persist the sampled document list as a new registered dataset.
     if body.save_sample_as is not None and sample_info is not None:
@@ -462,6 +489,9 @@ def run_evaluation(session: SessionDep, body: EvalRunRequest) -> EvalRunDetail:
 
     if sample_info is not None:
         metrics["sample"] = sample_info
+
+    if rem:
+        metrics["eval_pred_label_remap"] = dict(rem)
 
     # Persist eval result to filesystem
     result_path = save_eval_result(

@@ -14,13 +14,54 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+# Shipped default whitelist — matches ``data/dictionaries/whitelist/`` file stems.
+_DEFAULT_WHITELIST_LABELS: dict[str, Any] = {
+    "FIRST_NAME": {
+        "enabled": True,
+        "remap": None,
+        "terms": [],
+        "dictionaries": ["male-first-names", "female_first_names"],
+    },
+    "LAST_NAME": {
+        "enabled": True,
+        "remap": None,
+        "terms": [],
+        "dictionaries": ["last_names"],
+    },
+    "HOSPITAL": {
+        "enabled": True,
+        "remap": None,
+        "terms": [],
+        "dictionaries": ["us_hospitals"],
+    },
+    "LOCATION": {
+        "enabled": True,
+        "remap": None,
+        "terms": [],
+        "dictionaries": ["us_cities", "local_places_unambig_v2", "LOCATION__us_states"],
+    },
+    "STATE": {
+        "enabled": True,
+        "remap": None,
+        "terms": [],
+        "dictionaries": ["STATE__us_states"],
+    },
+}
+
 
 def fast_profile() -> dict[str, Any]:
     """Regex + whitelist + blacklist + resolve.  ~10 ms, no ML."""
     return {
         "pipes": [
             {"type": "regex_ner"},
-            {"type": "whitelist"},
+            {
+                "type": "whitelist",
+                "config": {
+                    "source_name": "whitelist",
+                    "skip_overlapping": False,
+                    "labels": _DEFAULT_WHITELIST_LABELS,
+                },
+            },
             {"type": "blacklist"},
             {"type": "resolve_spans", "config": {"strategy": "longest_non_overlapping"}},
         ],
@@ -41,7 +82,14 @@ def balanced_profile() -> dict[str, Any]:
     return {
         "pipes": [
             {"type": "regex_ner"},
-            {"type": "whitelist"},
+            {
+                "type": "whitelist",
+                "config": {
+                    "source_name": "whitelist",
+                    "skip_overlapping": False,
+                    "labels": _DEFAULT_WHITELIST_LABELS,
+                },
+            },
             {"type": "presidio_ner"},
             {"type": "blacklist"},
             {"type": "resolve_spans", "config": {"strategy": "longest_non_overlapping"}},
@@ -65,7 +113,14 @@ def accurate_profile() -> dict[str, Any]:
     return {
         "pipes": [
             {"type": "regex_ner"},
-            {"type": "whitelist"},
+            {
+                "type": "whitelist",
+                "config": {
+                    "source_name": "whitelist",
+                    "skip_overlapping": False,
+                    "labels": _DEFAULT_WHITELIST_LABELS,
+                },
+            },
             {"type": "presidio_ner"},
             {"type": "blacklist"},
             {"type": "consistency_propagator", "config": {"min_confidence": 0.7}},

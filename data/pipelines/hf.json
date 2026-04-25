@@ -3,7 +3,7 @@
     {
       "type": "huggingface_ner",
       "config": {
-        "model": "physionet-clinicalbert-v1"
+        "model": "physionet-train-clinicalbert"
       }
     }
   ]

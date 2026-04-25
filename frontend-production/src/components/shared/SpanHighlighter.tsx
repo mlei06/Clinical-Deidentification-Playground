@@ -2,10 +2,10 @@ import {
   useMemo,
   useRef,
   useCallback,
-  useEffect,
   useImperativeHandle,
   forwardRef,
   type MouseEvent,
+  type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from 'react';
 import { clsx } from 'clsx';
@@ -141,6 +141,38 @@ function textOffsetFromPoint(root: HTMLElement, x: number, y: number): number | 
   return offsetUpTo(root, pos.offsetNode, pos.offset);
 }
 
+/**
+ * Map client coordinates to a text offset, robust to pointer leaving the pre, thin hit targets,
+ * and ``caretFromPoint`` returning null for points on padding / handles.
+ * Clamps to the pre box and tries small horizontal/vertical nudges; for edge drags, biases
+ * nudges so the caret lands in character cells (not on ``data-no-offset`` chrome).
+ */
+function textOffsetFromClientResilient(
+  root: HTMLElement,
+  clientX: number,
+  clientY: number,
+  side: 'left' | 'right' | null,
+): number | null {
+  const r = root.getBoundingClientRect();
+  if (r.width <= 0 || r.height <= 0) return null;
+  const preferX = side === 'left' ? 6 : side === 'right' ? -6 : 0;
+  const nudgeXs = [0, preferX, 4, -4, 8, -8, 2, -2, 10, -10, 12, -12, 1, -1];
+  const nudgeYs = [0, 1, -1, 2, -2, 3, -3, 4, -4];
+  const seen = new Set<string>();
+  for (const dy of nudgeYs) {
+    for (const dx of nudgeXs) {
+      const k = `${dx},${dy}`;
+      if (seen.has(k)) continue;
+      seen.add(k);
+      const x = Math.min(Math.max(clientX + dx, r.left + 0.5), r.right - 0.5);
+      const y = Math.min(Math.max(clientY + dy, r.top + 0.5), r.bottom - 0.5);
+      const o = textOffsetFromPoint(root, x, y);
+      if (o != null) return o;
+    }
+  }
+  return null;
+}
+
 function overlaps(a0: number, a1: number, b0: number, b1: number): boolean {
   return Math.max(a0, b0) < Math.min(a1, b1);
 }
@@ -239,6 +271,11 @@ const SpanHighlighter = forwardRef<SpanHighlighterHandle, SpanHighlighterProps>(
       return m;
     }, [spans, text.length]);
 
+    /**
+     * Drag state is a ref rather than state so pointermove doesn't re-run
+     * effects. ``key`` is the *current* span key (rotates after each update
+     * since the span's key is derived from start/end).
+     */
     const dragRef = useRef<{
       key: string;
       side: 'left' | 'right';
@@ -249,58 +286,70 @@ const SpanHighlighter = forwardRef<SpanHighlighterHandle, SpanHighlighterProps>(
       maxEnd: number;
     } | null>(null);
 
-    const beginResize = useCallback(
-      (side: 'left' | 'right', span: EntitySpanResponse) =>
-        (e: MouseEvent<HTMLSpanElement>) => {
-          if (!onSpanResize) return;
-          e.stopPropagation();
-          e.preventDefault();
-          const key = entitySpanKey(span);
-          const b = siblingBounds.get(key);
-          if (!b) return;
-          dragRef.current = {
-            key,
-            side,
-            anchorStart: span.start,
-            anchorEnd: span.end,
-            label: span.label,
-            minStart: b.minStart,
-            maxEnd: b.maxEnd,
-          };
-        },
-      [onSpanResize, siblingBounds],
-    );
+    const onSpanResizeRef = useRef(onSpanResize);
+    onSpanResizeRef.current = onSpanResize;
 
-    useEffect(() => {
-      if (!onSpanResize) return;
-      const onMove = (ev: globalThis.MouseEvent) => {
-        const drag = dragRef.current;
-        if (!drag || !rootRef.current) return;
-        const off = textOffsetFromPoint(rootRef.current, ev.clientX, ev.clientY);
-        if (off == null) return;
-        let newStart = drag.anchorStart;
-        let newEnd = drag.anchorEnd;
-        if (drag.side === 'left') {
-          newStart = Math.min(drag.anchorEnd - 1, Math.max(drag.minStart, off));
-        } else {
-          newEnd = Math.max(drag.anchorStart + 1, Math.min(drag.maxEnd, off));
-        }
-        if (newStart === drag.anchorStart && newEnd === drag.anchorEnd && drag.side === 'left') return;
-        onSpanResize(drag.key, newStart, newEnd);
-        drag.key = `${newStart}-${newEnd}-${drag.label}`;
-        if (drag.side === 'left') drag.anchorStart = newStart;
-        else drag.anchorEnd = newEnd;
-      };
-      const onUp = () => {
-        dragRef.current = null;
-      };
-      window.addEventListener('mousemove', onMove);
-      window.addEventListener('mouseup', onUp);
-      return () => {
-        window.removeEventListener('mousemove', onMove);
-        window.removeEventListener('mouseup', onUp);
-      };
-    }, [onSpanResize]);
+    const beginResize = useCallback(
+      (side: 'left' | 'right', span: EntitySpanResponse) => (e: ReactPointerEvent<HTMLSpanElement>) => {
+        if (!onSpanResizeRef.current) return;
+        e.stopPropagation();
+        e.preventDefault();
+        const key = entitySpanKey(span);
+        const b = siblingBounds.get(key);
+        if (!b) return;
+        const el = e.currentTarget;
+        el.setPointerCapture(e.pointerId);
+        document.body.style.userSelect = 'none';
+        dragRef.current = {
+          key,
+          side,
+          anchorStart: span.start,
+          anchorEnd: span.end,
+          label: span.label,
+          minStart: b.minStart,
+          maxEnd: b.maxEnd,
+        };
+        const onMove = (ev: PointerEvent) => {
+          const drag = dragRef.current;
+          const root = rootRef.current;
+          const cb = onSpanResizeRef.current;
+          if (!drag || !root || !cb) return;
+          const off = textOffsetFromClientResilient(root, ev.clientX, ev.clientY, drag.side);
+          if (off == null) return;
+          let newStart = drag.anchorStart;
+          let newEnd = drag.anchorEnd;
+          if (drag.side === 'left') {
+            newStart = Math.min(drag.anchorEnd - 1, Math.max(drag.minStart, off));
+          } else {
+            newEnd = Math.max(drag.anchorStart + 1, Math.min(drag.maxEnd, off));
+          }
+          if (newStart === drag.anchorStart && newEnd === drag.anchorEnd) return;
+          cb(drag.key, newStart, newEnd);
+          /** Span key is derived from start:end:label — rotate it so the next call targets the updated span. */
+          drag.key = `${newStart}-${newEnd}-${drag.label}`;
+          if (drag.side === 'left') drag.anchorStart = newStart;
+          else drag.anchorEnd = newEnd;
+        };
+        const onUp = (ev: PointerEvent) => {
+          el.removeEventListener('pointermove', onMove);
+          el.removeEventListener('pointerup', onUp);
+          el.removeEventListener('pointercancel', onUp);
+          try {
+            if (el.hasPointerCapture(ev.pointerId)) {
+              el.releasePointerCapture(ev.pointerId);
+            }
+          } catch {
+            /* already released */
+          }
+          document.body.style.userSelect = '';
+          dragRef.current = null;
+        };
+        el.addEventListener('pointermove', onMove);
+        el.addEventListener('pointerup', onUp);
+        el.addEventListener('pointercancel', onUp);
+      },
+      [siblingBounds],
+    );
 
     useImperativeHandle(
       ref,
@@ -427,8 +476,8 @@ const SpanHighlighter = forwardRef<SpanHighlighterHandle, SpanHighlighterProps>(
                 <span
                   data-no-offset="true"
                   aria-hidden="true"
-                  onMouseDown={beginResize('left', s)}
-                  className="absolute -left-0.5 top-0 bottom-0 w-1 cursor-ew-resize opacity-0 group-hover:opacity-100 bg-blue-500/60 rounded-sm"
+                  onPointerDown={beginResize('left', s)}
+                  className="absolute -left-1.5 top-0 bottom-0 z-10 w-3 min-w-[12px] cursor-ew-resize touch-none opacity-0 group-hover:opacity-100 bg-blue-500/60 rounded-sm"
                 />
               )}
               {seg.text}
@@ -436,8 +485,8 @@ const SpanHighlighter = forwardRef<SpanHighlighterHandle, SpanHighlighterProps>(
                 <span
                   data-no-offset="true"
                   aria-hidden="true"
-                  onMouseDown={beginResize('right', s)}
-                  className="absolute -right-0.5 top-0 bottom-0 w-1 cursor-ew-resize opacity-0 group-hover:opacity-100 bg-blue-500/60 rounded-sm"
+                  onPointerDown={beginResize('right', s)}
+                  className="absolute -right-1.5 top-0 bottom-0 z-10 w-3 min-w-[12px] cursor-ew-resize touch-none opacity-0 group-hover:opacity-100 bg-blue-500/60 rounded-sm"
                 />
               )}
             </mark>

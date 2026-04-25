@@ -100,6 +100,31 @@ def test_redact_endpoint_annotated_passthrough(client) -> None:
     assert r.json()["output_text"] == text
 
 
+def test_redact_surrogate_includes_spans(client) -> None:
+    """POST /process/redact in surrogate mode can return aligned surrogate_spans for UIs."""
+    import pytest
+    pytest.importorskip("faker", reason="surrogate replacement requires faker")
+
+    r = client.post(
+        "/process/redact",
+        json={
+            "text": "Call 555-123-4567 today.",
+            "spans": [{"start": 5, "end": 17, "label": "PHONE"}],
+            "output_mode": "surrogate",
+            "include_surrogate_spans": True,
+            "surrogate_seed": 42,
+        },
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["surrogate_text"] == body["output_text"]
+    assert body["surrogate_spans"] is not None
+    assert len(body["surrogate_spans"]) == 1
+    st = body["output_text"]
+    s0 = body["surrogate_spans"][0]
+    assert st[s0["start"] : s0["end"]] == s0["text"]
+
+
 # ---------------------------------------------------------------------------
 # POST /process/scrub
 # ---------------------------------------------------------------------------

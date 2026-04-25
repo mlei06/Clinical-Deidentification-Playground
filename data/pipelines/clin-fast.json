@@ -1,0 +1,186 @@
+{
+  "pipes": [
+    {
+      "type": "regex_ner",
+      "config": {
+        "source_name": "regex_ner",
+        "pattern_pack": "clinical_phi",
+        "skip_overlapping": false,
+        "labels": {
+          "ACCOUNT": {
+            "enabled": false,
+            "remap": null,
+            "custom_pattern": null
+          },
+          "ADDRESS": {
+            "enabled": true,
+            "remap": "LOCATION",
+            "custom_pattern": null
+          },
+          "DATE_TIME": {
+            "enabled": true,
+            "remap": "DATE",
+            "custom_pattern": null
+          },
+          "DEVICE_ID": {
+            "enabled": false,
+            "remap": null,
+            "custom_pattern": null
+          },
+          "EMAIL": {
+            "enabled": true,
+            "remap": "OTHER",
+            "custom_pattern": null
+          },
+          "FAX": {
+            "enabled": false,
+            "remap": null,
+            "custom_pattern": null
+          },
+          "IP_ADDRESS": {
+            "enabled": false,
+            "remap": null,
+            "custom_pattern": null
+          },
+          "LICENSE": {
+            "enabled": false,
+            "remap": null,
+            "custom_pattern": null
+          },
+          "MRN": {
+            "enabled": true,
+            "remap": "ID",
+            "custom_pattern": null
+          },
+          "OHIP": {
+            "enabled": true,
+            "remap": "ID",
+            "custom_pattern": null
+          },
+          "POSTAL_CODE_CA": {
+            "enabled": true,
+            "remap": "LOCATION",
+            "custom_pattern": null
+          },
+          "SIN": {
+            "enabled": true,
+            "remap": "ID",
+            "custom_pattern": null
+          },
+          "SSN": {
+            "enabled": true,
+            "remap": "ID",
+            "custom_pattern": null
+          },
+          "URL": {
+            "enabled": false,
+            "remap": null,
+            "custom_pattern": null
+          },
+          "VEHICLE_ID": {
+            "enabled": false,
+            "remap": null,
+            "custom_pattern": null
+          },
+          "ZIP_CODE_US": {
+            "enabled": true,
+            "remap": "LOCATION",
+            "custom_pattern": null
+          }
+        }
+      }
+    },
+    {
+      "type": "whitelist",
+      "config": {
+        "source_name": "whitelist",
+        "skip_overlapping": false,
+        "labels": {
+          "NAME": {
+            "enabled": true,
+            "remap": null,
+            "terms": [],
+            "dictionaries": [
+              "female_first_names",
+              "last_names",
+              "male-first-names"
+            ]
+          },
+          "LOCATION": {
+            "enabled": true,
+            "remap": null,
+            "terms": [],
+            "dictionaries": [
+              "local_places_unambig_v2",
+              "us_cities",
+              "us_hospitals",
+              "us_states"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "type": "blacklist",
+      "config": {
+        "dict_config": {
+          "disabled_dictionaries": [
+            "common_words",
+            "sno_edited"
+          ]
+        },
+        "match": "any_token",
+        "apply_to_labels": null,
+        "load_all_dictionaries": true
+      }
+    },
+    {
+      "type": "resolve_spans",
+      "config": {
+        "strategy": "longest_non_overlapping",
+        "consensus_threshold": 2,
+        "label_priority": [
+          "NAME",
+          "PATIENT",
+          "FIRST_NAME",
+          "LAST_NAME",
+          "SSN",
+          "MRN",
+          "ID",
+          "DATE",
+          "DOB",
+          "PHONE",
+          "FAX",
+          "EMAIL",
+          "ADDRESS",
+          "STREET",
+          "CITY",
+          "STATE",
+          "ZIP",
+          "COUNTRY",
+          "HOSPITAL",
+          "ORGANIZATION",
+          "AGE",
+          "URL",
+          "IP",
+          "DEVICE",
+          "PLATE",
+          "VIN",
+          "ACCOUNT"
+        ]
+      }
+    }
+  ],
+  "output_label_space": [
+    "AGE",
+    "DATE",
+    "HOSPITAL",
+    "ID",
+    "LOCATION",
+    "NAME",
+    "ORGANIZATION",
+    "OTHER",
+    "PHONE"
+  ],
+  "output_label_space_updated_at": "2026-04-25T00:57:38.694017+00:00"
+}

@@ -48,7 +48,7 @@ All mutable state lives under `data/` and all model weights live under `models/`
 | Models | Directories | `models/{framework}/{name}/` |
 | Datasets | JSONL under corpora | `data/corpora/{name}/corpus.jsonl` + `dataset.json` (cached analytics). BRAT is ingest/export only — not stored as the canonical corpus layout |
 | Dataset exports | Filesystem under `data/exports` | `data/exports/{name}/` for materialized BRAT / training exports from `POST /datasets/{name}/export` (`CLINICAL_DEID_EXPORTS_DIR`) |
-| Dictionaries | Term-list files | `data/dictionaries/{whitelist,blacklist}/` |
+| Dictionaries | Term-list files | `data/dictionaries/whitelist/` and `data/dictionaries/blacklist/` (each a flat pool of files; assign names to NER labels in the whitelist pipe) |
 | Deploy config | JSON file | `data/modes.json` (`CLINICAL_DEID_MODES_PATH`; mutable via UI or on disk) |
 | Audit log | SQLite (SQLModel) | `data/app.sqlite` — `audit_log` table |
 

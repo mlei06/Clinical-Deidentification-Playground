@@ -21,10 +21,13 @@ from clinical_deid.pipes.whitelist.lists import term_to_list_pattern
 class WhitelistLabelSettings(BaseModel):
     """Per-label settings for the whitelist detector."""
 
+    model_config = ConfigDict(extra="ignore")  # ignore legacy keys e.g. disabled_dictionaries in old JSON
+
     enabled: bool = True
     remap: str | None = None
     terms: list[str] = Field(default_factory=list)
-    disabled_dictionaries: list[str] = Field(default_factory=list)
+    # Named dictionary stems from the global whitelist pool (per-label opt-in)
+    dictionaries: list[str] = Field(default_factory=list)
 
 
 # Backward-compat alias — old configs used WhitelistLabelConfig
@@ -58,7 +61,7 @@ class WhitelistConfig(BaseModel):
         title="Labels",
         description=(
             "Configure each detection label: toggle on/off, "
-            "select dictionaries, add inline terms, and remap output labels."
+            "select dictionaries from the pool, add inline terms, and remap output labels."
         ),
         json_schema_extra=field_ui(
             ui_group="Labels",
@@ -96,7 +99,7 @@ class WhitelistConfig(BaseModel):
     @property
     def _merged_labels(self) -> dict[str, WhitelistLabelSettings]:
         """Merge old per_label/label_mapping into the new labels dict."""
-        merged = dict(self.labels)
+        merged: dict[str, WhitelistLabelSettings] = {k: v for k, v in self.labels.items()}
 
         for label, old_cfg in self.per_label.items():
             if label not in merged:
@@ -106,7 +109,8 @@ class WhitelistConfig(BaseModel):
                 merged[label] = WhitelistLabelSettings(
                     enabled=existing.enabled,
                     remap=existing.remap,
-                    terms=list({*existing.terms, *old_cfg.terms}),
+                    terms=sorted({*existing.terms, *old_cfg.terms}),
+                    dictionaries=sorted({*existing.dictionaries, *old_cfg.dictionaries}),
                 )
 
         for label, target in self.label_mapping.items():
@@ -114,11 +118,11 @@ class WhitelistConfig(BaseModel):
                 s = merged[label]
                 if target is None:
                     merged[label] = WhitelistLabelSettings(
-                        enabled=False, remap=s.remap, terms=s.terms,
+                        enabled=False, remap=s.remap, terms=s.terms, dictionaries=s.dictionaries,
                     )
                 elif not s.remap:
                     merged[label] = WhitelistLabelSettings(
-                        enabled=s.enabled, remap=target, terms=s.terms,
+                        enabled=s.enabled, remap=target, terms=s.terms, dictionaries=s.dictionaries,
                     )
 
         return merged
@@ -136,13 +140,8 @@ class WhitelistConfig(BaseModel):
 
 
 def default_base_labels() -> list[str]:
-    """Default label space from auto-discovered whitelist dictionaries."""
-    try:
-        store = _get_dictionary_store()
-        dicts = store.list_dictionaries(kind="whitelist")
-        return sorted({d.label for d in dicts if d.label})
-    except Exception:
-        return []
+    """Whitelist does not infer labels from on-disk dictionary layout."""
+    return []
 
 
 class _ResolvedList:
@@ -164,44 +163,36 @@ def _get_dictionary_store():
 logger = logging.getLogger(__name__)
 
 
-def _auto_discover_whitelist_dicts() -> dict[str, dict[str, list[str]]]:
-    """Load all whitelist dictionaries, grouped by label then dict name."""
-    try:
-        store = _get_dictionary_store()
-        dicts = store.list_dictionaries(kind="whitelist")
-    except Exception:
-        logger.warning("Failed to auto-discover whitelist dictionaries", exc_info=True)
-        return {}
-    by_label: dict[str, dict[str, list[str]]] = {}
-    for d in dicts:
-        if d.label is None:
-            continue
-        try:
-            terms = store.get_terms("whitelist", d.name, label=d.label)
-            by_label.setdefault(d.label, {})[d.name] = terms
-        except FileNotFoundError:
-            continue
-    return by_label
-
-
 def _resolve_list_labels(config: WhitelistConfig) -> list[_ResolvedList]:
     merged = config._merged_labels
-    auto_dicts = _auto_discover_whitelist_dicts()
+    try:
+        store = _get_dictionary_store()
+    except Exception:
+        logger.warning("Failed to load dictionary store for whitelist", exc_info=True)
+        store = None
 
-    label_keys: set[str] = set(auto_dicts.keys()) | set(merged.keys())
+    def _get_terms(name: str) -> list[str]:
+        if store is None:
+            return []
+        try:
+            return store.get_terms("whitelist", name)
+        except FileNotFoundError:
+            logger.warning("Whitelist dictionary not found: %r", name)
+            return []
+        except Exception:
+            logger.warning("Failed to read whitelist dictionary %r", name, exc_info=True)
+            return []
 
+    label_keys: set[str] = set(merged.keys())
     resolved: list[_ResolvedList] = []
     for label in sorted(label_keys):
-        settings = merged.get(label, WhitelistLabelSettings())
+        settings = merged[label]
         if not settings.enabled:
             continue
-        disabled = set(settings.disabled_dictionaries)
         terms: list[str] = []
-
-        for dict_name, dict_terms in auto_dicts.get(label, {}).items():
-            if dict_name not in disabled:
-                terms.extend(dict_terms)
-
+        for dict_name in settings.dictionaries:
+            if dict_name.strip():
+                terms.extend(_get_terms(dict_name.strip()))
         terms.extend(settings.terms)
 
         seen: set[str] = set()

@@ -22,9 +22,9 @@ def _doc(text: str) -> AnnotatedDocument:
 class TestDictionaryStore:
     def test_save_and_list_whitelist(self, tmp_path):
         store = DictionaryStore(tmp_path)
-        info = store.save("whitelist", "my_hospitals", "Hospital A\nHospital B\n", label="HOSPITAL")
+        info = store.save("whitelist", "my_hospitals", "Hospital A\nHospital B\n")
         assert info.kind == "whitelist"
-        assert info.label == "HOSPITAL"
+        assert info.label is None
         assert info.name == "my_hospitals"
         assert info.term_count == 2
 
@@ -44,14 +44,14 @@ class TestDictionaryStore:
 
     def test_get_terms(self, tmp_path):
         store = DictionaryStore(tmp_path)
-        store.save("whitelist", "docs", "Dr. Smith\nDr. Jones\n", label="DOCTOR")
-        terms = store.get_terms("whitelist", "docs", label="DOCTOR")
+        store.save("whitelist", "docs", "Dr. Smith\nDr. Jones\n")
+        terms = store.get_terms("whitelist", "docs")
         assert terms == ["Dr. Smith", "Dr. Jones"]
 
     def test_get_terms_not_found(self, tmp_path):
         store = DictionaryStore(tmp_path)
         with pytest.raises(FileNotFoundError):
-            store.get_terms("whitelist", "nonexistent", label="HOSPITAL")
+            store.get_terms("whitelist", "nonexistent")
 
     def test_delete(self, tmp_path):
         store = DictionaryStore(tmp_path)
@@ -71,19 +71,11 @@ class TestDictionaryStore:
         terms = store.get_terms("blacklist", "words")
         assert terms == ["new1", "new2"]
 
-    def test_list_filters_by_label(self, tmp_path):
-        store = DictionaryStore(tmp_path)
-        store.save("whitelist", "list_a", "A\n", label="HOSPITAL")
-        store.save("whitelist", "list_b", "B\n", label="DOCTOR")
-        hospital_dicts = store.list_dictionaries(kind="whitelist", label="HOSPITAL")
-        assert len(hospital_dicts) == 1
-        assert hospital_dicts[0].label == "HOSPITAL"
-
     def test_load_whitelist_terms_bulk(self, tmp_path):
         store = DictionaryStore(tmp_path)
-        store.save("whitelist", "list1", "Alpha\nBeta\n", label="HOSPITAL")
-        store.save("whitelist", "list2", "Gamma\n", label="HOSPITAL")
-        terms = store.load_whitelist_terms(["list1", "list2"], "HOSPITAL")
+        store.save("whitelist", "list1", "Alpha\nBeta\n")
+        store.save("whitelist", "list2", "Gamma\n")
+        terms = store.load_whitelist_terms(["list1", "list2"])
         assert terms == ["Alpha", "Beta", "Gamma"]
 
     def test_load_blacklist_terms_bulk(self, tmp_path):
@@ -93,15 +85,10 @@ class TestDictionaryStore:
         terms = store.load_blacklist_terms(["safe1", "safe2"])
         assert terms == ["NORMAL", "STABLE"]
 
-    def test_whitelist_requires_label(self, tmp_path):
-        store = DictionaryStore(tmp_path)
-        with pytest.raises(ValueError, match="require a label"):
-            store.save("whitelist", "no_label", "term\n")
-
     def test_csv_dictionary(self, tmp_path):
         store = DictionaryStore(tmp_path)
-        store.save("whitelist", "hospitals_csv", "term\nHospital A\nHospital B\n", label="HOSPITAL", extension=".csv")
-        terms = store.get_terms("whitelist", "hospitals_csv", label="HOSPITAL")
+        store.save("whitelist", "hospitals_csv", "term\nHospital A\nHospital B\n", extension=".csv")
+        terms = store.get_terms("whitelist", "hospitals_csv")
         assert terms == ["Hospital A", "Hospital B"]
 
     def test_get_preview(self, tmp_path):
@@ -158,12 +145,12 @@ def test_upload_whitelist_dictionary(client):
     r = client.post(
         "/dictionaries",
         files=[("file", ("hospitals.txt", io.BytesIO(content), "text/plain"))],
-        data={"kind": "whitelist", "name": "test_hospitals", "label": "HOSPITAL"},
+        data={"kind": "whitelist", "name": "test_hospitals"},
     )
     assert r.status_code == 201, r.text
     body = r.json()
     assert body["info"]["kind"] == "whitelist"
-    assert body["info"]["label"] == "HOSPITAL"
+    assert body["info"]["label"] is None
     assert body["info"]["name"] == "test_hospitals"
     assert body["info"]["term_count"] == 2
 
@@ -304,13 +291,12 @@ def test_whitelist_pipe_with_dictionary(tmp_path, monkeypatch):
     reset_settings()
 
     store = DictionaryStore(tmp_path)
-    store.save("whitelist", "test_hospitals", "Alpha Clinic\n", label="HOSPITAL")
+    store.save("whitelist", "test_hospitals", "Alpha Clinic\n")
 
     from clinical_deid.pipes.whitelist import WhitelistConfig, WhitelistLabelConfig, WhitelistPipe
 
     config = WhitelistConfig(
-        load_all_dictionaries=False,
-        per_label={
+        labels={
             "HOSPITAL": WhitelistLabelConfig(
                 dictionaries=["test_hospitals"],
             ),

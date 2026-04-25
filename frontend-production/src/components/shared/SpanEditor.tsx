@@ -1,4 +1,4 @@
-import { useMemo, useState, useCallback, useEffect } from 'react';
+import { useMemo, useState, useCallback, useEffect, type ReactNode } from 'react';
 import { clsx } from 'clsx';
 import {
   Trash2,
@@ -8,10 +8,9 @@ import {
   Crosshair,
   Copy,
   AlertTriangle,
-  Loader2,
+  ArrowRightLeft,
 } from 'lucide-react';
 import LabelBadge from './LabelBadge';
-import { CANONICAL_LABELS } from '../../lib/canonicalLabels';
 import { entitySpanKey } from '../../lib/entitySpanKey';
 import { pickPrimarySpan, spanRangeKey, type SpanConflictSet } from '../../lib/spanOverlapConflicts';
 import type { EntitySpanResponse } from '../../api/types';
@@ -33,7 +32,9 @@ interface SpanEditorProps {
   onResolveConflict?: (kept: EntitySpanResponse) => void;
   onDropConflict?: (range: { start: number; end: number }) => void;
   onQuickResolveLabelPriority?: () => void;
-  onUpdateOutput?: () => void;
+  /** Optional save control rendered above Reset (replaces the old "Update output" button). */
+  saveControl?: ReactNode;
+  showGhostPanel?: boolean;
 }
 
 export default function SpanEditor({
@@ -53,13 +54,16 @@ export default function SpanEditor({
   onResolveConflict,
   onDropConflict,
   onQuickResolveLabelPriority,
-  onUpdateOutput,
+  saveControl,
+  showGhostPanel = true,
 }: SpanEditorProps) {
   const DROP_ALL_CHOICE = '__drop_all__';
   const [collapsedLabels, setCollapsedLabels] = useState<Set<string>>(new Set());
   const [collapsedConflicts, setCollapsedConflicts] = useState(false);
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
   const [conflictChoice, setConflictChoice] = useState<Record<string, string>>({});
+  const [openMapGroup, setOpenMapGroup] = useState<string | null>(null);
+  const [groupLabelDraft, setGroupLabelDraft] = useState('');
 
   const toggleLabel = (label: string) => {
     setCollapsedLabels((prev) => {
@@ -153,6 +157,14 @@ export default function SpanEditor({
     });
   };
 
+  const remapGroup = (fromLabel: string, toLabelRaw: string) => {
+    const toLabel = toLabelRaw.trim();
+    if (!toLabel || fromLabel === toLabel) return;
+    onChange(spans.map((s) => (s.label === fromLabel ? { ...s, label: toLabel } : s)));
+    setOpenMapGroup(null);
+    setGroupLabelDraft('');
+  };
+
   const confirmConflictResolution = (cs: SpanConflictSet) => {
     const rk = spanRangeKey(cs.start, cs.end);
     const key = conflictChoice[rk];
@@ -199,22 +211,7 @@ export default function SpanEditor({
         </div>
 
         <div className="flex flex-col gap-1">
-          {onUpdateOutput && (
-            <button
-              type="button"
-              onClick={onUpdateOutput}
-              disabled={isApplying || spans.length === 0}
-              className="inline-flex w-full items-center justify-center gap-1 rounded bg-gray-900 px-2 py-1.5 font-medium text-white hover:bg-gray-800 disabled:opacity-40"
-              title={
-                conflictSets.length > 0
-                  ? 'Regenerate the Output pane from your current spans. Unresolved same-range overlaps use the canonical primary label.'
-                  : 'Regenerate the Output pane from your current spans using the selected view style.'
-              }
-            >
-              {isApplying ? <Loader2 size={12} className="animate-spin" /> : null}
-              {isApplying ? 'Updating…' : 'Update output'}
-            </button>
-          )}
+          {saveControl && <div className="flex w-full">{saveControl}</div>}
           <button
             type="button"
             onClick={onReset}
@@ -236,7 +233,7 @@ export default function SpanEditor({
         </div>
       )}
 
-      {ghostSelection && (
+      {showGhostPanel && ghostSelection && (
         <div
           data-pending-selection-ui
           className="shrink-0 space-y-1 rounded border border-amber-200 bg-amber-50/80 px-2 py-2 text-[11px] text-amber-950"
@@ -434,6 +431,45 @@ export default function SpanEditor({
                       <LabelBadge label={label} />
                       <span className="text-gray-400">({items.length})</span>
                     </button>
+                    <div className="relative flex shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setOpenMapGroup((g) => (g === label ? null : label));
+                          setGroupLabelDraft('');
+                        }}
+                        className="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] font-medium text-gray-600 hover:bg-gray-200/80"
+                        title="Map all spans in this group to a typed label"
+                      >
+                        <ArrowRightLeft size={12} className="shrink-0" />
+                        <span className="hidden min-[360px]:inline">Map group</span>
+                      </button>
+                      {openMapGroup === label && (
+                        <div className="absolute right-0 top-full z-20 mt-0.5 min-w-[12rem] rounded border border-gray-200 bg-white p-2 shadow-lg">
+                          <div className="mb-1 text-[10px] font-semibold text-gray-500">
+                            Map {label} to
+                          </div>
+                          <input
+                            value={groupLabelDraft}
+                            onChange={(e) => setGroupLabelDraft(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key !== 'Enter') return;
+                              remapGroup(label, groupLabelDraft);
+                            }}
+                            className="mb-1.5 w-full rounded border border-gray-200 px-2 py-1 text-[10px] text-gray-800"
+                            placeholder="Type target label"
+                            autoFocus
+                          />
+                          <button
+                            type="button"
+                            onClick={() => remapGroup(label, groupLabelDraft)}
+                            className="w-full rounded border border-gray-200 bg-gray-50 px-2 py-1 text-[10px] font-medium text-gray-700 hover:bg-gray-100"
+                          >
+                            Apply
+                          </button>
+                        </div>
+                      )}
+                    </div>
                     {!collapsed && (
                       <button
                         type="button"
@@ -495,18 +531,20 @@ export default function SpanEditor({
                                 {s.text || originalText.slice(s.start, s.end)}
                               </code>
                               <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover/row:opacity-100 group-focus-within/row:opacity-100">
-                                <select
-                                  value={s.label}
-                                  onChange={(e) => handleLabelChange(key, e.target.value)}
-                                  className="max-w-[100px] rounded border border-gray-200 bg-white px-0.5 py-0.5 text-[9px] text-gray-800"
-                                  title="Change label"
-                                >
-                                  {CANONICAL_LABELS.map((l) => (
-                                    <option key={l} value={l}>
-                                      {l}
-                                    </option>
-                                  ))}
-                                </select>
+                                <input
+                                  defaultValue={s.label}
+                                  onBlur={(e) => {
+                                    const next = e.target.value.trim();
+                                    if (next && next !== s.label) handleLabelChange(key, next);
+                                  }}
+                                  onKeyDown={(e) => {
+                                    if (e.key !== 'Enter') return;
+                                    const next = (e.target as HTMLInputElement).value.trim();
+                                    if (next && next !== s.label) handleLabelChange(key, next);
+                                  }}
+                                  className="max-w-[110px] rounded border border-gray-200 bg-white px-1 py-0.5 text-[9px] text-gray-800"
+                                  title="Type a new label"
+                                />
                                 <button
                                   type="button"
                                   onClick={() => handleDelete(key)}

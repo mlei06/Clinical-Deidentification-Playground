@@ -166,6 +166,13 @@ class RedactRequest(BaseModel):
     text: str = Field(..., max_length=MAX_TEXT_LENGTH)
     spans: list[RedactSpan]
     output_mode: OutputMode = OutputMode.redacted
+    include_surrogate_spans: bool = Field(
+        default=False,
+        description=(
+            "When ``output_mode=surrogate``, also return ``surrogate_text`` and "
+            "``surrogate_spans`` (offsets in the surrogate string). No-op for other modes."
+        ),
+    )
     surrogate_seed: int | None = None
     surrogate_consistency: bool = True
 
@@ -174,6 +181,14 @@ class RedactResponse(BaseModel):
     output_text: str
     output_mode: OutputMode
     span_count: int
+    surrogate_text: str | None = Field(
+        default=None,
+        description="Set with ``include_surrogate_spans`` in surrogate mode; same as ``output_text`` then.",
+    )
+    surrogate_spans: list[EntitySpanResponse] | None = Field(
+        default=None,
+        description="Aligned spans for ``surrogate_text`` when surrogate mode and flag is set.",
+    )
 
 
 class ScrubRequest(BaseModel):

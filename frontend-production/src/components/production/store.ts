@@ -10,6 +10,21 @@ import { makeIdbStorage } from '../../lib/idbStorage';
 
 export type ExportOutputType = 'redacted' | 'annotated' | 'surrogate_annotated';
 
+export type SavedOutputMode = 'annotated' | 'redacted' | 'surrogate_annotated';
+
+export interface SavedOutput {
+  mode: SavedOutputMode;
+  /** null when mode === 'annotated'; export uses file.originalText. */
+  text: string | null;
+  /** Snapshot at save time. annotated → snapshot of annotations; redacted → []; surrogate → aligned spans. */
+  spans: EntitySpanResponse[];
+  /** Snapshot of file.annotations at save time. Drives staleness detection. */
+  annotationsAtSave: EntitySpanResponse[];
+  /** Hash of file.originalText at save time. Defensive against future text mutations. */
+  sourceTextHash: string;
+  savedAt: string;
+}
+
 export type DetectionStatus =
   | 'pending'
   | 'processing'
@@ -29,8 +44,11 @@ export interface DatasetFile {
   note?: string;
   error?: string;
   processingTimeMs?: number;
+  /** @deprecated migrated to `savedOutput`; retained for back-compat through M4. */
   surrogateText?: string | null;
+  /** @deprecated migrated to `savedOutput`; retained for back-compat through M4. */
   annotationsOnSurrogate?: EntitySpanResponse[] | null;
+  savedOutput?: SavedOutput | null;
   createdAt: string;
 }
 
@@ -72,6 +90,9 @@ interface State extends UiState {
   updateFile: (datasetId: string, fileId: string, patch: Partial<DatasetFile>) => void;
   setFileResolved: (datasetId: string, fileId: string, resolved: boolean) => void;
   setCurrentFile: (datasetId: string, fileId: string | null) => void;
+
+  saveFileOutput: (datasetId: string, fileId: string, output: SavedOutput) => void;
+  clearFileOutput: (datasetId: string, fileId: string) => void;
 
   replaceFileAnnotations: (
     datasetId: string,
@@ -180,8 +201,34 @@ function migrateLegacyQueue(legacy: {
   };
 }
 
-const PERSIST_VERSION = 2;
+const PERSIST_VERSION = 3;
 const PERSIST_KEY = 'clinical-deid-production:v2';
+
+function migrateLegacySurrogate(persisted: PersistedShape): PersistedShape {
+  if (!persisted.datasets) return persisted;
+  const datasets: Record<string, Dataset> = {};
+  for (const [id, ds] of Object.entries(persisted.datasets)) {
+    datasets[id] = {
+      ...ds,
+      files: ds.files.map((f) => {
+        if (f.savedOutput) return f;
+        if (f.surrogateText && f.annotationsOnSurrogate?.length) {
+          const savedOutput: SavedOutput = {
+            mode: 'surrogate_annotated',
+            text: f.surrogateText,
+            spans: f.annotationsOnSurrogate,
+            annotationsAtSave: [],
+            sourceTextHash: '__legacy__',
+            savedAt: f.createdAt,
+          };
+          return { ...f, savedOutput };
+        }
+        return f;
+      }),
+    };
+  }
+  return { ...persisted, datasets };
+}
 
 let _storage: ReturnType<typeof makeIdbStorage> | null = null;
 function makeIdbStorageSingleton() {
@@ -201,14 +248,17 @@ const persistOptions: PersistOptions<State, PersistedShape> = {
   }),
   migrate: (persisted, version): PersistedShape => {
     if (persisted == null) return {};
+    let next: PersistedShape;
     if (version >= PERSIST_VERSION) return persisted as PersistedShape;
     const legacy = persisted as {
       reviewer?: string;
       mode?: string;
       docs?: LegacyDoc[];
     };
-    if (Array.isArray(legacy.docs)) return migrateLegacyQueue(legacy);
-    return persisted as PersistedShape;
+    if (Array.isArray(legacy.docs)) next = migrateLegacyQueue(legacy);
+    else next = persisted as PersistedShape;
+    if (version < 3) next = migrateLegacySurrogate(next);
+    return next;
   },
 };
 
@@ -382,6 +432,36 @@ export const useProductionStore = create<State>()(
           };
         }),
 
+      saveFileOutput: (datasetId, fileId, output) =>
+        set((s) => {
+          const ds = s.datasets[datasetId];
+          if (!ds) return s;
+          const files = ds.files.map((f) =>
+            f.id === fileId ? { ...f, savedOutput: output } : f,
+          );
+          return {
+            datasets: {
+              ...s.datasets,
+              [datasetId]: { ...ds, files, updatedAt: nowIso() },
+            },
+          };
+        }),
+
+      clearFileOutput: (datasetId, fileId) =>
+        set((s) => {
+          const ds = s.datasets[datasetId];
+          if (!ds) return s;
+          const files = ds.files.map((f) =>
+            f.id === fileId ? { ...f, savedOutput: null } : f,
+          );
+          return {
+            datasets: {
+              ...s.datasets,
+              [datasetId]: { ...ds, files, updatedAt: nowIso() },
+            },
+          };
+        }),
+
       replaceFileAnnotations: (datasetId, fileId, spans, opts) =>
         set((s) => {
           const ds = s.datasets[datasetId];
@@ -397,6 +477,7 @@ export const useProductionStore = create<State>()(
               processingTimeMs: opts.processingTimeMs,
               surrogateText: opts.surrogateText ?? null,
               annotationsOnSurrogate: opts.annotationsOnSurrogate ?? null,
+              savedOutput: null,
               resolved: opts.clearResolved ? false : f.resolved,
               error: undefined,
             };

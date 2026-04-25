@@ -10,25 +10,13 @@
             "enabled": true,
             "remap": null,
             "terms": [],
-            "disabled_dictionaries": [
-              "female_names_ambig",
-              "female_names_popular_v2",
-              "female_names_unambig_v2",
-              "male_names_ambig",
-              "male_names_popular_v2",
-              "male_names_unambig_v2"
-            ]
+            "dictionaries": ["male-first-names", "female_first_names"]
           },
           "LAST_NAME": {
             "enabled": true,
             "remap": null,
             "terms": [],
-            "disabled_dictionaries": [
-              "all_last_names",
-              "last_name_prefixes",
-              "last_names_popular_v2",
-              "last_names_unambig_v2"
-            ]
+            "dictionaries": ["last_names"]
           }
         }
       }

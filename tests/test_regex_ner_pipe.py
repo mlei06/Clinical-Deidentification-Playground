@@ -54,10 +54,10 @@ def test_list_terms_hospital() -> None:
     pipe = _chained_detectors(
         _no_builtin_regex_config(),
         WhitelistConfig(
-            per_label={
+            labels={
                 "HOSPITAL": WhitelistLabelConfig(
                     terms=["Toronto General Hospital"],
-                                    ),
+                ),
             }
         ),
     )
@@ -70,7 +70,7 @@ def test_ner_builtins_endpoint(client) -> None:
     assert r.status_code == 200
     body = r.json()
     assert "DATE" in body["regex_labels"]
-    assert isinstance(body["whitelist_labels"], list)
+    assert body["whitelist_labels"] == []
 
 
 def test_whitelist_parse_lists_endpoint(client) -> None:
@@ -90,8 +90,7 @@ def test_builtin_regex_disabled_lists_only_labels() -> None:
     pipe = _chained_detectors(
         _no_builtin_regex_config(),
         WhitelistConfig(
-            load_all_dictionaries=False,
-            per_label={
+            labels={
                 "HOSPITAL": WhitelistLabelConfig(
                     terms=["Toronto General Hospital"],
                 ),

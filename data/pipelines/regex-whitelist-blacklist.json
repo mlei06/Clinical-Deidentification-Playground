@@ -11,7 +11,39 @@
       "type": "whitelist",
       "config": {
         "source_name": "whitelist",
-        "skip_overlapping": false
+        "skip_overlapping": false,
+        "labels": {
+          "FIRST_NAME": {
+            "enabled": true,
+            "remap": null,
+            "terms": [],
+            "dictionaries": ["male-first-names", "female_first_names"]
+          },
+          "LAST_NAME": {
+            "enabled": true,
+            "remap": null,
+            "terms": [],
+            "dictionaries": ["last_names"]
+          },
+          "HOSPITAL": {
+            "enabled": true,
+            "remap": null,
+            "terms": [],
+            "dictionaries": ["us_hospitals"]
+          },
+          "LOCATION": {
+            "enabled": true,
+            "remap": null,
+            "terms": [],
+            "dictionaries": ["us_cities", "local_places_unambig_v2", "LOCATION__us_states"]
+          },
+          "STATE": {
+            "enabled": true,
+            "remap": null,
+            "terms": [],
+            "dictionaries": ["STATE__us_states"]
+          }
+        }
       }
     },
     {

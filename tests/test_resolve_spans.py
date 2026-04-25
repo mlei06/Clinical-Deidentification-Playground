@@ -43,7 +43,7 @@ def test_chained_detectors_then_resolve() -> None:
             {"type": "regex_ner"},
             {
                 "type": "whitelist",
-                "config": {"load_all_dictionaries": False},
+                "config": {},
             },
             {"type": "resolve_spans", "config": {"strategy": "exact_dedupe"}},
         ]
@@ -57,7 +57,7 @@ def test_chained_detectors_then_resolve() -> None:
 def test_regex_then_resolve_longest() -> None:
     pipe = Pipeline(pipes=[
         RegexNerPipe(RegexNerConfig()),
-        WhitelistPipe(WhitelistConfig(load_all_dictionaries=False)),
+        WhitelistPipe(WhitelistConfig()),
     ])
     doc = AnnotatedDocument(document=Document(id="d", text="a@b.co extra"), spans=[])
     doc = pipe.forward(doc)

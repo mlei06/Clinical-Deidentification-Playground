@@ -34,13 +34,13 @@
             "enabled": true,
             "remap": "NAME",
             "terms": [],
-            "disabled_dictionaries": []
+            "dictionaries": ["male-first-names", "female_first_names"]
           },
           "LAST_NAME": {
             "enabled": true,
             "remap": "NAME",
             "terms": [],
-            "disabled_dictionaries": []
+            "dictionaries": ["last_names"]
           }
         }
       }

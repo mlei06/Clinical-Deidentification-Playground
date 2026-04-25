@@ -971,6 +971,25 @@ def test_import_brat_to_jsonl_unit(tmp_path):
 # ---------------------------------------------------------------------------
 
 
+def test_eval_rejects_empty_eval_pred_label_remap_value(client, tmp_path):
+    jsonl = _write_sample_jsonl(tmp_path / "data" / "gold_remap.jsonl", count=1)
+    client.post(
+        "/datasets",
+        json={"name": "eval-remap-422", "data_path": str(jsonl), "format": "jsonl"},
+    )
+    client.post("/pipelines", json={"name": "noop-rmap", "config": {"pipes": []}})
+
+    resp = client.post(
+        "/eval/run",
+        json={
+            "pipeline_name": "noop-rmap",
+            "dataset_name": "eval-remap-422",
+            "eval_pred_label_remap": {"A": " "},
+        },
+    )
+    assert resp.status_code == 422
+
+
 def test_eval_with_dataset_name(client, tmp_path):
     """Eval endpoint can reference a registered dataset by name."""
     jsonl = _write_sample_jsonl(tmp_path / "data" / "gold.jsonl", count=3)

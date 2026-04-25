@@ -51,8 +51,6 @@ export function useBatchDetect() {
       const workers: Promise<void>[] = [];
       let done = 0;
 
-      const needsSurrogate = ds.exportOutputType === 'surrogate_annotated';
-
       const worker = async (): Promise<void> => {
         while (!cancelRef.current) {
           const file = queue.shift();
@@ -68,18 +66,14 @@ export function useBatchDetect() {
               undefined,
               false,
               reviewer || 'production-ui',
-              needsSurrogate
-                ? { outputMode: 'surrogate', includeSurrogateSpans: true }
-                : undefined,
+              undefined,
             );
             replaceFileAnnotations(datasetId, file.id, res.spans, {
               target,
               processingTimeMs: res.processing_time_ms,
               clearResolved: clearResolved && file.resolved,
-              surrogateText: needsSurrogate ? res.surrogate_text ?? null : null,
-              annotationsOnSurrogate: needsSurrogate
-                ? res.surrogate_spans ?? null
-                : null,
+              surrogateText: null,
+              annotationsOnSurrogate: null,
             });
           } catch (err) {
             updateFile(datasetId, file.id, {

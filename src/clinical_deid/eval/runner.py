@@ -115,6 +115,21 @@ def _aggregate_match_results(results: list[MatchResult]) -> MatchResult:
     return make_match_result(tp, fp, fn, partial)
 
 
+def _remap_pred_span_labels(
+    pred_spans: list[EntitySpan], mapping: dict[str, str] | None
+) -> list[EntitySpan]:
+    """Rename predicted span labels (POST /eval/run ``eval_pred_label_remap``), preserving offsets."""
+    if not mapping:
+        return pred_spans
+    out: list[EntitySpan] = []
+    for s in pred_spans:
+        if s.label in mapping and mapping[s.label] != s.label:
+            out.append(s.model_copy(update={"label": mapping[s.label]}))
+        else:
+            out.append(s)
+    return out
+
+
 
 def _aggregate_redaction_metrics(doc_metrics: list[RedactionMetrics]) -> RedactionMetrics:
     """Aggregate per-document redaction metrics into a corpus-level summary."""
@@ -177,6 +192,7 @@ def evaluate_pipeline(
     documents: list[AnnotatedDocument],
     risk_weights: dict[str, float] | None = None,
     risk_profile: RiskProfile | None = None,
+    pred_label_remap: dict[str, str] | None = None,
 ) -> EvalResult:
     """Run pipeline on each doc, compute all metrics, sort docs by worst performance.
 
@@ -186,6 +202,10 @@ def evaluate_pipeline(
     gold and pipeline output via the pipeline (e.g. ``label_mapper``) or the
     corpus so labels match; see docs/configuration.md (label normalization applies
     to ``POST /process/*`` only, not to eval).
+
+    *pred_label_remap*, when set, renames **predicted** span labels right after
+    :meth:`Pipe.forward` (same as an ad-hoc label_mapper) so eval can proceed
+    without editing the saved pipeline.
 
     If the pipeline's output text differs from the input (indicating redaction),
     redaction metrics are also computed.
@@ -230,7 +250,7 @@ def evaluate_pipeline(
 
         text = gold_doc.document.text
         gold_spans = list(gold_doc.spans)
-        pred_spans = list(pred_doc.spans)
+        pred_spans = _remap_pred_span_labels(list(pred_doc.spans), pred_label_remap)
 
         # Detect redaction: output text differs from input
         is_redacted = pred_doc.document.text != text

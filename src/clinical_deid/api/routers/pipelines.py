@@ -140,15 +140,14 @@ def _inject_base_labels(
         if widget == "whitelist_label":
             store = DictionaryStore(get_settings().dictionaries_dir)
             wl_dicts = store.list_dictionaries(kind="whitelist")
-            dicts_by_label: dict[str, list[dict]] = {}
-            for d in wl_dicts:
-                if d.label:
-                    dicts_by_label.setdefault(d.label, []).append({
-                        "name": d.name,
-                        "filename": d.filename,
-                        "term_count": d.term_count,
-                    })
-            prop["ui_dictionaries_by_label"] = dicts_by_label
+            prop["ui_whitelist_dictionaries"] = [
+                {
+                    "name": d.name,
+                    "filename": d.filename,
+                    "term_count": d.term_count,
+                }
+                for d in wl_dicts
+            ]
 
 
 def _inject_dict_info(config_schema: dict) -> None:
@@ -241,12 +240,9 @@ def pipe_label_space_bundle(name: str) -> LabelSpaceBundle:
 
 @router.get("/ner/builtins", response_model=NerBuiltinInfo, dependencies=[require_admin])
 def ner_builtins() -> NerBuiltinInfo:
-    store = DictionaryStore(get_settings().dictionaries_dir)
-    wl_dicts = store.list_dictionaries(kind="whitelist")
-    whitelist_labels = sorted({d.label for d in wl_dicts if d.label})
     return NerBuiltinInfo(
         regex_labels=builtin_regex_label_names(),
-        whitelist_labels=whitelist_labels,
+        whitelist_labels=[],
     )
 
 

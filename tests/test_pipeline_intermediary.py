@@ -4,9 +4,6 @@ from __future__ import annotations
 
 from clinical_deid.domain import AnnotatedDocument, Document
 from clinical_deid.pipes.registry import dump_pipeline, load_pipeline
-from clinical_deid.pipes.whitelist import WhitelistLabelConfig
-
-
 def _doc(text: str) -> AnnotatedDocument:
     return AnnotatedDocument(document=Document(id="d", text=text), spans=[])
 
@@ -35,10 +32,10 @@ def test_run_with_trace_captures_all_steps() -> None:
             {
                 "type": "whitelist",
                 "config": {
-                    "per_label": {
-                        "HOSPITAL": WhitelistLabelConfig(
-                            terms=["Zed Clinic"],
-                                                    ),
+                    "labels": {
+                        "HOSPITAL": {
+                            "terms": ["Zed Clinic"],
+                        },
                     },
                 },
             },
