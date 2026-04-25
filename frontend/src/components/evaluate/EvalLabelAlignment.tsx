@@ -103,6 +103,8 @@ interface EvalLabelAlignmentProps {
   /** Raw path string for "path on server" mode (not resolved client-side). */
   datasetPath: string;
   pipelineName: string;
+  tempPredLabelRemap?: Record<string, string>;
+  onTempPredLabelRemapChange?: (mapping: Record<string, string>) => void;
 }
 
 function GoldPipelineDiff({
@@ -111,12 +113,16 @@ function GoldPipelineDiff({
   health,
   pipelineName,
   pipelineQuery,
+  tempPredLabelRemap,
+  onTempPredLabelRemapChange,
 }: {
   goldLabels: string[];
   goldSubtitle?: string;
   health: HealthResponse | undefined;
   pipelineName: string;
   pipelineQuery: UseQueryResult<PipelineDetail, Error>;
+  tempPredLabelRemap?: Record<string, string>;
+  onTempPredLabelRemapChange?: (mapping: Record<string, string>) => void;
 }) {
   if (pipelineQuery.isLoading) {
     return (
@@ -144,6 +150,40 @@ function GoldPipelineDiff({
   const mismatch = onlyA.length > 0 || onlyB.length > 0;
   const missingOutput = pipelineLabels.length === 0;
   const loadHref = `/create?load=${encodeURIComponent(pipelineName.trim())}`;
+  const currentRemap = tempPredLabelRemap ?? {};
+  const hasRemapEditor = typeof onTempPredLabelRemapChange === 'function' && onlyB.length > 0;
+  const normalizedGoldLabels = goldLabels.slice().sort((a, b) => a.localeCompare(b));
+
+  useEffect(() => {
+    if (!onTempPredLabelRemapChange) return;
+    const allowedKeys = new Set(onlyB);
+    const allowedTargets = new Set(goldLabels);
+    const next: Record<string, string> = {};
+    for (const [k, v] of Object.entries(currentRemap)) {
+      if (!allowedKeys.has(k)) continue;
+      const target = v.trim();
+      if (!target || !allowedTargets.has(target)) continue;
+      next[k] = target;
+    }
+    const same =
+      Object.keys(next).length === Object.keys(currentRemap).length &&
+      Object.entries(next).every(([k, v]) => currentRemap[k] === v);
+    if (!same) onTempPredLabelRemapChange(next);
+  }, [currentRemap, goldLabels, onlyB, onTempPredLabelRemapChange]);
+
+  const updateOneMapping = (source: string, target: string) => {
+    if (!onTempPredLabelRemapChange) return;
+    const next = { ...currentRemap };
+    const trimmed = target.trim();
+    if (!trimmed) delete next[source];
+    else next[source] = trimmed;
+    onTempPredLabelRemapChange(next);
+  };
+
+  const clearMappings = () => {
+    if (!onTempPredLabelRemapChange) return;
+    onTempPredLabelRemapChange({});
+  };
 
   return (
     <div className="space-y-3 rounded-lg border border-gray-200 bg-white p-3 shadow-sm">
@@ -222,6 +262,51 @@ function GoldPipelineDiff({
         />
       </div>
 
+      {hasRemapEditor && (
+        <div className="rounded-md border border-indigo-100 bg-indigo-50/40 p-2.5">
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h5 className="text-xs font-semibold text-indigo-950">Temporary eval label remap</h5>
+              <p className="text-[11px] text-indigo-900/80">
+                Run-scoped only. This does not modify the saved pipeline config.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={clearMappings}
+              className="rounded border border-indigo-200 bg-white px-2 py-1 text-[11px] font-medium text-indigo-900 hover:bg-indigo-50"
+            >
+              Clear mappings
+            </button>
+          </div>
+          <div className="space-y-1.5">
+            {onlyB.map((sourceLabel) => (
+              <div key={sourceLabel} className="flex flex-wrap items-center gap-2 text-xs">
+                <span className="rounded bg-sky-100/80 px-1.5 py-0.5 font-mono text-sky-900">
+                  {sourceLabel}
+                </span>
+                <span className="text-indigo-900/70">→</span>
+                <select
+                  value={currentRemap[sourceLabel] ?? ''}
+                  onChange={(e) => updateOneMapping(sourceLabel, e.target.value)}
+                  className="min-w-[11rem] rounded border border-indigo-200 bg-white px-2 py-1 text-xs text-gray-800 shadow-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+                >
+                  <option value="">No mapping</option>
+                  {normalizedGoldLabels.map((goldLabel) => (
+                    <option key={goldLabel} value={goldLabel}>
+                      {goldLabel}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ))}
+          </div>
+          <p className="mt-2 text-[11px] text-indigo-900/80">
+            Unmapped labels keep their original names during evaluation.
+          </p>
+        </div>
+      )}
+
       {(mismatch || missingOutput) && (
         <div className="flex flex-wrap items-center gap-2 border-t border-gray-100 pt-2">
           <Link
@@ -245,6 +330,8 @@ export default function EvalLabelAlignment({
   datasetName,
   datasetPath,
   pipelineName,
+  tempPredLabelRemap,
+  onTempPredLabelRemapChange,
 }: EvalLabelAlignmentProps) {
   const { data: health } = useHealth();
   const [debouncedPath, setDebouncedPath] = useState('');
@@ -317,6 +404,8 @@ export default function EvalLabelAlignment({
         health={health}
         pipelineName={pipelineName}
         pipelineQuery={pipelineQuery}
+        tempPredLabelRemap={tempPredLabelRemap}
+        onTempPredLabelRemapChange={onTempPredLabelRemapChange}
       />
     );
   }
@@ -347,6 +436,8 @@ export default function EvalLabelAlignment({
       health={health}
       pipelineName={pipelineName}
       pipelineQuery={pipelineQuery}
+      tempPredLabelRemap={tempPredLabelRemap}
+      onTempPredLabelRemapChange={onTempPredLabelRemapChange}
     />
   );
 }

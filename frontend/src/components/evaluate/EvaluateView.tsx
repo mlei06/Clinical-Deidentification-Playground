@@ -8,12 +8,25 @@ import type { EvalRunDetail, EvalCompareResponse } from '../../api/types';
 
 export default function EvaluateView() {
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
+  const [latestRunResult, setLatestRunResult] = useState<EvalRunDetail | null>(null);
   const [compareResult, setCompareResult] = useState<EvalCompareResponse | null>(null);
 
   const { data: selectedRun } = useEvalRun(selectedRunId);
+  const runForDashboard =
+    latestRunResult && selectedRunId === latestRunResult.id ? latestRunResult : selectedRun;
 
   const handleResult = (run: EvalRunDetail) => {
+    setLatestRunResult(run);
     setSelectedRunId(run.id);
+    setCompareResult(null);
+  };
+
+  const handleSelectRun = (runId: string) => {
+    setSelectedRunId(runId);
+    // Switching to a different run should show persisted history data.
+    if (latestRunResult && runId !== latestRunResult.id) {
+      setLatestRunResult(null);
+    }
     setCompareResult(null);
   };
 
@@ -26,12 +39,12 @@ export default function EvaluateView() {
           <h3 className="mb-2 text-xs font-bold uppercase tracking-wider text-gray-400">
             Past Runs
           </h3>
-          <EvalRunList onSelect={setSelectedRunId} selectedId={selectedRunId} />
+          <EvalRunList onSelect={handleSelectRun} selectedId={selectedRunId} />
         </div>
         <div className="lg:col-span-2">
-          {selectedRun && <EvalDashboard run={selectedRun} />}
+          {runForDashboard && <EvalDashboard run={runForDashboard} />}
           {compareResult && <EvalCompare data={compareResult} />}
-          {!selectedRun && !compareResult && (
+          {!runForDashboard && !compareResult && (
             <div className="flex h-40 items-center justify-center text-sm text-gray-400">
               Select a run to view results, or run a new evaluation
             </div>

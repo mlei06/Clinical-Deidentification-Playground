@@ -100,21 +100,21 @@
             "enabled": true,
             "remap": null,
             "terms": [],
-            "dictionaries": [
-              "female_first_names",
-              "last_names",
-              "male-first-names"
+            "disabled_dictionaries": [
+              "local_places_unambig_v2",
+              "us_cities",
+              "us_hospitals",
+              "us_states"
             ]
           },
           "LOCATION": {
             "enabled": true,
             "remap": null,
             "terms": [],
-            "dictionaries": [
-              "local_places_unambig_v2",
-              "us_cities",
-              "us_hospitals",
-              "us_states"
+            "disabled_dictionaries": [
+              "female_first_names",
+              "last_names",
+              "male-first-names"
             ]
           }
         }
@@ -177,10 +177,9 @@
     "HOSPITAL",
     "ID",
     "LOCATION",
-    "NAME",
     "ORGANIZATION",
     "OTHER",
     "PHONE"
   ],
-  "output_label_space_updated_at": "2026-04-25T00:57:38.694017+00:00"
+  "output_label_space_updated_at": "2026-04-25T11:08:07.801669+00:00"
 }

@@ -85,6 +85,24 @@ class TestDictionaryStore:
         terms = store.load_blacklist_terms(["safe1", "safe2"])
         assert terms == ["NORMAL", "STABLE"]
 
+    def test_flattens_legacy_label_subdirs(self, tmp_path):
+        wl_sub = tmp_path / "whitelist" / "LOCATION"
+        wl_sub.mkdir(parents=True)
+        (wl_sub / "cities.txt").write_text("Boston\n", encoding="utf-8")
+        bl_sub = tmp_path / "blacklist" / "SAFE"
+        bl_sub.mkdir(parents=True)
+        (bl_sub / "words.txt").write_text("NORMAL\n", encoding="utf-8")
+
+        store = DictionaryStore(tmp_path)
+        listed = store.list_dictionaries()
+
+        assert any(d.kind == "whitelist" and d.name == "cities" for d in listed)
+        assert any(d.kind == "blacklist" and d.name == "words" for d in listed)
+        assert (tmp_path / "whitelist" / "cities.txt").exists()
+        assert (tmp_path / "blacklist" / "words.txt").exists()
+        assert not (tmp_path / "whitelist" / "LOCATION").exists()
+        assert not (tmp_path / "blacklist" / "SAFE").exists()
+
     def test_csv_dictionary(self, tmp_path):
         store = DictionaryStore(tmp_path)
         store.save("whitelist", "hospitals_csv", "term\nHospital A\nHospital B\n", extension=".csv")

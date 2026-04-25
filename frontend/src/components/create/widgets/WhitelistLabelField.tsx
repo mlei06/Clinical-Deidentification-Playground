@@ -74,6 +74,10 @@ export default function WhitelistLabelField(props: FieldProps) {
 
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [newLabel, setNewLabel] = useState('');
+  const { data: allWhitelistDicts = [] } = useQuery({
+    queryKey: ['dictionaries', 'whitelist'],
+    queryFn: () => listDictionaries('whitelist'),
+  });
 
   const getSettings = useCallback(
     (label: string): LabelSettings => {
@@ -137,7 +141,11 @@ export default function WhitelistLabelField(props: FieldProps) {
   const addCustomLabel = () => {
     const trimmed = newLabel.trim().toUpperCase();
     if (!trimmed || allLabels.includes(trimmed)) return;
-    patchLabel(trimmed, { ...DEFAULT_SETTINGS });
+    patchLabel(trimmed, {
+      ...DEFAULT_SETTINGS,
+      // New labels start with every dictionary disabled; user opts in by checking.
+      disabled_dictionaries: allWhitelistDicts.map((d) => d.name),
+    });
     setExpanded((prev) => new Set(prev).add(trimmed));
     setNewLabel('');
   };

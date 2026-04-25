@@ -148,6 +148,8 @@ export interface EvalRunRequest {
   include_per_document?: boolean;
   /** Implies `include_per_document`; also includes text + gold/pred spans per doc. */
   include_per_document_spans?: boolean;
+  /** For this run only, remap predicted labels before scoring against gold labels. */
+  eval_pred_label_remap?: Record<string, string>;
 }
 
 export interface EvalSpanLite {
@@ -234,6 +236,8 @@ export interface EvalRunDetail extends EvalRunSummary {
     document_level_truncated?: boolean;
     document_level_total?: number;
     document_level_includes_spans?: boolean;
+    /** Echoes eval-time mapping when eval_pred_label_remap was provided. */
+    eval_pred_label_remap?: Record<string, string>;
   };
 }
 

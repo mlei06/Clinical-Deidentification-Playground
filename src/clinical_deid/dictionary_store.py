@@ -61,6 +61,7 @@ class DictionaryStore:
 
     def _resolve_path(self, kind: DictKind, name: str) -> Path | None:
         """Find a dictionary file by name (stem). Returns None if not found."""
+        self._flatten_legacy_subdirs(kind)
         if kind == "whitelist":
             parent = self._whitelist_dir()
         else:
@@ -93,6 +94,7 @@ class DictionaryStore:
         return results
 
     def _list_whitelist(self) -> list[DictionaryInfo]:
+        self._flatten_legacy_subdirs("whitelist")
         wl = self._whitelist_dir()
         if not wl.is_dir():
             return []
@@ -110,6 +112,7 @@ class DictionaryStore:
         return out
 
     def _list_blacklist(self) -> list[DictionaryInfo]:
+        self._flatten_legacy_subdirs("blacklist")
         bl_root = self._blacklist_dir()
         if not bl_root.is_dir():
             return []
@@ -161,6 +164,7 @@ class DictionaryStore:
             parent = self._whitelist_dir()
         else:
             parent = self._blacklist_dir()
+        self._flatten_legacy_subdirs(kind)
         parent.mkdir(parents=True, exist_ok=True)
 
         for existing in parent.iterdir():
@@ -197,6 +201,34 @@ class DictionaryStore:
     def _load_terms(path: Path) -> list[str]:
         text = path.read_text(encoding="utf-8")
         return parse_list_file(text, filename=path.name)
+
+    def _flatten_legacy_subdirs(self, kind: DictKind) -> None:
+        """Move one-level nested dictionary files into the flat kind directory.
+
+        Legacy layout used kind/label/name.ext for whitelist and, in some setups,
+        for blacklist as well. The current contract is flat kind directories for
+        both. We transparently migrate on access.
+        """
+        root = self._whitelist_dir() if kind == "whitelist" else self._blacklist_dir()
+        if not root.is_dir():
+            return
+        allowed = {".txt", ".csv", ".json"}
+        for sub in root.iterdir():
+            if not sub.is_dir():
+                continue
+            for path in sub.iterdir():
+                if not path.is_file() or path.suffix not in allowed:
+                    continue
+                target = root / path.name
+                if target.exists():
+                    # Keep deterministic and avoid overwrite; suffix with legacy folder.
+                    target = root / f"{path.stem}__{sub.name}{path.suffix}"
+                path.replace(target)
+            try:
+                sub.rmdir()
+            except OSError:
+                # Non-empty (unexpected artifacts); leave it for manual cleanup.
+                pass
 
     # -- preview / paginated browse ------------------------------------------
 

@@ -1,0 +1,21 @@
+{
+  "pipes": [
+    {
+      "type": "whitelist",
+      "config": {
+        "source_name": "whitelist",
+        "skip_overlapping": false,
+        "labels": {
+          "NAME": {
+            "enabled": true,
+            "remap": null,
+            "terms": [],
+            "disabled_dictionaries": []
+          }
+        }
+      }
+    }
+  ],
+  "output_label_space": [],
+  "output_label_space_updated_at": "2026-04-25T10:57:07.196441+00:00"
+}

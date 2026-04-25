@@ -13,23 +13,23 @@ function dictKey(d: { kind: string; label: string | null; name: string }): DictK
 }
 
 interface GroupedDicts {
-  whitelistByLabel: Map<string, DictionaryInfo[]>;
+  whitelist: DictionaryInfo[];
   blacklist: DictionaryInfo[];
 }
 
 function groupDicts(dicts: DictionaryInfo[]): GroupedDicts {
-  const whitelistByLabel = new Map<string, DictionaryInfo[]>();
+  const whitelist: DictionaryInfo[] = [];
   const blacklist: DictionaryInfo[] = [];
   for (const d of dicts) {
-    if (d.kind === 'whitelist' && d.label) {
-      const existing = whitelistByLabel.get(d.label) ?? [];
-      existing.push(d);
-      whitelistByLabel.set(d.label, existing);
+    if (d.kind === 'whitelist') {
+      whitelist.push(d);
     } else if (d.kind === 'blacklist') {
       blacklist.push(d);
     }
   }
-  return { whitelistByLabel, blacklist };
+  whitelist.sort((a, b) => a.name.localeCompare(b.name));
+  blacklist.sort((a, b) => a.name.localeCompare(b.name));
+  return { whitelist, blacklist };
 }
 
 export default function DictionaryManager() {
@@ -129,19 +129,12 @@ export default function DictionaryManager() {
           ) : (
             <div className="space-y-4">
               {/* Whitelist section */}
-              {grouped.whitelistByLabel.size > 0 && (
+              {grouped.whitelist.length > 0 && (
                 <div>
                   <div className="mb-1 px-3 text-xs font-semibold uppercase tracking-wider text-gray-400">
                     Whitelist
                   </div>
-                  {[...grouped.whitelistByLabel.entries()]
-                    .sort(([a], [b]) => a.localeCompare(b))
-                    .map(([label, items]) => (
-                      <div key={label} className="mb-2">
-                        <div className="mb-0.5 px-3 text-xs font-medium text-blue-600">{label}</div>
-                        <div className="space-y-0.5">{items.map(renderDictItem)}</div>
-                      </div>
-                    ))}
+                  <div className="space-y-0.5">{grouped.whitelist.map(renderDictItem)}</div>
                 </div>
               )}
 

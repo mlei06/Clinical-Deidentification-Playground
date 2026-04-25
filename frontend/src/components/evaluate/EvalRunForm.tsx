@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Play, Loader2 } from 'lucide-react';
+import { Play, Loader2, ChevronDown, Check } from 'lucide-react';
 import PipelineSelector from '../shared/PipelineSelector';
 import EvalLabelAlignment from './EvalLabelAlignment';
 import { useRunEvaluation } from '../../hooks/useEvalRuns';
@@ -20,15 +20,17 @@ export default function EvalRunForm({ onResult }: EvalRunFormProps) {
   const [sourceMode, setSourceMode] = useState<SourceMode>('registered');
   const [datasetName, setDatasetName] = useState('');
   const [datasetPath, setDatasetPath] = useState('');
-  const [splitsText, setSplitsText] = useState('');
+  const [selectedSplits, setSelectedSplits] = useState<string[]>([]);
   const [evalMode, setEvalMode] = useState<EvalMode>('full');
   const [sampleSizeText, setSampleSizeText] = useState('');
   const [useFixedSeed, setUseFixedSeed] = useState(false);
   const [seedText, setSeedText] = useState('');
   const [saveSample, setSaveSample] = useState(false);
   const [saveSampleName, setSaveSampleName] = useState('');
-  const [includePerDoc, setIncludePerDoc] = useState(false);
-  const [includePerDocSpans, setIncludePerDocSpans] = useState(false);
+  const [includeDetailedSpanBreakdown, setIncludeDetailedSpanBreakdown] = useState(false);
+  const [tempPredLabelRemap, setTempPredLabelRemap] = useState<Record<string, string>>({});
+  const [splitsMenuOpen, setSplitsMenuOpen] = useState(false);
+  const splitsMenuRef = useRef<HTMLDivElement | null>(null);
 
   const { data: datasets, isLoading: datasetsLoading } = useDatasets();
   const datasetDetailQuery = useDataset(
@@ -44,7 +46,14 @@ export default function EvalRunForm({ onResult }: EvalRunFormProps) {
       setSourceMode('registered');
       setDatasetName(pre);
     }
-    if (sp) setSplitsText(sp);
+    if (sp) {
+      setSelectedSplits(
+        sp
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean),
+      );
+    }
     setSearchParams(
       (prev) => {
         const next = new URLSearchParams(prev);
@@ -56,14 +65,50 @@ export default function EvalRunForm({ onResult }: EvalRunFormProps) {
     );
   }, [searchParams, setSearchParams]);
 
-  const datasetSplits = useMemo(
-    () =>
-      splitsText
-        .split(',')
-        .map((s) => s.trim())
-        .filter(Boolean),
-    [splitsText],
-  );
+  const datasetSplits = selectedSplits;
+  const availableSplitOptions = useMemo(() => {
+    if (sourceMode !== 'registered') return [];
+    const counts = datasetDetailQuery.data?.split_document_counts;
+    if (!counts) return [];
+    return Object.keys(counts).sort((a, b) => a.localeCompare(b));
+  }, [sourceMode, datasetDetailQuery.data]);
+  const showSplitSelector = availableSplitOptions.length > 0;
+
+  useEffect(() => {
+    if (!showSplitSelector) {
+      if (selectedSplits.length > 0) setSelectedSplits([]);
+      if (splitsMenuOpen) setSplitsMenuOpen(false);
+      return;
+    }
+    const allowed = new Set(availableSplitOptions);
+    const next = selectedSplits.filter((s) => allowed.has(s));
+    if (next.length !== selectedSplits.length) setSelectedSplits(next);
+  }, [availableSplitOptions, selectedSplits, showSplitSelector, splitsMenuOpen]);
+
+  useEffect(() => {
+    if (!splitsMenuOpen) return;
+    const onPointerDown = (event: MouseEvent) => {
+      const node = splitsMenuRef.current;
+      if (!node) return;
+      if (!node.contains(event.target as Node)) {
+        setSplitsMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', onPointerDown);
+    return () => document.removeEventListener('mousedown', onPointerDown);
+  }, [splitsMenuOpen]);
+
+  const selectedSplitsSummary = useMemo(() => {
+    if (selectedSplits.length === 0) return 'All splits';
+    if (selectedSplits.length <= 2) return selectedSplits.join(', ');
+    return `${selectedSplits.length} splits selected`;
+  }, [selectedSplits]);
+
+  const toggleSplit = (split: string) => {
+    setSelectedSplits((prev) =>
+      prev.includes(split) ? prev.filter((s) => s !== split) : [...prev, split].sort(),
+    );
+  };
 
   const sampleSize = sampleSizeText.trim() === '' ? NaN : Number(sampleSizeText);
   const sampleSizeValid = Number.isInteger(sampleSize) && sampleSize > 0;
@@ -129,17 +174,24 @@ export default function EvalRunForm({ onResult }: EvalRunFormProps) {
               : {}),
           }
         : {};
-    const perDocPayload: Partial<EvalRunRequest> = includePerDocSpans
+    const perDocPayload: Partial<EvalRunRequest> = includeDetailedSpanBreakdown
       ? { include_per_document_spans: true }
-      : includePerDoc
-        ? { include_per_document: true }
+      : {};
+    const normalizedRemap = Object.fromEntries(
+      Object.entries(tempPredLabelRemap)
+        .map(([k, v]) => [k.trim(), v.trim()] as const)
+        .filter(([k, v]) => k.length > 0 && v.length > 0),
+    );
+    const remapPayload: Partial<EvalRunRequest> =
+      Object.keys(normalizedRemap).length > 0
+        ? { eval_pred_label_remap: normalizedRemap }
         : {};
     const base: EvalRunRequest =
       sourceMode === 'registered'
         ? { pipeline_name: pipeline, dataset_name: datasetName.trim() }
         : { pipeline_name: pipeline, dataset_path: datasetPath.trim() };
     mutation.mutate(
-      { ...base, ...splitPayload, ...samplePayload, ...perDocPayload },
+      { ...base, ...splitPayload, ...samplePayload, ...perDocPayload, ...remapPayload },
       { onSuccess: onResult },
     );
   };
@@ -215,18 +267,69 @@ export default function EvalRunForm({ onResult }: EvalRunFormProps) {
           </div>
         )}
 
-        <div className="flex min-w-[14rem] max-w-md flex-col gap-1">
-          <label className="text-xs font-medium text-gray-500">
-            Document splits <span className="font-normal text-gray-400">(optional)</span>
-          </label>
-          <input
-            type="text"
-            value={splitsText}
-            onChange={(e) => setSplitsText(e.target.value)}
-            placeholder="e.g. train, valid — matches metadata.split"
-            className="rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-gray-500 focus:ring-1 focus:ring-gray-500 focus:outline-none"
-          />
-        </div>
+        {sourceMode === 'registered' && showSplitSelector && (
+          <div ref={splitsMenuRef} className="relative flex min-w-[14rem] max-w-md flex-col gap-1 pb-4">
+            <label className="text-xs font-medium text-gray-500">
+              Document splits <span className="font-normal text-gray-400">(optional)</span>
+            </label>
+            <button
+              type="button"
+              onClick={() => setSplitsMenuOpen((v) => !v)}
+              className="inline-flex min-h-[2.5rem] items-center justify-between gap-2 rounded-md border border-gray-300 bg-white px-3 py-2 text-left text-sm shadow-sm hover:bg-gray-50 focus:border-gray-500 focus:ring-1 focus:ring-gray-500 focus:outline-none"
+            >
+              <span className={selectedSplits.length === 0 ? 'text-gray-500' : 'text-gray-900'}>
+                {selectedSplitsSummary}
+              </span>
+              <ChevronDown
+                size={16}
+                className={`text-gray-500 transition-transform ${splitsMenuOpen ? 'rotate-180' : ''}`}
+              />
+            </button>
+            {splitsMenuOpen && (
+              <div className="absolute top-[calc(100%+0.25rem)] z-20 w-full rounded-md border border-gray-200 bg-white p-2 shadow-lg">
+                <div className="mb-2 flex items-center justify-between text-[11px]">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedSplits(availableSplitOptions)}
+                    className="font-medium text-gray-700 hover:text-gray-900"
+                  >
+                    Select all
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedSplits([])}
+                    className="font-medium text-gray-700 hover:text-gray-900"
+                  >
+                    Clear
+                  </button>
+                </div>
+                <div className="max-h-48 space-y-1 overflow-auto pr-1">
+                  {availableSplitOptions.map((split) => {
+                    const checked = selectedSplits.includes(split);
+                    return (
+                      <label
+                        key={split}
+                        className="flex cursor-pointer items-center gap-2 rounded px-1.5 py-1 text-xs hover:bg-gray-50"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => toggleSplit(split)}
+                          className="h-3.5 w-3.5"
+                        />
+                        <span className="flex-1 font-mono">{split}</span>
+                        {checked && <Check size={12} className="text-gray-500" />}
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+            <span className="pointer-events-none absolute -bottom-0.5 left-0 text-[11px] text-gray-500">
+              Leave empty to evaluate all splits.
+            </span>
+          </div>
+        )}
 
         <div className="flex flex-col gap-1">
           <span className="text-xs font-medium text-gray-500">Eval mode</span>
@@ -392,28 +495,13 @@ export default function EvalRunForm({ onResult }: EvalRunFormProps) {
         <label className="flex items-center gap-1.5 text-gray-700">
           <input
             type="checkbox"
-            checked={includePerDoc || includePerDocSpans}
-            onChange={(e) => {
-              setIncludePerDoc(e.target.checked);
-              if (!e.target.checked) setIncludePerDocSpans(false);
-            }}
+            checked={includeDetailedSpanBreakdown}
+            onChange={(e) => setIncludeDetailedSpanBreakdown(e.target.checked)}
             className="h-3.5 w-3.5"
           />
-          Include per-doc scores
+          Include detailed document span breakdown
         </label>
-        <label className="flex items-center gap-1.5 text-gray-700">
-          <input
-            type="checkbox"
-            checked={includePerDocSpans}
-            onChange={(e) => {
-              setIncludePerDocSpans(e.target.checked);
-              if (e.target.checked) setIncludePerDoc(true);
-            }}
-            className="h-3.5 w-3.5"
-          />
-          Include gold vs pred spans
-        </label>
-        {includePerDocSpans && (
+        {includeDetailedSpanBreakdown && (
           <span className="text-[11px] text-amber-700">
             Response will carry raw document text — admin session only.
           </span>
@@ -429,6 +517,8 @@ export default function EvalRunForm({ onResult }: EvalRunFormProps) {
         datasetName={datasetName}
         datasetPath={datasetPath}
         pipelineName={pipeline}
+        tempPredLabelRemap={tempPredLabelRemap}
+        onTempPredLabelRemapChange={setTempPredLabelRemap}
       />
     </div>
   );

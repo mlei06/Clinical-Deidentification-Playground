@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { X, Save, Loader2 } from 'lucide-react';
 import { usePipelineEditorStore } from '../../stores/pipelineEditorStore';
 import { useCreatePipeline, useUpdatePipeline } from '../../hooks/usePipelines';
@@ -23,22 +23,31 @@ export default function PipelineSaveDialog({
   } = usePipelineEditorStore();
   const [name, setName] = useState(pipelineName);
   const [description, setDescription] = useState(pipelineDescription);
+  const [saveMode, setSaveMode] = useState<'create' | 'update'>(isUpdate ? 'update' : 'create');
   const createMutation = useCreatePipeline();
   const updateMutation = useUpdatePipeline();
 
+  useEffect(() => {
+    if (!isOpen) return;
+    setName(pipelineName);
+    setDescription(pipelineDescription);
+    setSaveMode(isUpdate ? 'update' : 'create');
+  }, [isOpen, isUpdate, pipelineDescription, pipelineName]);
+
   if (!isOpen) return null;
 
-  const mutation = isUpdate ? updateMutation : createMutation;
+  const shouldUpdate = isUpdate && saveMode === 'update';
+  const mutation = shouldUpdate ? updateMutation : createMutation;
 
   const handleSave = () => {
     setPipelineDescription(description);
     const base = toPipelineConfig();
     const trimmed = description.trim();
     const config = trimmed ? { ...base, description: trimmed } : base;
-    const saveName = isUpdate ? pipelineName : name;
+    const saveName = shouldUpdate ? pipelineName : name;
     if (!saveName.trim()) return;
 
-    if (isUpdate) {
+    if (shouldUpdate) {
       updateMutation.mutate(
         { name: saveName, config },
         {
@@ -67,14 +76,14 @@ export default function PipelineSaveDialog({
       <div className="w-96 rounded-lg border border-gray-200 bg-white shadow-xl">
         <div className="flex items-center justify-between border-b border-gray-200 px-4 py-3">
           <span className="text-sm font-semibold text-gray-900">
-            {isUpdate ? 'Update Pipeline' : 'Save Pipeline'}
+            {shouldUpdate ? 'Update Pipeline' : 'Save Pipeline'}
           </span>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
             <X size={16} />
           </button>
         </div>
         <div className="p-4">
-          {!isUpdate && (
+          {!shouldUpdate && (
             <div className="mb-4">
               <label className="mb-1 block text-xs font-medium text-gray-600">
                 Pipeline Name
@@ -92,10 +101,22 @@ export default function PipelineSaveDialog({
               </div>
             </div>
           )}
-          {isUpdate && (
+          {shouldUpdate && (
             <p className="mb-4 text-sm text-gray-600">
               Update <span className="font-semibold">{pipelineName}</span>?
             </p>
+          )}
+          {isUpdate && (
+            <button
+              onClick={() =>
+                setSaveMode((current) => (current === 'update' ? 'create' : 'update'))
+              }
+              className="mb-4 text-xs font-medium text-gray-600 underline-offset-2 hover:text-gray-900 hover:underline"
+            >
+              {shouldUpdate
+                ? 'Save as a new pipeline instead'
+                : `Update "${pipelineName}" instead`}
+            </button>
           )}
 
           <div className="mb-4">
@@ -120,7 +141,7 @@ export default function PipelineSaveDialog({
 
           <button
             onClick={handleSave}
-            disabled={mutation.isPending || (!isUpdate && !name.trim())}
+            disabled={mutation.isPending || (!shouldUpdate && !name.trim())}
             className="flex w-full items-center justify-center gap-1.5 rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-gray-800 disabled:opacity-40"
           >
             {mutation.isPending ? (
@@ -128,7 +149,7 @@ export default function PipelineSaveDialog({
             ) : (
               <Save size={15} />
             )}
-            {isUpdate ? 'Update' : 'Save'}
+            {shouldUpdate ? 'Update' : 'Save As New'}
           </button>
         </div>
       </div>

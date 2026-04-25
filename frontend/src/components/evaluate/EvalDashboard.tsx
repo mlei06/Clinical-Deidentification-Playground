@@ -47,6 +47,10 @@ export default function EvalDashboard({ run }: EvalDashboardProps) {
   const perDocItems = Array.isArray(metrics.document_level)
     ? (metrics.document_level as EvalPerDocumentItem[])
     : undefined;
+  const evalPredLabelRemap =
+    metrics.eval_pred_label_remap && typeof metrics.eval_pred_label_remap === 'object'
+      ? (metrics.eval_pred_label_remap as Record<string, string>)
+      : undefined;
 
   const [activeTab, setActiveTab] = useState<EvalTab>(hasRedaction ? 'redaction' : 'detection');
 
@@ -92,6 +96,18 @@ export default function EvalDashboard({ run }: EvalDashboardProps) {
               </Link>
             </>
           )}
+        </div>
+      )}
+      {evalPredLabelRemap && Object.keys(evalPredLabelRemap).length > 0 && (
+        <div className="flex flex-wrap items-start gap-2 rounded-md border border-indigo-100 bg-indigo-50/60 px-3 py-2 text-xs text-indigo-950">
+          <span className="font-semibold">Eval remap applied</span>
+          {Object.entries(evalPredLabelRemap)
+            .sort(([a], [b]) => a.localeCompare(b))
+            .map(([source, target]) => (
+              <code key={source} className="rounded bg-white/80 px-1 py-0.5 font-mono text-[11px]">
+                {source} -&gt; {target}
+              </code>
+            ))}
         </div>
       )}
 
