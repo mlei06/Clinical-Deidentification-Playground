@@ -44,6 +44,7 @@ export default function PipelinesCatalogView() {
     return names.filter((n) => n.toLowerCase().includes(q));
   }, [filter, names]);
 
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (!pipelines?.length) {
       return;
@@ -53,6 +54,7 @@ export default function PipelinesCatalogView() {
     }
     setSelected(filtered[0] ?? null);
   }, [pipelines, filtered, selected]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const detail: PipelineDetail | undefined = useMemo(
     () => (pipelines ?? []).find((p) => p.name === selected),

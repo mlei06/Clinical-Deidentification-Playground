@@ -124,6 +124,31 @@ function GoldPipelineDiff({
   tempPredLabelRemap?: Record<string, string>;
   onTempPredLabelRemapChange?: (mapping: Record<string, string>) => void;
 }) {
+  const p = pipelineQuery.data;
+  const outSpace = p?.config?.output_label_space;
+  const pipelineLabels = Array.isArray(outSpace) ? outSpace : [];
+  const goldSet = new Set(goldLabels);
+  const pipeSet = new Set(pipelineLabels);
+  const { onlyA, onlyB, both } = setDiff(goldSet, pipeSet);
+  const currentRemap = tempPredLabelRemap ?? {};
+
+  useEffect(() => {
+    if (!onTempPredLabelRemapChange || !p) return;
+    const allowedKeys = new Set(onlyB);
+    const allowedTargets = new Set(goldLabels);
+    const next: Record<string, string> = {};
+    for (const [k, v] of Object.entries(currentRemap)) {
+      if (!allowedKeys.has(k)) continue;
+      const target = v.trim();
+      if (!target || !allowedTargets.has(target)) continue;
+      next[k] = target;
+    }
+    const same =
+      Object.keys(next).length === Object.keys(currentRemap).length &&
+      Object.entries(next).every(([k, v]) => currentRemap[k] === v);
+    if (!same) onTempPredLabelRemapChange(next);
+  }, [currentRemap, goldLabels, onlyB, onTempPredLabelRemapChange, p]);
+
   if (pipelineQuery.isLoading) {
     return (
       <p className="text-xs text-gray-400" aria-live="polite">
@@ -138,38 +163,13 @@ function GoldPipelineDiff({
       </p>
     );
   }
-  const p = pipelineQuery.data;
   if (!p) return null;
 
-  const outSpace = p.config?.output_label_space;
-  const pipelineLabels = Array.isArray(outSpace) ? outSpace : [];
-
-  const goldSet = new Set(goldLabels);
-  const pipeSet = new Set(pipelineLabels);
-  const { onlyA, onlyB, both } = setDiff(goldSet, pipeSet);
   const mismatch = onlyA.length > 0 || onlyB.length > 0;
   const missingOutput = pipelineLabels.length === 0;
   const loadHref = `/create?load=${encodeURIComponent(pipelineName.trim())}`;
-  const currentRemap = tempPredLabelRemap ?? {};
   const hasRemapEditor = typeof onTempPredLabelRemapChange === 'function' && onlyB.length > 0;
   const normalizedGoldLabels = goldLabels.slice().sort((a, b) => a.localeCompare(b));
-
-  useEffect(() => {
-    if (!onTempPredLabelRemapChange) return;
-    const allowedKeys = new Set(onlyB);
-    const allowedTargets = new Set(goldLabels);
-    const next: Record<string, string> = {};
-    for (const [k, v] of Object.entries(currentRemap)) {
-      if (!allowedKeys.has(k)) continue;
-      const target = v.trim();
-      if (!target || !allowedTargets.has(target)) continue;
-      next[k] = target;
-    }
-    const same =
-      Object.keys(next).length === Object.keys(currentRemap).length &&
-      Object.entries(next).every(([k, v]) => currentRemap[k] === v);
-    if (!same) onTempPredLabelRemapChange(next);
-  }, [currentRemap, goldLabels, onlyB, onTempPredLabelRemapChange]);
 
   const updateOneMapping = (source: string, target: string) => {
     if (!onTempPredLabelRemapChange) return;

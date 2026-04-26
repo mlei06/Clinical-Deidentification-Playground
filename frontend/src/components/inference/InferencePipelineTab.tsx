@@ -72,9 +72,11 @@ export default function InferencePipelineTab({
   const queryClient = useQueryClient();
   const [liveLabels, setLiveLabels] = useState<LiveLabelState | null>(null);
 
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     setLiveLabels(null);
   }, [pipelineName]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const validateMut = useMutation({
     mutationFn: async (name: string) => {

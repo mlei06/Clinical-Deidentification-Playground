@@ -1,7 +1,7 @@
 import Form from '@rjsf/core';
 import validator from '@rjsf/validator-ajv8';
 import type { IChangeEvent } from '@rjsf/core';
-import type { RegistryWidgetsType, RegistryFieldsType } from '@rjsf/utils';
+import type { RegistryWidgetsType, RegistryFieldsType, RJSFSchema } from '@rjsf/utils';
 import { schemaToUiSchema, normalizeSchema } from '../../lib/schemaToUiSchema';
 import { useMemo } from 'react';
 import KeyValueField from './widgets/KeyValueWidget';
@@ -62,7 +62,7 @@ export default function SchemaForm({ schema, formData, onChange, formContext }: 
       '[&_.form-group]:mb-3',
     ].join(' ')}>
       <Form
-        schema={normalizedSchema as any}
+        schema={normalizedSchema as RJSFSchema}
         uiSchema={{
           ...uiSchema,
           'ui:submitButtonOptions': { norender: true },

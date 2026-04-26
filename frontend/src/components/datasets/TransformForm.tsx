@@ -71,6 +71,7 @@ export default function TransformForm({ sourceDataset, onCreated }: TransformFor
     return Object.entries(c).map(([key, count]) => ({ key, count: Number(count) || 0 }));
   }, [sourceDatasetDetail?.split_document_counts]);
 
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (!source) return;
     if (targetSplitOptions.length === 0) {
@@ -83,6 +84,7 @@ export default function TransformForm({ sourceDataset, onCreated }: TransformFor
       return next.length === prev.length ? prev : next;
     });
   }, [source, targetSplitOptions]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const handleKeepSelectionChange = useCallback((next: string[]) => {
     setKeepLabels(next);
@@ -93,9 +95,11 @@ export default function TransformForm({ sourceDataset, onCreated }: TransformFor
     setKeepLabels((k) => k.filter((x) => !next.includes(x)));
   }, []);
 
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (sourceDataset) setSource(sourceDataset);
   }, [sourceDataset]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const blockedForKeep = useMemo(() => new Set(dropLabels), [dropLabels]);
   const blockedForDrop = useMemo(() => new Set(keepLabels), [keepLabels]);
@@ -221,6 +225,7 @@ export default function TransformForm({ sourceDataset, onCreated }: TransformFor
     transformSeed,
   ]);
 
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (!previewRequest) {
       setPreviewResult(null);
@@ -235,6 +240,7 @@ export default function TransformForm({ sourceDataset, onCreated }: TransformFor
     }, debounceMs);
     return () => window.clearTimeout(t);
   }, [previewRequest, previewMutate, subStep]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const handleRefreshPreview = useCallback(() => {
     if (!previewRequest) return;

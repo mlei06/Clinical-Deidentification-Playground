@@ -9,6 +9,20 @@ interface PerLabelTableProps {
 
 type SortKey = 'label' | 'f1' | 'precision' | 'recall' | 'support';
 
+function TH({ k, label, onSort }: { k: SortKey; label: string; onSort: (k: SortKey) => void }) {
+  return (
+    <th
+      className="cursor-pointer px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-gray-500 hover:text-gray-700"
+      onClick={() => onSort(k)}
+    >
+      <span className="inline-flex items-center gap-1">
+        {label}
+        <ArrowUpDown size={10} />
+      </span>
+    </th>
+  );
+}
+
 export default function PerLabelTable({ perLabel }: PerLabelTableProps) {
   const [sortKey, setSortKey] = useState<SortKey>('support');
   const [sortAsc, setSortAsc] = useState(false);
@@ -41,28 +55,16 @@ export default function PerLabelTable({ perLabel }: PerLabelTableProps) {
     }
   };
 
-  const TH = ({ k, label }: { k: SortKey; label: string }) => (
-    <th
-      className="cursor-pointer px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-gray-500 hover:text-gray-700"
-      onClick={() => toggleSort(k)}
-    >
-      <span className="inline-flex items-center gap-1">
-        {label}
-        <ArrowUpDown size={10} />
-      </span>
-    </th>
-  );
-
   return (
     <div className="overflow-hidden rounded-lg border border-gray-200 bg-white">
       <table className="w-full text-sm">
         <thead className="border-b border-gray-200 bg-gray-50">
           <tr>
-            <TH k="label" label="Label" />
-            <TH k="precision" label="Precision" />
-            <TH k="recall" label="Recall" />
-            <TH k="f1" label="F1" />
-            <TH k="support" label="Support" />
+            <TH k="label" label="Label" onSort={toggleSort} />
+            <TH k="precision" label="Precision" onSort={toggleSort} />
+            <TH k="recall" label="Recall" onSort={toggleSort} />
+            <TH k="f1" label="F1" onSort={toggleSort} />
+            <TH k="support" label="Support" onSort={toggleSort} />
           </tr>
         </thead>
         <tbody className="divide-y divide-gray-100">

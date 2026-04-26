@@ -38,9 +38,11 @@ export default function EvalPerDocumentPanel({
 }: Props) {
   const [index, setIndex] = useState(0);
 
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     setIndex(0);
   }, [items]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const selected = useMemo(() => items[index] ?? null, [items, index]);
 

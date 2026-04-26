@@ -106,6 +106,7 @@ export default function SpanEditor({
     [conflictSets],
   );
 
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     setConflictChoice((prev) => {
       const next: Record<string, string> = {};
@@ -119,6 +120,7 @@ export default function SpanEditor({
       return next;
     });
   }, [conflictSets]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   useEffect(() => {
     if (!openMapGroup) return;

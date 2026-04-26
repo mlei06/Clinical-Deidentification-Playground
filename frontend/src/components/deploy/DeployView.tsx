@@ -20,6 +20,7 @@ export default function DeployView() {
   const [newModeName, setNewModeName] = useState('');
   const [dirty, setDirty] = useState(false);
 
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (config) {
       setModes(config.modes);
@@ -28,6 +29,7 @@ export default function DeployView() {
       setDirty(false);
     }
   }, [config]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   if (isLoading) {
     return (

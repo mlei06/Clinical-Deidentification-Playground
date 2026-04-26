@@ -37,6 +37,16 @@ export default function LabelSpaceField(props: FieldProps) {
 
   const [newLabel, setNewLabel] = useState('');
 
+  const update = (next: Record<string, string | null>) => {
+    const cleaned: Record<string, string | null> = {};
+    for (const [k, v] of Object.entries(next)) {
+      if (v === null || (typeof v === 'string' && v !== '')) {
+        cleaned[k] = v;
+      }
+    }
+    onChange(Object.keys(cleaned).length > 0 ? cleaned : undefined, fieldPathId.path);
+  };
+
   // ── Auto-prune stale label_mapping entries when the label space changes ──
   // When the user switches models the available labels change. Entries for
   // labels that no longer exist in the space are removed so the widget stays
@@ -74,16 +84,6 @@ export default function LabelSpaceField(props: FieldProps) {
     const v = mapping[label];
     if (v === undefined || v === null) return '';
     return v;
-  };
-
-  const update = (next: Record<string, string | null>) => {
-    const cleaned: Record<string, string | null> = {};
-    for (const [k, v] of Object.entries(next)) {
-      if (v === null || (typeof v === 'string' && v !== '')) {
-        cleaned[k] = v;
-      }
-    }
-    onChange(Object.keys(cleaned).length > 0 ? cleaned : undefined, fieldPathId.path);
   };
 
   const toggleLabel = (label: string) => {

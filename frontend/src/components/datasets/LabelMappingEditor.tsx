@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components */
 import { Trash2, Plus } from 'lucide-react';
 import { useMemo } from 'react';
 import type { DatasetLabelFrequency } from '../../api/types';

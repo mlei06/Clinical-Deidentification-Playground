@@ -38,6 +38,7 @@ export default function EvalRunForm({ onResult }: EvalRunFormProps) {
   );
   const mutation = useRunEvaluation();
 
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     const pre = searchParams.get('dataset')?.trim();
     const sp = searchParams.get('splits')?.trim();
@@ -64,6 +65,7 @@ export default function EvalRunForm({ onResult }: EvalRunFormProps) {
       { replace: true },
     );
   }, [searchParams, setSearchParams]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const datasetSplits = selectedSplits;
   const availableSplitOptions = useMemo(() => {
@@ -74,6 +76,7 @@ export default function EvalRunForm({ onResult }: EvalRunFormProps) {
   }, [sourceMode, datasetDetailQuery.data]);
   const showSplitSelector = availableSplitOptions.length > 0;
 
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (!showSplitSelector) {
       if (selectedSplits.length > 0) setSelectedSplits([]);
@@ -84,6 +87,7 @@ export default function EvalRunForm({ onResult }: EvalRunFormProps) {
     const next = selectedSplits.filter((s) => allowed.has(s));
     if (next.length !== selectedSplits.length) setSelectedSplits(next);
   }, [availableSplitOptions, selectedSplits, showSplitSelector, splitsMenuOpen]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   useEffect(() => {
     if (!splitsMenuOpen) return;

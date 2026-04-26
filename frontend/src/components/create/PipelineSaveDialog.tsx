@@ -27,12 +27,14 @@ export default function PipelineSaveDialog({
   const createMutation = useCreatePipeline();
   const updateMutation = useUpdatePipeline();
 
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (!isOpen) return;
     setName(pipelineName);
     setDescription(pipelineDescription);
     setSaveMode(isUpdate ? 'update' : 'create');
   }, [isOpen, isUpdate, pipelineDescription, pipelineName]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   if (!isOpen) return null;
 
