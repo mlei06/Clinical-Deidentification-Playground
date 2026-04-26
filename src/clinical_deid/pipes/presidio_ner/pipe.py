@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from functools import lru_cache
 from typing import Any, Literal, get_args
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -106,13 +107,80 @@ _SPECIFIC_MODEL_NER_LABELS: dict[str, list[str]] = {
     ],
 }
 
-# Presidio entities from built-in regex recognizers (always active regardless
-# of NER model).  Only entities present in the default ``entity_map`` are
-# listed — others (CREDIT_CARD, IBAN_CODE, …) pass through as-is and are
-# rarely relevant for clinical de-identification.
-_BUILTIN_PRESIDIO_ENTITIES: set[str] = {
-    "PHONE_NUMBER", "EMAIL_ADDRESS", "US_SSN", "IP_ADDRESS", "MEDICAL_LICENSE",
-}
+# When Presidio cannot be imported or the English NLP engine cannot be built, we
+# still need a *superset* of entity_type strings that ``load_predefined_recognizers`` +
+# ``analyze(..., entities=None)`` can emit from pattern/regex recognizers.  The
+# short historical list (PHONE, EMAIL, …) hid US_BANK_NUMBER, CREDIT_CARD, etc.
+# from the label-space UI even though they were detected at runtime.
+_PRESIDIO_EN_ENTITY_TYPES_FALLBACK: frozenset[str] = frozenset(
+    {
+        "PHONE_NUMBER",
+        "EMAIL_ADDRESS",
+        "US_SSN",
+        "IP_ADDRESS",
+        "MEDICAL_LICENSE",
+        "US_BANK_NUMBER",
+        "US_DRIVER_LICENSE",
+        "US_ITIN",
+        "US_PASSPORT",
+        "US_MBI",
+        "US_NPI",
+        "US_DEA",
+        "CREDIT_CARD",
+        "CRYPTO",
+        "IBAN_CODE",
+        "URL",
+        "DATE_TIME",
+        "NRP",
+        "UK_NHS",
+    }
+)
+
+
+@lru_cache(maxsize=1)
+def _presidio_all_predefined_entity_types_en() -> frozenset[str]:
+    """All ``entity_type`` values Presidio's default English registry can return.
+
+    Mirrors ``RecognizerRegistry`` + ``load_predefined_recognizers`` the same way
+    as :func:`_build_analyzer` (spaCy ``en`` engine + global recognizers).  This
+    must cover pattern-based hits (e.g. ``US_BANK_NUMBER``) and any NER head labels
+    the bundled spaCy/Transformers recognizer exposes so the Playground
+    label-mapping list matches :meth:`PresidioNerPipe.forward` with ``entities=None``.
+
+    If Presidio or ``en_core_web_sm`` is unavailable, returns
+    :data:`_PRESIDIO_EN_ENTITY_TYPES_FALLBACK`.
+    """
+    try:
+        from presidio_analyzer import RecognizerRegistry
+        from presidio_analyzer.nlp_engine import NlpEngineProvider
+    except ImportError:
+        return _PRESIDIO_EN_ENTITY_TYPES_FALLBACK
+
+    nlp_configuration: dict[str, Any] = {
+        "nlp_engine_name": "spacy",
+        "models": [{"lang_code": "en", "model_name": "en_core_web_sm"}],
+    }
+    try:
+        nlp_engine = NlpEngineProvider(nlp_configuration=nlp_configuration).create_engine()
+    except Exception:
+        return _PRESIDIO_EN_ENTITY_TYPES_FALLBACK
+
+    registry = RecognizerRegistry()
+    try:
+        registry.load_predefined_recognizers(nlp_engine=nlp_engine)
+    except Exception:
+        return _PRESIDIO_EN_ENTITY_TYPES_FALLBACK
+
+    out: set[str] = set()
+    try:
+        for rec in registry.get_recognizers(language="en", all_fields=True):
+            for e in rec.supported_entities:
+                out.add(e)
+    except Exception:
+        return _PRESIDIO_EN_ENTITY_TYPES_FALLBACK
+    if not out:
+        return _PRESIDIO_EN_ENTITY_TYPES_FALLBACK
+    return frozenset(out)
 
 
 def _ner_labels_for_model(model: str) -> list[str]:
@@ -132,7 +200,7 @@ def _model_entity_map_keys(
     keys: set[str] = set()
     for ner_label in _ner_labels_for_model(model):
         keys.add(m2p.get(ner_label, ner_label))
-    keys.update(_BUILTIN_PRESIDIO_ENTITIES)
+    keys.update(_presidio_all_predefined_entity_types_en())
     return sorted(keys)
 
 
@@ -144,7 +212,9 @@ def _model_base_labels(
     """Compute the effective label space for *model*.
 
     Flows raw NER labels through ``model_to_presidio`` → ``entity_map``,
-    then adds labels from built-in Presidio recognizers that appear in
+    then adds labels from all Presidio entity types the default English registry
+    can emit (pattern recognizers + NER head; see
+    :func:`_presidio_all_predefined_entity_types_en`), remapped through
     ``entity_map``.
     """
     m2p = model_to_presidio or DEFAULT_MODEL_TO_PRESIDIO
@@ -152,7 +222,7 @@ def _model_base_labels(
     for ner_label in _ner_labels_for_model(model):
         presidio_entity = m2p.get(ner_label, ner_label)
         labels.add(entity_map.get(presidio_entity, presidio_entity))
-    for entity in _BUILTIN_PRESIDIO_ENTITIES:
+    for entity in _presidio_all_predefined_entity_types_en():
         labels.add(entity_map.get(entity, entity))
     return labels
 
@@ -346,10 +416,9 @@ class PresidioNerConfig(BaseModel):
         default=False,
         description="Drop new spans that overlap any existing span in the document.",
         json_schema_extra=field_ui(
-            ui_group="Advanced",
+            ui_group="General",
             ui_order=99,
             ui_widget="switch",
-            ui_advanced=True,
         ),
     )
 
@@ -415,9 +484,12 @@ class PresidioNerPipe(ConfigurablePipe):
 def build_presidio_label_space_bundle() -> dict[str, Any]:
     """Payload for ``GET …/presidio_ner/label-space-bundle`` (same JSON shape as NeuroNER bundle).
 
-    ``labels_by_model`` holds **Presidio entity names** (``entity_map`` keys) per selectable model
-    using default ``model_to_presidio``. The client merges ``default_entity_map`` with
-    ``config.entity_map``, then maps each key to canonical PHI labels.
+    ``labels_by_model`` holds **Presidio entity names** (``entity_map`` keys) per selectable
+    model, using default ``model_to_presidio`` and the same predefined-recognizer
+    superset as :func:`_presidio_all_predefined_entity_types_en` (so pattern hits like
+    ``US_BANK_NUMBER`` are listed, not only a short legacy subset). The client merges
+    ``default_entity_map`` with ``config.entity_map``, then maps each key to canonical
+    PHI labels.
     """
     labels_by_model: dict[str, list[str]] = {}
     for model in get_args(KNOWN_MODELS):

@@ -135,7 +135,7 @@ Wraps the Presidio Analyzer for NER-based detection.
   "type": "presidio_ner",
   "config": {
     "model": "spacy/en_core_web_lg",
-    "entities": {
+    "entity_map": {
       "PERSON": "PATIENT",
       "DATE_TIME": "DATE",
       "LOCATION": "LOCATION_OTHER"
@@ -146,8 +146,10 @@ Wraps the Presidio Analyzer for NER-based detection.
 
 | Config field | Purpose |
 |-------------|---------|
-| `model` | Presidio model string (e.g. `spacy/en_core_web_lg`, `HuggingFace/obi/deid_roberta_i2b2`) |
-| `entities` | Map Presidio entity types to your label set |
+| `model` | Presidio model string (e.g. `spacy/en_core_web_lg`, `huggingface/obi/deid_roberta_i2b2`) |
+| `entity_map` | Map Presidio entity types to your label space (see `PresidioNerConfig` for `entities` filter and other fields) |
+
+**SpaCy data packages and load-time behavior:** `pip install …[presidio]` does **not** install spaCy *language data*. The pipe constructs the Presidio analyzer when the pipeline **loads**; if the spaCy package for your `model` is missing, startup fails with a spaCy / Presidio error (there is **no** automatic downgrade to a smaller model or to the **fast** profile). Install the data that matches `config.model`, e.g. `python -m spacy download en_core_web_lg` for the default spaCy model. For **HuggingFace** Presidio models (`huggingface/…`), this project still uses **`en_core_web_sm`** as the paired spaCy engine in Presidio’s configuration — install it even though NER comes from the HF checkpoint — and install **`transformers` + `torch`** (e.g. `pip install -e ".[ner]"` or `".[train]"`). The CLI **balanced** profile only falls back to **fast** when the Presidio *package* is not importable, not when a spaCy model is missing.
 
 #### `huggingface_ner` — Hugging Face token classification
 

@@ -216,7 +216,6 @@ class HuggingfaceNerConfig(BaseModel):
             ui_group="General",
             ui_order=99,
             ui_widget="switch",
-            ui_advanced=True,
         ),
     )
 
@@ -423,9 +422,28 @@ class HuggingfaceNerPipe(ConfigurablePipe):
 
     def _resolve_model(self) -> tuple[Path, dict[str, Any]]:
         from clinical_deid.config import get_settings
-        from clinical_deid.models import get_model
+        from clinical_deid.models import get_model, list_models
 
-        info = get_model(get_settings().models_dir, self._config.model)
+        settings = get_settings()
+        try:
+            info = get_model(settings.models_dir, self._config.model)
+        except KeyError as exc:
+            hf_names = [
+                m.name
+                for m in list_models(settings.models_dir, framework="huggingface")
+            ]
+            avail = ", ".join(sorted(hf_names)) or "(none)"
+            hint = ""
+            if self._config.model.startswith(("spacy/", "huggingface/")) and "/" in self._config.model:
+                hint = (
+                    " Presidio model strings (e.g. spacy/… or huggingface/obi/…) belong on the "
+                    "presidio_ner pipe; huggingface_ner only accepts names of directories under "
+                    "models/huggingface/ with model_manifest.json."
+                )
+            raise ValueError(
+                f"huggingface_ner model {self._config.model!r} is not registered under "
+                f"models/huggingface/.{hint} Available: {avail}"
+            ) from exc
         if info.framework != "huggingface":
             raise ValueError(
                 f"Model {info.name!r} has framework={info.framework!r}; "

@@ -67,27 +67,35 @@ FastAPI backend with SQLite for audit only, React + TypeScript frontend. Python 
 
 ## Architecture
 
+Two separate frontend SPAs share a single FastAPI backend. They differ only in
+which API key they ship and therefore which routes the backend allows:
+
 ```
-     +-------------------------------------------------------+
-     | Playground UI (React + Vite + TypeScript)              |
-     |  /create  /inference  /evaluate  /datasets             |
-     |  /dictionaries  /deploy  /audit                        |
-     +----------------------------+--------------------------+
-                                  |
-                          FastAPI Gateway
-                                  |
-  +----------+----------+---------+--------+-----------+-----------+
-  |          |          |         |        |           |           |
-  v          v          v         v        v           v           v
+  +------------------------------+   +-----------------------------------------+
+  | Playground UI  (frontend/)   |   | Production UI  (frontend-production/)    |
+  | admin API key                |   | inference API key                        |
+  | /create /pipelines           |   | Batch NER workspace — load a dataset,    |
+  | /inference /evaluate         |   | review detections, resolve, export.      |
+  | /datasets /dictionaries      |   | Access: POST /process/*, GET /deploy/    |
+  | /deploy /audit /production   |   | health, audit reads (read-only).         |
+  +-------------+----------------+   +---------------------+--------------------+
+                |                                          |
+                +------------------+-----------------------+
+                                   |
+                           FastAPI Gateway
+                                   |
+  +----------+----------+----------+--------+-----------+-----------+
+  |          |          |          |        |           |           |
+  v          v          v          v        v           v           v
 Pipeline   Process   Eval      Dataset  Dictionary  Deploy     Audit
 Service    Service   Service   Service  Service     Service    Service
-                                                               + prod proxy
+
   +----------+----------+
   |          |          |
   v          v          v
 Data prep  Training   Model
 + library  (local     Directory
-(scripts)  CLI, plan) (FS registry)
+(scripts)  CLI)       (FS registry)
 ```
 
 ---

@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
-import { AlertCircle, Loader2, Network, RefreshCw } from 'lucide-react';
+import { AlertCircle, Loader2, Network, Pencil, RefreshCw, Trash2 } from 'lucide-react';
 import { validatePipeline } from '../../api/pipelines';
 import type { PipelineDetail, PipeStep } from '../../api/types';
-import { usePipelines } from '../../hooks/usePipelines';
+import { useDeletePipeline, usePipelines, useRenamePipeline } from '../../hooks/usePipelines';
 import { useHealth } from '../../hooks/useHealth';
 import { ApiError } from '../../api/client';
 
@@ -36,6 +36,11 @@ export default function PipelinesCatalogView() {
   const [liveLabels, setLiveLabels] = useState<
     Record<string, { labels: string[]; at?: string; error?: string }>
   >({});
+  const [renaming, setRenaming] = useState(false);
+  const [renameDraft, setRenameDraft] = useState('');
+
+  const deleteMut = useDeletePipeline();
+  const renameMut = useRenamePipeline();
 
   const names = useMemo(() => (pipelines ?? []).map((p) => p.name), [pipelines]);
   const filtered = useMemo(() => {
@@ -60,6 +65,68 @@ export default function PipelinesCatalogView() {
     () => (pipelines ?? []).find((p) => p.name === selected),
     [pipelines, selected],
   );
+
+  const beginRename = () => {
+    if (detail) {
+      setRenameDraft(detail.name);
+      setRenaming(true);
+    }
+  };
+
+  const cancelRename = () => {
+    setRenaming(false);
+    setRenameDraft('');
+  };
+
+  const applyRename = () => {
+    if (!detail) return;
+    const next = renameDraft.trim();
+    if (!next || next === detail.name) {
+      cancelRename();
+      return;
+    }
+    renameMut.mutate(
+      { name: detail.name, newName: next },
+      {
+        onSuccess: (res) => {
+          setSelected(res.name);
+          setLiveLabels((prev) => {
+            const copy = { ...prev };
+            delete copy[detail.name];
+            return copy;
+          });
+          setRenaming(false);
+          setRenameDraft('');
+        },
+      },
+    );
+  };
+
+  const requestDelete = () => {
+    if (!detail) return;
+    if (
+      !window.confirm(
+        `Delete pipeline "${detail.name}"? This cannot be undone.`,
+      )
+    ) {
+      return;
+    }
+    const removeName = detail.name;
+    deleteMut.mutate(removeName, {
+      onSuccess: () => {
+        if (selected === removeName) {
+          setSelected(null);
+        }
+        setLiveLabels((prev) => {
+          const copy = { ...prev };
+          delete copy[removeName];
+          return copy;
+        });
+        setRenaming(false);
+        setRenameDraft('');
+      },
+    });
+  };
 
   const validateMut = useMutation({
     mutationFn: async (name: string) => {
@@ -175,10 +242,92 @@ export default function PipelinesCatalogView() {
           )}
           {detail && (
             <div className="max-w-4xl space-y-6">
-              <div className="flex items-center gap-2">
-                <Network size={22} className="text-gray-400" />
-                <h2 className="text-xl font-semibold text-gray-900">{detail.name}</h2>
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <Network size={22} className="shrink-0 text-gray-400" />
+                  {renaming ? (
+                    <div className="flex min-w-0 flex-1 flex-col gap-2 sm:flex-row sm:items-center">
+                      <input
+                        type="text"
+                        value={renameDraft}
+                        onChange={(e) => setRenameDraft(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') applyRename();
+                          if (e.key === 'Escape') cancelRename();
+                        }}
+                        className="min-w-0 flex-1 rounded-md border border-gray-300 px-2 py-1.5 font-mono text-sm"
+                        autoFocus
+                        spellCheck={false}
+                        disabled={renameMut.isPending}
+                        aria-label="New pipeline name"
+                      />
+                      <div className="flex shrink-0 items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={applyRename}
+                          disabled={renameMut.isPending}
+                          className="rounded-md bg-gray-900 px-2.5 py-1.5 text-sm font-medium text-white hover:bg-gray-800 disabled:opacity-50"
+                        >
+                          {renameMut.isPending ? 'Saving…' : 'Save name'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={cancelRename}
+                          disabled={renameMut.isPending}
+                          className="rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-sm text-gray-800 hover:bg-gray-50"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <h2 className="text-xl font-semibold text-gray-900">{detail.name}</h2>
+                  )}
+                </div>
+                {!renaming && (
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={beginRename}
+                      className="inline-flex items-center gap-1.5 rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-sm font-medium text-gray-800 hover:bg-gray-50"
+                    >
+                      <Pencil size={14} />
+                      Rename
+                    </button>
+                    <button
+                      type="button"
+                      onClick={requestDelete}
+                      disabled={deleteMut.isPending}
+                      className="inline-flex items-center gap-1.5 rounded-md border border-red-200 bg-white px-2.5 py-1.5 text-sm font-medium text-red-800 hover:bg-red-50 disabled:opacity-50"
+                    >
+                      {deleteMut.isPending ? (
+                        <Loader2 size={14} className="animate-spin" />
+                      ) : (
+                        <Trash2 size={14} />
+                      )}
+                      Delete
+                    </button>
+                  </div>
+                )}
               </div>
+              {renameMut.isError && (
+                <p className="text-sm text-red-700" role="alert">
+                  {renameMut.error instanceof ApiError
+                    ? renameMut.error.detail
+                    : renameMut.error instanceof Error
+                      ? renameMut.error.message
+                      : 'Rename failed.'}
+                </p>
+              )}
+              {deleteMut.isError && (
+                <p className="text-sm text-red-700" role="alert">
+                  {deleteMut.error instanceof ApiError
+                    ? deleteMut.error.detail
+                    : deleteMut.error instanceof Error
+                      ? deleteMut.error.message
+                      : 'Delete failed.'}
+                </p>
+              )}
               <div>
                 <h3 className="text-xs font-bold uppercase tracking-wider text-gray-400">Description</h3>
                 <p className="mt-1 text-sm text-gray-800">

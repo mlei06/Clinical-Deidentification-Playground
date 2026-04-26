@@ -85,6 +85,29 @@ def test_blacklist_regex_patterns_conditional_meta() -> None:
     assert p.get("ui_advanced") is True
 
 
+@pytest.mark.parametrize(
+    "name",
+    [
+        "regex_ner",
+        "whitelist",
+        "presidio_ner",
+        "llm_ner",
+        "neuroner_ner",
+        "huggingface_ner",
+    ],
+)
+def test_all_detectors_expose_skip_overlapping_in_general(name: str) -> None:
+    """``skip_overlapping`` is implemented on every detector; the playground shows it
+    in the main form (not only under Advanced) so it is discoverable like regex_ner.
+    """
+    cfg_cls = registered_pipes()[name]
+    prop = cfg_cls.model_json_schema()["properties"]["skip_overlapping"]
+    assert prop.get("type") == "boolean"
+    assert prop.get("ui_widget") == "switch"
+    assert prop.get("ui_group") == "General"
+    assert prop.get("ui_advanced") is not True
+
+
 def test_presidio_anonymizer_operator_params_conditional() -> None:
     from clinical_deid.pipes.presidio_anonymizer.pipe import PresidioAnonymizerConfig
 

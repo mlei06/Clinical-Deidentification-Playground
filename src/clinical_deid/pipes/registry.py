@@ -447,6 +447,54 @@ def load_pipeline(source: dict[str, Any] | str | Path) -> Pipeline:
     return _load_pipeline_from_dict(source)
 
 
+def validate_pipeline_config(config: dict[str, Any]) -> list[str]:
+    """Validate a pipeline config dict without instantiating pipes.
+
+    Returns a list of error strings (empty = valid).  Checks that each pipe
+    type is registered and that the config parses against the config class.
+    Does NOT call pipe constructors, so no models are loaded.
+    """
+    errors: list[str] = []
+    pipes = config.get("pipes")
+    if not isinstance(pipes, list):
+        return ["pipeline config must have a 'pipes' list"]
+
+    for i, spec in enumerate(pipes):
+        if not isinstance(spec, dict):
+            errors.append(f"pipe[{i}]: expected a dict, got {type(spec).__name__}")
+            continue
+        pipe_type = spec.get("type")
+        if not pipe_type:
+            errors.append(f"pipe[{i}]: missing 'type'")
+            continue
+        if pipe_type == "pipeline":
+            sub_errors = validate_pipeline_config(spec)
+            errors.extend(f"pipe[{i}].{e}" for e in sub_errors)
+            continue
+        entry = _REGISTRY.get(pipe_type)
+        if entry is None:
+            catalog_entry = get_catalog_entry(pipe_type)
+            if catalog_entry is not None:
+                errors.append(
+                    f"pipe[{i}] ({pipe_type!r}): not installed — "
+                    f"run: {catalog_entry.install_hint}"
+                )
+            else:
+                errors.append(
+                    f"pipe[{i}] ({pipe_type!r}): unknown pipe type. "
+                    f"Registered: {', '.join(sorted(_REGISTRY))}"
+                )
+            continue
+        config_cls, _ = entry
+        raw_config = spec.get("config") or {}
+        try:
+            config_cls.model_validate(raw_config)
+        except Exception as exc:
+            errors.append(f"pipe[{i}] ({pipe_type!r}) config error: {exc}")
+
+    return errors
+
+
 # ---------------------------------------------------------------------------
 # Dump
 # ---------------------------------------------------------------------------

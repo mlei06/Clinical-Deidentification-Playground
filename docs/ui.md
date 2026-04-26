@@ -1,16 +1,29 @@
-# Playground UI
+# Frontend Applications
 
-The Playground UI is a React + TypeScript single-page application (Vite, Tailwind CSS, TanStack Query) that wraps every major workflow. All UI features call the same Python library code and HTTP endpoints that the CLI uses — no duplicate logic.
+The platform ships two separate React + TypeScript SPAs that both call the same FastAPI backend. They are distinguished by **which API key they present**, which controls which backend routes they can reach.
 
-## Running
+| App | Directory | Default port | API scope | Who uses it |
+|-----|-----------|-------------|-----------|-------------|
+| **Playground UI** | `frontend/` | 3000 | admin | Pipeline authors, operators, researchers |
+| **Production UI** | `frontend-production/` | 3001 | inference | Reviewers / consumers running batch NER |
+
+Both are Vite + React 19 + TypeScript + Tailwind CSS + TanStack Query.
+
+---
+
+## Playground UI (`frontend/`)
+
+Wraps every authoring workflow. All features call the same Python library code and HTTP endpoints that the CLI uses — no duplicate logic.
+
+### Running
 
 ```bash
 cd frontend
 npm install
-npm run dev          # default http://localhost:3000 (see frontend/vite.config.ts)
+npm run dev          # http://localhost:3000 (proxies /api → localhost:8000)
 ```
 
-The frontend expects the API at `localhost:8000`. Start it with `clinical-deid serve`.
+Set `VITE_API_KEY` to an **admin** key in `frontend/.env.local` when the backend has auth enabled.
 
 ## Views
 
@@ -118,27 +131,44 @@ Browse and monitor the audit trail.
 
 **API endpoints used:** `GET /audit/logs`, `GET /audit/logs/{id}`, `GET /audit/stats`.
 
-## Production UI workbench
+---
 
-The Production UI (`frontend-production/`) targets reviewers running batch
-detection over ingested corpora. Key affordances beyond the Playground:
+## Production UI (`frontend-production/`)
 
-- **Virtualized file list** — when a dataset's visible file list exceeds
-  200 items, the left-hand queue renders through `@tanstack/react-virtual` to
-  keep scrolling smooth on large corpora. Below that threshold it renders a
-  simple list (fewer layout edge-cases).
-- **Keyboard shortcuts** (fire only when the workbench has focus and the
-  active element is not an input / textarea / select / contenteditable):
+A purpose-built SPA for reviewers and consumers who need to run batch NER over a corpus, inspect and resolve detections, and export results. It uses an **inference-scoped API key** — it cannot create pipelines, modify dictionaries, or touch evaluation runs.
+
+### Running
+
+```bash
+cd frontend-production
+npm install
+npm run dev          # http://localhost:3001
+```
+
+Set `VITE_API_KEY` to an **inference** key in `frontend-production/.env.local` when the backend has auth enabled. Also set `VITE_API_BASE_URL` if the API is not on `localhost:8000`.
+
+### What the Production UI can do (inference scope)
+
+| Route | Description |
+|-------|-------------|
+| `POST /process/*` | Run any allowed pipeline (subject to deploy allowlist in `data/modes.json`) |
+| `GET /deploy/health` | Fetch available modes + per-mode availability for the mode selector |
+| `GET /audit/logs`, `GET /audit/logs/{id}`, `GET /audit/stats` | Read-only audit trail |
+
+Everything else (pipeline CRUD, datasets, eval, dictionaries, deploy config writes) requires an admin key and is only accessible through the Playground UI.
+
+### Key affordances
+
+- **Virtualized file list** — when a dataset's file list exceeds 200 items, the left-hand queue uses `@tanstack/react-virtual` for smooth scrolling; below that threshold a simple list renders.
+- **Keyboard shortcuts** (fire only when workbench has focus and no input is active):
   - `↑` / `↓` — previous / next file
   - `J` / `K` — next / previous **unresolved** file
   - `N` — next file whose detection errored
   - `R` — toggle resolved on the current file
   - `?` — open the cheat-sheet modal
-- **Surrogate preview** — in `Preview: surrogate` mode the reviewer pane
-  renders what the surrogate text will look like before export. When the
-  dataset's export type is `surrogate_annotated`, detection requests the API
-  with `include_surrogate_spans=true`; the response's aligned spans are cached
-  on each file and emitted verbatim by the export bar.
+- **Surrogate preview** — in `Preview: surrogate` mode the reviewer pane shows what the surrogate text will look like before export. When the dataset's export type is `surrogate_annotated`, detection requests the API with `include_surrogate_spans=true`; the response's aligned spans are cached per file and emitted verbatim by the export bar.
+
+---
 
 ## Tech stack
 

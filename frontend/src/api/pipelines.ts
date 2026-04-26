@@ -35,6 +35,16 @@ export function deletePipeline(name: string): Promise<void> {
   return apiFetch(`/pipelines/${encodeURIComponent(name)}`, { method: 'DELETE' });
 }
 
+export function renamePipeline(
+  name: string,
+  newName: string,
+): Promise<PipelineDetail> {
+  return apiFetch(`/pipelines/${encodeURIComponent(name)}/rename`, {
+    method: 'POST',
+    body: JSON.stringify({ new_name: newName }),
+  });
+}
+
 export function validatePipeline(
   name: string,
   config?: PipelineConfig,

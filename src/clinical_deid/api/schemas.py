@@ -47,6 +47,10 @@ class UpdatePipelineRequest(BaseModel):
     config: dict[str, Any] | None = None
 
 
+class RenamePipelineRequest(BaseModel):
+    new_name: str
+
+
 class PipelineDetail(BaseModel):
     name: str
     config: dict[str, Any]

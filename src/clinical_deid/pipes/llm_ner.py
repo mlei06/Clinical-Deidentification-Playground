@@ -190,10 +190,9 @@ class LlmNerConfig(BaseModel):
         default=False,
         description="Drop new spans that overlap any existing span in the document.",
         json_schema_extra=field_ui(
-            ui_group="Advanced",
+            ui_group="General",
             ui_order=99,
             ui_widget="switch",
-            ui_advanced=True,
         ),
     )
 

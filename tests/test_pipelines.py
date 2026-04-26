@@ -126,6 +126,31 @@ def test_delete_pipeline(client) -> None:
     assert len(r.json()) == 0
 
 
+def test_rename_pipeline(client) -> None:
+    client.post("/pipelines", json={"name": "old-pipe", "config": REGEX_WHITELIST})
+    r = client.post(
+        "/pipelines/old-pipe/rename", json={"new_name": "new-pipe"},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["name"] == "new-pipe"
+    assert r.json()["config"]["pipes"] == REGEX_WHITELIST["pipes"]
+
+    r = client.get("/pipelines/new-pipe")
+    assert r.status_code == 200
+    r = client.get("/pipelines/old-pipe")
+    assert r.status_code == 404
+
+    r = client.get("/pipelines")
+    assert [p["name"] for p in r.json()] == ["new-pipe"]
+
+
+def test_rename_pipeline_target_exists(client) -> None:
+    client.post("/pipelines", json={"name": "a", "config": REGEX_WHITELIST})
+    client.post("/pipelines", json={"name": "b", "config": REGEX_WHITELIST})
+    r = client.post("/pipelines/a/rename", json={"new_name": "b"})
+    assert r.status_code == 409
+
+
 def test_validate_pipeline(client) -> None:
     client.post("/pipelines", json={"name": "val", "config": REGEX_WHITELIST})
 
@@ -322,6 +347,7 @@ def test_presidio_label_space_bundle(client) -> None:
     assert "default_model" in body
     assert "spacy/en_core_web_lg" in body["labels_by_model"]
     assert isinstance(body["labels_by_model"]["spacy/en_core_web_lg"], list)
+    assert "US_BANK_NUMBER" in body["labels_by_model"]["spacy/en_core_web_lg"]
 
 
 def test_compute_pipe_labels_presidio_omits_neuroner_fields(client) -> None:

@@ -25,6 +25,7 @@ from clinical_deid.api.schemas import (
     PipeTypeInfo,
     PrefixLabelSpaceRequest,
     PrefixLabelSpaceResponse,
+    RenamePipelineRequest,
     UpdatePipelineRequest,
     ValidatePipelineRequest,
     ValidatePipelineResponse,
@@ -34,6 +35,7 @@ from clinical_deid.pipeline_store import (
     delete_pipeline,
     list_pipelines,
     load_pipeline_config,
+    rename_pipeline,
     save_pipeline_config,
 )
 from clinical_deid.dictionary_store import DictionaryStore
@@ -50,6 +52,7 @@ from clinical_deid.pipes.registry import (
     pipe_availability,
     registered_pipes,
     resolve_dynamic_options,
+    validate_pipeline_config,
 )
 from clinical_deid.pipes.ui_schema import pipe_config_json_schema
 from clinical_deid.pipes.whitelist.lists import parse_list_file
@@ -80,10 +83,9 @@ async def _read_upload(uf: UploadFile) -> str:
 
 
 def _validate_config(config: dict) -> None:
-    try:
-        load_pipeline(config)
-    except Exception as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    errors = validate_pipeline_config(config)
+    if errors:
+        raise HTTPException(status_code=422, detail="; ".join(errors))
 
 
 # ---------------------------------------------------------------------------
@@ -348,6 +350,25 @@ def delete_pipeline_endpoint(pipeline_name: str) -> None:
         delete_pipeline(_pipelines_dir(), pipeline_name)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post(
+    "/{pipeline_name}/rename",
+    response_model=PipelineDetail,
+    dependencies=[require_admin],
+)
+def rename_pipeline_endpoint(pipeline_name: str, body: RenamePipelineRequest) -> PipelineDetail:
+    pdir = _pipelines_dir()
+    try:
+        rename_pipeline(pdir, pipeline_name, body.new_name)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except FileExistsError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    config = load_pipeline_config(pdir, body.new_name)
+    return PipelineDetail(name=body.new_name, config=config)
 
 
 @router.post("/{pipeline_name}/validate", response_model=ValidatePipelineResponse, dependencies=[require_admin])

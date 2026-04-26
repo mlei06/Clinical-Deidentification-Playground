@@ -38,6 +38,21 @@ export function useDeletePipeline() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (name: string) => api.deletePipeline(name),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['pipelines'] }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['pipelines'] });
+    },
+  });
+}
+
+export function useRenamePipeline() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ name, newName }: { name: string; newName: string }) =>
+      api.renamePipeline(name, newName),
+    onSuccess: (_data, { name, newName }) => {
+      void qc.invalidateQueries({ queryKey: ['pipelines'] });
+      void qc.removeQueries({ queryKey: ['pipelines', name] });
+      void qc.invalidateQueries({ queryKey: ['pipelines', newName] });
+    },
   });
 }

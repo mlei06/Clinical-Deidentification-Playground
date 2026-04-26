@@ -11,7 +11,7 @@
 | [models.md](models.md) | Filesystem model registry (`models/{framework}/{name}/`) |
 | [evaluation.md](evaluation.md) | Metrics, matching modes, eval API |
 | [data-ingestion.md](data-ingestion.md) | Dataset formats, registration, transforms |
-| [ui.md](ui.md) | Playground UI views |
+| [ui.md](ui.md) | Both frontend apps: Playground UI (admin, `frontend/`) and Production UI (inference, `frontend-production/`) |
 | [synthesis.md](synthesis.md) | LLM note synthesis |
 | [neuroner-setup.md](neuroner-setup.md) | NeuroNER Docker sidecar |
 | [transforms-and-composition.md](transforms-and-composition.md) | Dataset transforms |

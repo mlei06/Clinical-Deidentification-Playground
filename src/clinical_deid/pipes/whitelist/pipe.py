@@ -78,7 +78,6 @@ class WhitelistConfig(BaseModel):
             ui_group="General",
             ui_order=99,
             ui_widget="switch",
-            ui_advanced=True,
         ),
     )
 

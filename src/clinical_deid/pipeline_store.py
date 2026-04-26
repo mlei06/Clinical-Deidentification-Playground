@@ -92,3 +92,28 @@ def delete_pipeline(pipelines_dir: Path, name: str) -> None:
     if not path.is_file():
         raise FileNotFoundError(f"Pipeline {name!r} not found in {pipelines_dir}")
     path.unlink()
+
+
+def rename_pipeline(pipelines_dir: Path, from_name: str, to_name: str) -> Path:
+    """Move ``{from_name}.json`` to ``{to_name}.json`` (same config).
+
+    Returns the new path. Raises ``FileNotFoundError`` if the source is missing;
+    ``ValueError`` if the target name is invalid; ``FileExistsError`` if the
+    destination already exists.
+    """
+    _validate_name(from_name)
+    _validate_name(to_name)
+    if from_name == to_name:
+        p = pipelines_dir / f"{from_name}.json"
+        if not p.is_file():
+            raise FileNotFoundError(f"Pipeline {from_name!r} not found in {pipelines_dir}")
+        return p
+    _ensure_dir(pipelines_dir)
+    old_path = pipelines_dir / f"{from_name}.json"
+    new_path = pipelines_dir / f"{to_name}.json"
+    if not old_path.is_file():
+        raise FileNotFoundError(f"Pipeline {from_name!r} not found in {pipelines_dir}")
+    if new_path.exists():
+        raise FileExistsError(f"Pipeline {to_name!r} already exists in {pipelines_dir}")
+    old_path.rename(new_path)
+    return new_path
