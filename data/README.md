@@ -38,8 +38,8 @@ data/
 | Directory / file | Purpose | Typical commands |
 |------------------|---------|-----------------|
 | `pipelines/` | Pipeline configs | Playground builder; `POST`/`PUT`/`DELETE /pipelines` |
-| `modes.json` | Deploy mapping | Playground Deploy view; `GET`/`PUT /deploy` |
-| `evaluations/` | Eval results | `clinical-deid eval`, `POST /eval/run` |
+| `modes.json` | Deploy mapping — mode **aliases** to pipeline names (`default_mode` seeded `fast` → `clinical-fast`; also `presidio`, `transformer`, `transformer_presidio`) | Playground Deploy view; `GET`/`PUT /deploy` |
+| `evaluations/` | One JSON file per eval run (Playground, API, or **CLI**); the Evaluate view lists `*.json` for history. Also holds tracked **discharge** snapshot files `discharge-summaries__*.json` for docs. | `clinical-deid eval`, `POST /eval/run`, `GET /eval/runs` |
 | `inference_runs/` | Batch inference snapshots | `clinical-deid batch`, `POST /process/*` |
 | `app.sqlite` | Audit log | Written by `log_run()` on every run |
 | `corpora/` | Canonical **JSONL** datasets | `clinical-deid dataset register` (JSONL), `import-brat`, `POST /datasets/*` — **tracked** example: `discharge_summaries` (7 docs) |

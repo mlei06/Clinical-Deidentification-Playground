@@ -7,12 +7,15 @@ A **local-first NER pipeline platform**: compose modular detectors (regex, Presi
 Ships with a **clinical de-identification pack** (HIPAA Safe Harbor label space, regex patterns, surrogate strategies, risk/coverage profile) as the default configuration — so it works out of the box for PHI detection. The clinical domain is a *pack*, not a baked-in assumption. Swap the label space, pattern pack, surrogate pack, and risk profile to target any NER task. A minimal `generic_pii` pack ships alongside; custom packs register at startup.
 
 **Key capabilities:**
-- Visual pipeline builder (drag-and-drop, auto-generated config forms from JSON Schema)
+
+- **Playground UI** ([`frontend/`](./frontend/)) — admin-oriented web app: **visual pipeline builder**, **single-document** inference with span editing and trace, **evaluation** (metrics, confusion matrix, run comparison), **dataset** registry and transforms, **dictionaries**, **Deploy** (modes / allowlist), and **audit** viewer. Dev server: `http://localhost:3000` (see [Web UIs](#web-uis-playground-vs-production-app) below and [docs/ui.md](docs/ui.md)).
+- **Production UI** ([`frontend-production/`](./frontend-production/)) — inference-scoped app for **batch** work over a corpus: local dataset library, per-file review, redacted/surrogate **export**; uses deploy **modes** from `data/modes.json`. Dev server: `http://localhost:3001`. Same API as the Playground, narrower key. Details: [Web UIs](#web-uis-playground-vs-production-app), [docs/ui.md](docs/ui.md).
 - 11 pipe types: `regex_ner`, `whitelist`, `blacklist`, `presidio_ner`, `huggingface_ner`, `neuroner_ner`, `llm_ner`, `label_mapper`, `label_filter`, `resolve_spans`, `consistency_propagator`
 - **Shipped example pipelines** (under `data/pipelines/`, name = filename stem): `clinical-fast`, `presidio`, `clinical-transformer`, `clinical-transformer-presidio` — plus seed **inference modes** in `data/modes.json` (`fast` → `clinical-fast` by default)
 - Evaluation: 4 matching modes (strict, partial, token-level, boundary), per-label breakdown, risk-weighted recall, HIPAA Safe Harbor coverage report, confusion matrix
 - **Shipped eval snapshots** for the `discharge_summaries` gold set (`data/evaluations/discharge-summaries__*.json`); refresh with `python scripts/emit_discharge_eval_snapshots.py` after changing pipelines or the corpus
 - Dataset tools: JSONL/BRAT import, compose, transform, LLM synthesis, export to CoNLL/spaCy/HuggingFace/BRAT
+- **CLI and HTTP API** — same features as the UIs for scripting and automation (see [CLI](#cli) and [docs/api.md](docs/api.md))
 - HuggingFace fine-tuning pipeline (`clinical-deid train run`)
 - Full audit trail (SQLite) on every inference call
 
@@ -25,11 +28,12 @@ pip install -e ".[dev]"
 clinical-deid setup          # verify deps, init DB
 clinical-deid serve           # API on http://localhost:8000
 
-# Frontend (separate terminal)
-cd frontend && npm install && npm run dev   # http://localhost:3000
+# Frontends (separate terminals; need Node 20.19+ or 22.12+)
+cd frontend && npm install && npm run dev                 # Playground — http://localhost:3000
+# optional: cd frontend-production && npm install && npm run dev   # batch reviewer — http://localhost:3001
 ```
 
-Open `http://localhost:3000` → **Pipeline Builder** to compose a pipeline, then **Inference** to test it. See [SETUP.md](SETUP.md) for detailed installation options and optional extras.
+Open the **Playground** at `http://localhost:3000` → **Create** to compose a pipeline, **Inference** to test it, or **Evaluate** / **Datasets** as needed. The **Production** app (port 3001) is for inference-key batch review. See [Web UIs](#web-uis-playground-vs-production-app) and [SETUP.md](SETUP.md) for install options and optional extras.
 
 ## Video Links
 Demo+Technical Walkthrough
@@ -37,19 +41,37 @@ https://youtu.be/iKYWic1IqJQ
 
 ## Evaluation
 
-The platform ships three built-in profiles for out-of-the-box use:
+### CLI profiles vs saved pipelines vs deploy modes
 
-| Profile | Pipes | Latency |
-|---------|-------|---------|
+Three concepts overlap in name but are stored differently:
+
+1. **CLI `--profile`** (`src/clinical_deid/profiles.py`) — in-memory configs **`fast`**, **`balanced`**, **`accurate`** (regex-only → +Presidio → +consistency/resolve). Default for `clinical-deid run|batch|eval` is **`balanced`** when you don’t pass `--pipeline` or `--config`.
+2. **Saved pipeline JSON** (`data/pipelines/<name>.json`) — the repo ships **`clinical-fast`**, **`presidio`**, **`clinical-transformer`**, and **`clinical-transformer-presidio`** (name = file stem). Use **`--pipeline <name>`** or pick them in the Playground.
+3. **Deploy mode aliases** (`data/modes.json`) — map a short **mode** string to a saved pipeline for **`POST /process/<mode>`** and the Production UIs. Seeded defaults:
+
+| Mode alias | Resolves to pipeline | Notes |
+|------------|----------------------|--------|
+| `fast` | `clinical-fast` | Also **`default_mode`** for `/process/scrub` |
+| `presidio` | `presidio` | Presidio + regex stack |
+| `transformer` | `clinical-transformer` | Needs HF weights under `models/huggingface/` |
+| `transformer_presidio` | `clinical-transformer-presidio` | HF + Presidio + spaCy deps |
+
+**CLI profile** quick reference (when using `--profile`, not `--pipeline`):
+
+| Profile | Pipes | Latency (rough) |
+|---------|-------|-----------------|
 | **fast** | regex_ner + whitelist + blacklist + resolve_spans | ~10 ms |
-| **balanced** | + presidio_ner (spaCy NER fallback) | ~200 ms |
+| **balanced** | + presidio_ner (falls back to fast if Presidio missing) | ~200 ms |
 | **accurate** | + consistency_propagator + confidence-based resolution | ~300 ms |
 
 Four evaluation modes supported: **strict** (exact span + label), **exact boundary** (ignore label), **partial overlap** (any span overlap, same label), **token-level** (per-character BIO). Metrics computed: precision, recall, F1, risk-weighted recall (HIPAA severity weights), per-label breakdown, label confusion matrix, HIPAA Safe Harbor identifier coverage (18 identifiers), worst-document ranking.
 
 ```bash
-# Evaluate a pipeline against a gold JSONL corpus
-clinical-deid eval --corpus data/corpora/my-dataset/corpus.jsonl --pipeline my-pipeline
+# Evaluate a saved pipeline against a gold JSONL corpus
+clinical-deid eval --corpus data/corpora/discharge_summaries/corpus.jsonl --pipeline clinical-fast
+
+# Or use a CLI profile (default profile is balanced)
+clinical-deid eval --corpus data/corpora/discharge_summaries/corpus.jsonl --profile fast
 ```
 
 **Demo gold set — `discharge_summaries`:** seven short clinical snippets with span **gold labels** in `corpus.jsonl` (layered surrogate / model metadata on some lines under `document.metadata` from the **Production UI** export flow), plus cached stats in `dataset.json`. The repo **tracks** that corpus so Evaluate and the CLI use the same files.
@@ -65,7 +87,9 @@ Strict micro-F1 and risk-weighted recall (RWR) on that corpus, for each **shippe
 
 Full per-label tables and confusion matrices: `data/evaluations/discharge-summaries__<pipeline>.json`. **Regenerate:** `python scripts/emit_discharge_eval_snapshots.py` (requires the same optional extras you use to load each pipeline, e.g. Presidio + spaCy + HF weights).
 
-> The same eval can be run from **Playground → Evaluate**; HTTP details are in [docs/api.md](docs/api.md).
+**Where eval results are stored:** Every run from **Playground → Evaluate** or **`POST /eval/run`**, and every **`clinical-deid eval`**, writes a JSON file under **`data/evaluations/`** (default; override with `CLINICAL_DEID_EVALUATIONS_DIR`). Files are named **`{pipeline_name}_{YYYYMMDD_HHMMSS}.json`** (UTC). The **Evaluate** view lists and opens past runs from that folder via `GET /eval/runs` — so CLI and UI runs share the same history. Tracked `discharge-summaries__<pipeline>.json` files in the same directory are precomputed **snapshots** for docs (see [data/README.md](data/README.md)).
+
+> The same eval can be run from **Playground → Evaluate** or the CLI; HTTP details are in [docs/api.md](docs/api.md).
 
 **Larger benchmark — mimic-10k (optional download):** MIMIC-III clinical notes ship with PHI already redacted (replaced by `[** ... **]` placeholders) but with **no span annotations**, so they cannot be used for evaluation directly. For a large-scale labeled set, synthetic PHI was reinjected at those positions using the surrogate pipeline (see [SETUP.md](SETUP.md)). That optional archive is **not** in git; the discharge set above is the repo-default teaching corpus.
 
@@ -73,7 +97,7 @@ Full per-label tables and confusion matrices: `data/evaluations/discharge-summar
 
 **End-to-end flow:** train or import data → save models under [`models/`](./models/README.md) → compose pipelines in `data/pipelines/` (Playground, CLI, or API) → run inference and evaluation → optional SQLite **audit** on every process call. Pack selection (label space, risk profile, etc.) is env-driven; see [docs/configuration.md](docs/configuration.md) (`CLINICAL_DEID_LABEL_SPACE_NAME`, …).
 
-**Developer note:** new pipes are a Pydantic config + `forward` + `register()`. **Documentation index:** [docs/README.md](docs/README.md), [PROJECT_OVERVIEW.md](./PROJECT_OVERVIEW.md), [docs/deployment.md](docs/deployment.md), [docs/api.md](docs/api.md).
+**Developer note:** new pipes are a Pydantic config + `forward` + `register()`. **Documentation index:** [docs/README.md](docs/README.md), [docs/ui.md](docs/ui.md) (both web apps), [PROJECT_OVERVIEW.md](./PROJECT_OVERVIEW.md), [docs/deployment.md](docs/deployment.md), [docs/api.md](docs/api.md).
 
 ### Repository layout
 
@@ -111,46 +135,6 @@ Optional extras for specific pipes: `pip install -e ".[presidio]"`, `pip install
 **Presidio** does not pull spaCy model weights by itself: configure `python -m spacy download` for the `presidio_ner` `model` you use; HF-based Presidio models also need `en_core_web_sm` and a transformers install (see [docs/pipes-and-pipelines.md](docs/pipes-and-pipelines.md), `presidio_ner`).
 
 `pip` is the canonical install path; `uv.lock` is committed for reproducible builds when using `uv sync` / `uv pip install -e ".[dev]"`, but is not required.
-
-## CLI
-
-```bash
-# De-identify text
-echo "Patient John Smith DOB 01/15/1980" | clinical-deid run
-clinical-deid run --profile fast notes.txt
-clinical-deid run --pipeline my-pipeline notes.txt
-clinical-deid run --redactor surrogate notes.txt
-
-# Batch process
-clinical-deid batch notes_dir/ -o output/ --format jsonl
-clinical-deid batch corpus.jsonl -o output/ --pipeline my-pipeline
-
-# Evaluate against gold standard
-clinical-deid eval --corpus data.jsonl --profile balanced
-clinical-deid eval --corpus data.jsonl --pipeline my-pipeline
-
-# Dictionary management
-clinical-deid dict list
-clinical-deid dict preview whitelist hospitals --label HOSPITAL
-clinical-deid dict import terms.txt --kind whitelist --name hospitals --label HOSPITAL
-clinical-deid dict delete whitelist hospitals
-
-# Dataset management
-clinical-deid dataset list
-clinical-deid dataset register data/corpus.jsonl --name i2b2-2014
-clinical-deid dataset import-brat data/brat/ --name physionet
-clinical-deid dataset show i2b2-2014
-clinical-deid dataset delete i2b2-2014
-
-# Audit trail
-clinical-deid audit list
-clinical-deid audit show <record-id>
-
-# Server
-clinical-deid serve --port 8000 --reload
-```
-
-Pipeline commands (`run`, `batch`, `eval`) support `--profile` (fast/balanced/accurate), `--pipeline` (saved pipeline by name), `--config` (custom JSON file), and `--redactor` (tag/surrogate).
 
 ## Web UIs: Playground vs Production app
 
@@ -191,6 +175,48 @@ For day-to-day reviewers and batch consumers **without** admin credentials. Data
 | **Audit** | `/audit` | Read-only audit trail (as allowed for the inference key). |
 
 **Not available** with a typical inference key: create/edit **named pipelines** on the server, **register** server **datasets**, change **deploy** or **dictionaries** — use the Playground (admin) for those.
+
+## CLI
+
+The CLI exposes the same backend as the UIs: pipelines, process, eval, datasets, dictionaries, and audit. Full route reference: [docs/api.md](docs/api.md).
+
+```bash
+# De-identify text
+echo "Patient John Smith DOB 01/15/1980" | clinical-deid run
+clinical-deid run --profile fast notes.txt
+clinical-deid run --pipeline clinical-fast notes.txt
+clinical-deid run --redactor surrogate notes.txt
+
+# Batch process
+clinical-deid batch notes_dir/ -o output/ --format jsonl
+clinical-deid batch corpus.jsonl -o output/ --pipeline clinical-fast
+
+# Evaluate against gold standard
+clinical-deid eval --corpus data.jsonl --profile balanced
+clinical-deid eval --corpus data.jsonl --pipeline clinical-fast
+
+# Dictionary management
+clinical-deid dict list
+clinical-deid dict preview whitelist hospitals --label HOSPITAL
+clinical-deid dict import terms.txt --kind whitelist --name hospitals --label HOSPITAL
+clinical-deid dict delete whitelist hospitals
+
+# Dataset management
+clinical-deid dataset list
+clinical-deid dataset register data/corpus.jsonl --name i2b2-2014
+clinical-deid dataset import-brat data/brat/ --name physionet
+clinical-deid dataset show i2b2-2014
+clinical-deid dataset delete i2b2-2014
+
+# Audit trail
+clinical-deid audit list
+clinical-deid audit show <record-id>
+
+# Server
+clinical-deid serve --port 8000 --reload
+```
+
+Pipeline commands (`run`, `batch`, `eval`) support `--profile` (fast / balanced / accurate), `--pipeline` (saved pipeline JSON name such as `clinical-fast`), `--config` (custom JSON file), and `--redactor` (tag/surrogate). **`--pipeline` wins** over `--profile` when both are set.
 
 ## Run the API
 

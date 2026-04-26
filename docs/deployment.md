@@ -19,7 +19,7 @@ For a step-by-step Docker bring-up (build, volumes, env vars, frontends), see [d
 
 - **API:** `clinical-deid-api` → `uvicorn clinical_deid.api.app:app` (see root `Dockerfile` and `compose.yaml`).
 - **Playground UI** (`frontend/`) and **Production UI** (`frontend-production/`) are static SPAs. They call the API using `VITE_API_BASE_URL` and optional `VITE_API_KEY` (see each app’s `.env.example`).
-- **Mutable config after deploy:** Pipeline definitions (`CLINICAL_DEID_PIPELINES_DIR`, default `data/pipelines`) and deploy/mode mapping (`CLINICAL_DEID_MODES_PATH`, default `data/modes.json`) are **meant to change in production** without rebuilding the image. Operators can use the full **admin** Playground UI (pipeline builder, **Deploy** view) or **edit the JSON files on the instance** (bind-mount or volume). The API re-reads `modes.json` on each request that needs it; pipeline JSON is read from disk per request when loading a pipeline.
+- **Mutable config after deploy:** Pipeline definitions (`CLINICAL_DEID_PIPELINES_DIR`, default `data/pipelines`) and deploy/mode mapping (`CLINICAL_DEID_MODES_PATH`, default `data/modes.json`) are **meant to change in production** without rebuilding the image. Operators can use the full **admin** Playground UI (pipeline builder, **Deploy** view) or **edit the JSON files on the instance** (bind-mount or volume). The API re-reads `modes.json` on each request that needs it; pipeline JSON is read from disk per request when loading a pipeline. The **tracked** seed maps mode aliases to shipped pipelines (e.g. `fast` → `clinical-fast`, **`default_mode`**: `fast`); that is **not** the same as the CLI’s `--profile` `balanced` / `accurate` — see [Configuration — Deploy configuration](configuration.md#deploy-configuration) and the main [README](../README.md#evaluation).
 - **Two volumes** — everything mutable lives under `./data` (pipelines, modes, evaluations, inference runs, corpora, exports, dictionaries, SQLite audit log); model weights live under `./models` and are read-only at runtime. This is the full mount story — see `compose.yaml`:
     - `./data:/app/data` (read-write)
     - `./models:/app/models:ro`
@@ -40,4 +40,4 @@ OpenAPI (`/docs`, `/redoc`, `/openapi.json`) is **disabled** for anonymous clien
 
 ## Smoke test
 
-After deploy, verify `/health` returns `200`, run a `POST /process/{pipeline}` call with sample text, and check `GET /audit/logs` shows the request.
+After deploy, verify `/health` returns `200`, run `POST /process/fast` (or `POST /process/clinical-fast`) with sample text, and check `GET /audit/logs` shows the request.

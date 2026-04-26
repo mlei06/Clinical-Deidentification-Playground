@@ -516,6 +516,25 @@ def eval_cmd(
     click.echo(f"\nEval completed in {duration:.1f}s on {result.document_count} doc(s).")
 
     try:
+        from clinical_deid.config import get_settings
+        from clinical_deid.eval.metrics_json import build_persisted_eval_metrics
+        from clinical_deid.eval_store import save_eval_result
+
+        metrics = build_persisted_eval_metrics(
+            result, risk_profile_name=eval_risk_profile.name
+        )
+        out_path = save_eval_result(
+            get_settings().evaluations_dir,
+            pipeline_name=resolved_name,
+            dataset_source=dataset_source,
+            metrics=metrics,
+            document_count=result.document_count,
+        )
+        click.echo(f"Saved eval result: {out_path}", err=True)
+    except Exception:
+        logger.warning("Failed to save eval result JSON to evaluations dir", exc_info=True)
+
+    try:
         from clinical_deid.audit import log_run
 
         log_run(

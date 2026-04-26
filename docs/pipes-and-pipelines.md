@@ -299,8 +299,10 @@ There is no `parallel` pipe type in pipeline JSON. Run detectors **in sequence**
 Tracing is a runtime option, not part of the pipeline config. Pass `?trace=true` as a query parameter on the process endpoint to capture the document state after every pipeline step:
 
 ```
-POST /process/my-pipeline?trace=true
+POST /process/clinical-fast?trace=true
 ```
+
+You can also call a **deploy mode** alias (e.g. `POST /process/fast?trace=true`) — the path segment is resolved via `data/modes.json`.
 
 The API response includes an `intermediary_trace` array with one snapshot per step.
 

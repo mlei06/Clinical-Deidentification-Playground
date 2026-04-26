@@ -7,6 +7,7 @@ import {
 } from 'zustand/middleware';
 import type { EntitySpanResponse } from '../../api/types';
 import { makeIdbStorage } from '../../lib/idbStorage';
+import type { ResolveStrategyId } from '../../lib/spanOverlapConflicts';
 
 export type ExportOutputType = 'redacted' | 'annotated' | 'surrogate_annotated';
 
@@ -31,6 +32,17 @@ export type DetectionStatus =
   | 'ready'
   | 'error';
 
+export interface AutoResolveStamp {
+  strategy: ResolveStrategyId;
+  removed: number;
+  resolvedAt: string;
+}
+
+export interface DatasetAutoResolveSetting {
+  enabled: boolean;
+  strategy: ResolveStrategyId;
+}
+
 export interface DatasetFile {
   id: string;
   sourceLabel: string;
@@ -44,6 +56,8 @@ export interface DatasetFile {
   note?: string;
   error?: string;
   processingTimeMs?: number;
+  /** Set when detection ran with auto-resolve enabled; cleared otherwise. */
+  lastAutoResolve?: AutoResolveStamp | null;
   /** @deprecated migrated to `savedOutput`; retained for back-compat through M4. */
   surrogateText?: string | null;
   /** @deprecated migrated to `savedOutput`; retained for back-compat through M4. */
@@ -59,6 +73,8 @@ export interface Dataset {
   updatedAt: string;
   defaultDetectionMode: string;
   exportOutputType: ExportOutputType;
+  /** When set + enabled, detection auto-resolves overlapping spans before annotations land. */
+  autoResolveOverlaps?: DatasetAutoResolveSetting;
   files: DatasetFile[];
   currentFileId: string | null;
 }
@@ -83,6 +99,10 @@ interface State extends UiState {
 
   setDatasetExportType: (id: string, t: ExportOutputType) => void;
   setDatasetDefaultMode: (id: string, mode: string) => void;
+  setDatasetAutoResolveOverlaps: (
+    id: string,
+    setting: DatasetAutoResolveSetting | undefined,
+  ) => void;
 
   addFiles: (datasetId: string, files: DatasetFile[]) => void;
   removeFile: (datasetId: string, fileId: string) => void;
@@ -104,6 +124,7 @@ interface State extends UiState {
       clearResolved: boolean;
       surrogateText?: string | null;
       annotationsOnSurrogate?: EntitySpanResponse[] | null;
+      autoResolve?: AutoResolveStamp | null;
     },
   ) => void;
 }
@@ -346,6 +367,18 @@ export const useProductionStore = create<State>()(
           };
         }),
 
+      setDatasetAutoResolveOverlaps: (id, setting) =>
+        set((s) => {
+          const ds = s.datasets[id];
+          if (!ds) return s;
+          return {
+            datasets: {
+              ...s.datasets,
+              [id]: { ...ds, autoResolveOverlaps: setting, updatedAt: nowIso() },
+            },
+          };
+        }),
+
       addFiles: (datasetId, files) =>
         set((s) => {
           const ds = s.datasets[datasetId];
@@ -477,6 +510,7 @@ export const useProductionStore = create<State>()(
               processingTimeMs: opts.processingTimeMs,
               surrogateText: opts.surrogateText ?? null,
               annotationsOnSurrogate: opts.annotationsOnSurrogate ?? null,
+              lastAutoResolve: opts.autoResolve ?? null,
               savedOutput: null,
               resolved: opts.clearResolved ? false : f.resolved,
               error: undefined,

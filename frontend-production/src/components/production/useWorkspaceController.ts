@@ -2,10 +2,14 @@ import { useEffect, useMemo, useState } from 'react';
 import { useModes } from '../../hooks/useModes';
 import { useBatchDetect } from './useBatchDetect';
 import { useActiveDataset, useProductionStore } from './store';
+import type { ResolveStrategyId } from '../../lib/spanOverlapConflicts';
 
 export function useWorkspaceController() {
   const reviewer = useProductionStore((s) => s.reviewer);
   const setDatasetDefaultMode = useProductionStore((s) => s.setDatasetDefaultMode);
+  const setDatasetAutoResolveOverlaps = useProductionStore(
+    (s) => s.setDatasetAutoResolveOverlaps,
+  );
   const active = useActiveDataset();
   const { data: modesData } = useModes();
   const { run, cancel, running, progress } = useBatchDetect();
@@ -102,6 +106,27 @@ export function useWorkspaceController() {
         : 'Run detection'
       : `Run on ${selectionCount} selected`;
 
+  const autoResolveSetting = active?.autoResolveOverlaps;
+  const autoResolveEnabled = Boolean(autoResolveSetting?.enabled);
+  const autoResolveStrategy: ResolveStrategyId =
+    autoResolveSetting?.strategy ?? 'label_priority';
+
+  const setAutoResolveEnabled = (enabled: boolean) => {
+    if (!active) return;
+    setDatasetAutoResolveOverlaps(active.id, {
+      enabled,
+      strategy: autoResolveStrategy,
+    });
+  };
+
+  const setAutoResolveStrategy = (strategy: ResolveStrategyId) => {
+    if (!active) return;
+    setDatasetAutoResolveOverlaps(active.id, {
+      enabled: autoResolveEnabled,
+      strategy,
+    });
+  };
+
   return {
     active,
     reviewer,
@@ -122,5 +147,9 @@ export function useWorkspaceController() {
     toggleSelectAllVisible,
     handleRun,
     cancel,
+    autoResolveEnabled,
+    autoResolveStrategy,
+    setAutoResolveEnabled,
+    setAutoResolveStrategy,
   };
 }

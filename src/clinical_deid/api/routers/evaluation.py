@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field, field_validator
 from clinical_deid.api.auth import require_admin
 from clinical_deid.api.deps import SessionDep
 from clinical_deid.config import get_settings
+from clinical_deid.eval.metrics_json import build_persisted_eval_metrics, eval_metrics_to_dict
 from clinical_deid.eval_store import EvalResultInfo, list_eval_results, load_eval_result, save_eval_result
 from clinical_deid.pipeline_store import load_pipeline_config
 from clinical_deid.pipes.registry import load_pipeline
@@ -181,17 +182,6 @@ def _data_to_detail(data: dict[str, Any]) -> EvalRunDetail:
     )
 
 
-def _match_result_to_dict(mr) -> dict[str, Any]:
-    return {
-        "precision": mr.precision,
-        "recall": mr.recall,
-        "f1": mr.f1,
-        "tp": mr.tp,
-        "fp": mr.fp,
-        "fn": mr.fn,
-    }
-
-
 def _span_to_dict(span) -> dict[str, Any]:
     return {"start": span.start, "end": span.end, "label": span.label}
 
@@ -208,7 +198,7 @@ def _build_document_level(doc_results, *, include_spans: bool, limit: int) -> di
     for dr in trimmed:
         item: dict[str, Any] = {
             "document_id": dr.document_id,
-            "metrics": _eval_metrics_to_dict(dr.metrics),
+            "metrics": eval_metrics_to_dict(dr.metrics),
             "risk_weighted_recall": dr.risk_weighted_recall,
             "false_positive_count": len(dr.false_positives),
             "false_negative_count": len(dr.false_negatives),
@@ -225,44 +215,6 @@ def _build_document_level(doc_results, *, include_spans: bool, limit: int) -> di
         "document_level_truncated": truncated,
         "document_level_total": len(doc_results),
         "document_level_includes_spans": include_spans,
-    }
-
-
-def _eval_metrics_to_dict(em) -> dict[str, Any]:
-    return {
-        "strict": _match_result_to_dict(em.strict),
-        "exact_boundary": _match_result_to_dict(em.exact_boundary),
-        "partial_overlap": _match_result_to_dict(em.partial_overlap),
-        "token_level": _match_result_to_dict(em.token_level),
-    }
-
-
-def _redaction_metrics_to_dict(rm) -> dict[str, Any]:
-    return {
-        "gold_phi_count": rm.gold_phi_count,
-        "leaked_phi_count": rm.leaked_phi_count,
-        "leakage_rate": rm.leakage_rate,
-        "redaction_recall": rm.redaction_recall,
-        "over_redaction_chars": rm.over_redaction_chars,
-        "original_length": rm.original_length,
-        "redacted_length": rm.redacted_length,
-        "per_label": [
-            {
-                "label": ll.label,
-                "gold_count": ll.gold_count,
-                "leaked_count": ll.leaked_count,
-                "leakage_rate": ll.leakage_rate,
-            }
-            for ll in rm.per_label
-        ],
-        "leaked_spans": [
-            {
-                "label": ls.label,
-                "original_text": ls.original_text,
-                "found_at": ls.found_at,
-            }
-            for ls in rm.leaked_spans
-        ],
     }
 
 
@@ -465,33 +417,12 @@ def run_evaluation(session: SessionDep, body: EvalRunRequest) -> EvalRunDetail:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         sample_info["saved_dataset_name"] = spec.dataset_name.strip()
 
-    # Serialize metrics
-    per_label_dict = {}
-    for label, lm in result.per_label.items():
-        per_label_dict[label] = {
-            "strict": _match_result_to_dict(lm.strict),
-            "partial_overlap": _match_result_to_dict(lm.partial_overlap),
-            "token_level": _match_result_to_dict(lm.token_level),
-            "support": lm.support,
-        }
-
-    metrics: dict[str, Any] = {
-        "overall": _eval_metrics_to_dict(result.overall),
-        "per_label": per_label_dict,
-        "risk_weighted_recall": result.risk_weighted_recall,
-        "label_confusion": result.label_confusion,
-        "has_redaction": result.has_redaction,
-        "risk_profile_name": eval_risk_profile.name,
-    }
-
-    if result.redaction is not None:
-        metrics["redaction"] = _redaction_metrics_to_dict(result.redaction)
-
-    if sample_info is not None:
-        metrics["sample"] = sample_info
-
-    if rem:
-        metrics["eval_pred_label_remap"] = dict(rem)
+    metrics = build_persisted_eval_metrics(
+        result,
+        risk_profile_name=eval_risk_profile.name,
+        sample_info=sample_info,
+        eval_pred_label_remap=rem,
+    )
 
     # Persist eval result to filesystem
     result_path = save_eval_result(

@@ -15,6 +15,8 @@ import {
   PanelRightOpen,
   Pencil,
   Plus,
+  Shuffle,
+  Database,
 } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import PipelineSelector from '../shared/PipelineSelector';
@@ -29,6 +31,8 @@ import InferencePipelineTab from './InferencePipelineTab';
 import OutputModeToggle from '../shared/OutputModeToggle';
 import EditableSource from './EditableSource';
 import { useProcessText, useRedactDocument } from '../../hooks/useProcess';
+import { useDatasets } from '../../hooks/useDatasets';
+import { previewDataset, getDocument } from '../../api/datasets';
 import {
   listInferenceRuns,
   saveInferenceSnapshot,
@@ -170,6 +174,8 @@ export default function InferenceView() {
   const [outputCollapsed, setOutputCollapsed] = useState(false);
   const [asideCollapsed, setAsideCollapsed] = useState(false);
   const [sourceEditDraft, setSourceEditDraft] = useState<string | null>(null);
+  const [sampleDataset, setSampleDataset] = useState('');
+  const [isSampling, setIsSampling] = useState(false);
 
   const highlighterRef = useRef<SpanHighlighterHandle>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
@@ -350,6 +356,23 @@ export default function InferenceView() {
     setEditedSpans(null);
     setSourceEditDraft(null);
     setInputExpanded(true);
+  };
+
+  const { data: datasets = [] } = useDatasets();
+
+  const handleSampleFromDataset = async () => {
+    const ds = datasets.find((d) => d.name === sampleDataset);
+    if (!ds || ds.document_count === 0) return;
+    setIsSampling(true);
+    try {
+      const offset = Math.floor(Math.random() * ds.document_count);
+      const preview = await previewDataset(sampleDataset, { limit: 1, offset });
+      if (preview.items.length === 0) return;
+      const doc = await getDocument(sampleDataset, preview.items[0].document_id);
+      setText(doc.text);
+    } finally {
+      setIsSampling(false);
+    }
   };
 
   const canSave = result && !saveMutation.isPending;
@@ -753,6 +776,37 @@ export default function InferenceView() {
           <div className="mx-auto max-w-5xl">
             <div className="mb-1 text-xs font-medium text-gray-600">Input text</div>
             <TextInput value={text} onChange={setText} />
+            {datasets.length > 0 && (
+              <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                <Database size={12} className="shrink-0 text-gray-400" />
+                <span className="text-xs text-gray-400">Sample from dataset:</span>
+                <select
+                  className="rounded border border-gray-200 bg-white px-1.5 py-0.5 text-xs text-gray-700"
+                  value={sampleDataset}
+                  onChange={(e) => setSampleDataset(e.target.value)}
+                >
+                  <option value="">Choose dataset…</option>
+                  {datasets.map((d) => (
+                    <option key={d.name} value={d.name}>
+                      {d.name} ({d.document_count} docs)
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  onClick={handleSampleFromDataset}
+                  disabled={!sampleDataset || isSampling}
+                  className="flex items-center gap-1 rounded border border-gray-200 bg-white px-2 py-0.5 text-xs text-gray-700 hover:bg-gray-50 disabled:opacity-40"
+                >
+                  {isSampling ? (
+                    <Loader2 size={11} className="animate-spin" />
+                  ) : (
+                    <Shuffle size={11} />
+                  )}
+                  Sample
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}

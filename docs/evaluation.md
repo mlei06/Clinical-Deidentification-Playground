@@ -2,6 +2,12 @@
 
 Span-level evaluation metrics for measuring PHI detection quality. Available as a Python library, via `POST /eval/run`, and via `clinical-deid eval`.
 
+## Stored eval runs (`data/evaluations/`)
+
+Server-side and CLI evals persist a JSON file per run under **`data/evaluations/`** (configurable with `CLINICAL_DEID_EVALUATIONS_DIR`). The filename is **`{pipeline_name}_{YYYYMMDD_HHMMSS}.json`** (UTC timestamp from `save_eval_result` in `eval_store.py`). The Playground **Evaluate** view lists these with `GET /eval/runs` and loads detail with `GET /eval/runs/{id}` — so you can open **old runs** in the UI after the fact, whether you started the job from the **Playground**, the **HTTP API**, or **`clinical-deid eval`**. The file stores aggregate metrics and metadata; per-document debug payloads (when requested) are **not** written to disk (see API docs).
+
+**Shipped** `discharge-summaries__<pipeline>.json` files in the same folder are **documentation snapshots** produced by `scripts/emit_discharge_eval_snapshots.py`, not the same naming pattern as live runs.
+
 **Labels:** `evaluate_pipeline` (and the HTTP/CLI entry points) compare **raw** gold and predicted span `label` strings. There is no `LabelSpace` normalization at the eval step — if your gold file uses different names than the pipeline, use a **`label_mapper`** (or per-detector remaps) so output strings match the corpus, or change the gold. Inference responses (`POST /process/*`) may still apply `default_label_space().normalize` to span labels; that is separate from evaluation.
 
 ## Strict micro F1
@@ -99,6 +105,6 @@ for label in ["PATIENT", "DATE", "PHONE", "HOSPITAL"]:
 
 ## API and CLI
 
-Server-side evaluation is available via `POST /eval/run` and the `clinical-deid eval` CLI. The runner supports multiple matching modes (strict, exact boundary, partial overlap, token-level), risk-weighted metrics, run comparison, and per-document breakdowns — see `src/clinical_deid/eval/` and the OpenAPI schema when `/docs` is enabled.
+Server-side evaluation is available via `POST /eval/run` and the `clinical-deid eval` CLI. Both **write** a result file under `data/evaluations/` (see [Stored eval runs](#stored-eval-runs-dataevaluations) above). The runner supports multiple matching modes (strict, exact boundary, partial overlap, token-level), risk-weighted metrics, run comparison, and per-document breakdowns — see `src/clinical_deid/eval/` and the OpenAPI schema when `/docs` is enabled.
 
 **Gold data sources:** use a **registered dataset** (`dataset_name`) or a **`dataset_path` to a `.jsonl` file** on the server (paths must stay within the corpora root — `CLINICAL_DEID_CORPORA_DIR`, default `data/corpora/`). BRAT gold must be converted to JSONL first (Datasets tab: **Convert BRAT → JSONL**, or `clinical-deid dataset import-brat`). In Python, `load_annotated_corpus` can still load BRAT or JSONL from any path for ad-hoc scripts.

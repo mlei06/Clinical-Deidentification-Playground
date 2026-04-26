@@ -245,9 +245,9 @@ def dataset_ingest_run(
     \b
     Examples:
       clinical-deid dataset ingest-run --input notes/ \\
-        --pipeline fast --output-name notes_fast_silver
+        --pipeline clinical-fast --output-name notes_clinical_fast_silver
       clinical-deid dataset ingest-run --input notes.jsonl \\
-        --pipeline my-pipeline --output-jsonl /tmp/out.jsonl
+        --pipeline clinical-fast --output-jsonl /tmp/out.jsonl
     """
     from clinical_deid.config import get_settings
     from clinical_deid.dataset_store import commit_colocated_dataset, list_datasets

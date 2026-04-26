@@ -36,7 +36,7 @@ Everything else requires an admin key — use the Playground UI for pipeline aut
 
 ## Key features
 
-- **Batch NER workspace** — load a corpus, detect spans across all documents using a selected mode, review and resolve detections per document
+- **Batch NER workspace** — load a corpus, detect spans using a **deploy mode** (from `data/modes.json`: seeded aliases `fast` → `clinical-fast` (default), `presidio`, `transformer`, `transformer_presidio`), then review and resolve per document
 - **Virtualized file list** — `@tanstack/react-virtual` for smooth scrolling on large corpora (>200 files)
 - **Keyboard shortcuts** (active when workbench is focused and no text input is selected):
   - `↑` / `↓` — previous / next file

@@ -13,6 +13,16 @@ import DatasetFileList from '../DatasetFileList';
 import ShortcutCheatSheet from '../ShortcutCheatSheet';
 import { useFileListKeybinds } from '../useFileListKeybinds';
 import { useWorkspaceController } from '../useWorkspaceController';
+import {
+  RESOLVE_STRATEGY_LABEL,
+  type ResolveStrategyId,
+} from '../../../lib/spanOverlapConflicts';
+
+const RESOLVE_STRATEGIES: ResolveStrategyId[] = [
+  'label_priority',
+  'longest_wins',
+  'leftmost_first',
+];
 
 export default function DetectStep() {
   const {
@@ -34,6 +44,10 @@ export default function DetectStep() {
     toggleSelectAllVisible,
     handleRun,
     cancel,
+    autoResolveEnabled,
+    autoResolveStrategy,
+    setAutoResolveEnabled,
+    setAutoResolveStrategy,
   } = useWorkspaceController();
   const [showShortcuts, setShowShortcuts] = useState(false);
   const navigate = useNavigate();
@@ -100,6 +114,31 @@ export default function DetectStep() {
             />
             Set as dataset default
           </label>
+          <div className="flex flex-wrap items-center gap-1 text-[10px] text-gray-500">
+            <label className="flex items-center gap-1">
+              <input
+                type="checkbox"
+                checked={autoResolveEnabled}
+                onChange={(e) => setAutoResolveEnabled(e.target.checked)}
+              />
+              Auto-resolve overlapping spans
+            </label>
+            <select
+              value={autoResolveStrategy}
+              onChange={(e) =>
+                setAutoResolveStrategy(e.target.value as ResolveStrategyId)
+              }
+              disabled={!autoResolveEnabled}
+              className="rounded border border-gray-200 bg-white px-1 py-0.5 text-[10px] text-gray-700 disabled:opacity-50"
+              title="Strategy applied to detected spans before they replace existing annotations"
+            >
+              {RESOLVE_STRATEGIES.map((s) => (
+                <option key={s} value={s}>
+                  {RESOLVE_STRATEGY_LABEL[s]}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
 
         <div className="ml-auto flex items-center gap-2">

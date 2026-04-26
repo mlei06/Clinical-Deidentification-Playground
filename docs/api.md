@@ -86,7 +86,7 @@ Validates a pipeline and returns `output_label_space` when the graph loads. Body
 
 Base path: `/process`. **`inference`-scoped** keys may call these routes; **`admin`** keys always can. For **`inference`** callers, the resolved pipeline name must appear on the deploy **allowlist** in `data/modes.json` when `allowed_pipelines` is set; **admin** bypasses the allowlist.
 
-`{pipeline_name}` may be a **saved pipeline name** or a **mode alias** from `data/modes.json` (e.g. `fast`).
+`{pipeline_name}` may be a **saved pipeline name** (JSON stem, e.g. `clinical-fast`) or a **mode alias** from `data/modes.json` (seeded: `fast`, `presidio`, `transformer`, `transformer_presidio`). The deploy **`default_mode`** (seeded: `fast`) is used by `/process/scrub` when the client does not override the mode.
 
 Query parameters on run endpoints include:
 
@@ -125,6 +125,8 @@ Base path: `/inference`. Saved runs under `data/inference_runs/` — list, get, 
 ## Evaluation (admin)
 
 Base path: `/eval` — `POST /eval/run`, list/detail/compare runs (admin when auth is on).
+
+Each `POST /eval/run` **persists** a JSON file under `CLINICAL_DEID_EVALUATIONS_DIR` (default `data/evaluations/`) as `{pipeline_name}_{timestamp}.json`. `GET /eval/runs` reads that directory (the Playground **Evaluate** run history). **`clinical-deid eval` uses the same store**, so CLI-created files show up in the list too.
 
 ### `POST /eval/run`
 
@@ -189,14 +191,14 @@ annotated output as a new dataset.
 ```json
 {
   "source_path": "raw_txts",
-  "pipeline_name": "fast",
-  "output_name": "raw_txts_fast_silver"
+  "pipeline_name": "clinical-fast",
+  "output_name": "raw_txts_clinical_fast_silver"
 }
 ```
 
 - `source_path` is resolved **relative to `CORPORA_DIR`** (absolute paths must
   still resolve under it); `..` escapes are rejected with 400.
-- `pipeline_name` must be a saved pipeline (`GET /pipelines`).
+- `pipeline_name` must be a **saved** pipeline file stem (not a `modes.json` mode alias; use e.g. `clinical-fast` — see `GET /pipelines`).
 - `output_name` must not already exist.
 
 ### `POST /datasets/{name}/export`

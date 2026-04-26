@@ -71,6 +71,7 @@ Dashboard for measuring pipeline quality against gold-standard annotated data.
 - **Eval mode** toggle — run on the full (split-filtered) corpus or a **random sample** of *N* documents, with a fixed seed (reproducible) or a fresh seed per run (returned as `sample_seed_used`).
 - When sampling, an optional **Save sample as dataset** checkbox materializes the sampled docs as a new registered JSONL dataset (provenance captured in its `dataset.json`).
 - **Per-document inspection** toggles return (but do not persist) per-doc scores — optionally with gold/pred spans — so the dashboard can show a sortable worst-docs table and a gold-vs-pred highlight view. Persisted eval JSON stays free of raw document text; re-load from history re-runs without per-doc data.
+- **Run history** — every completed `POST /eval/run` (including from this view) is saved to **`data/evaluations/{pipeline}_{timestamp}.json`**. The run picker lists these files (newest first) so you can **re-open** past evals. **`clinical-deid eval` writes the same kind of file**, so CLI runs appear in the list too.
 - Run evaluation and view: precision, recall, F1 across all matching modes (strict, partial, token-level, exact boundary).
 - Per-label breakdown table with sortable columns.
 - Confusion matrix showing label misclassification patterns.
@@ -112,7 +113,7 @@ Dictionaries are referenced by name in whitelist/blacklist pipe configs.
 
 Configure inference-scoped access to `/process/*`.
 
-- **Inference modes** — map named modes (e.g. "fast", "balanced") to saved pipelines. Clients call `POST /process/<mode>` and the API routes to the configured pipeline.
+- **Inference modes** — map short **mode** keys to a saved pipeline `name` (seeded: `fast` → `clinical-fast`, `presidio` → `presidio`, `transformer` → `clinical-transformer`, `transformer_presidio` → `clinical-transformer-presidio`). Clients call `POST /process/<mode>` and the API resolves the alias. This is **not** the same as CLI `--profile` `balanced` / `accurate` (those are in-memory only unless you add matching entries to `modes.json`).
 - **Default mode** — used by `/process/scrub` when no mode is specified.
 - **Pipeline allowlist** — when enabled, inference-scoped callers may only invoke checked pipelines; admin-scoped callers bypass the allowlist.
 

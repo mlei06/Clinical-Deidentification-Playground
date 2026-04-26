@@ -226,16 +226,16 @@ dataset by running a saved pipeline over it. The result is an annotated
 corpus (`corpus.jsonl` + `dataset.json`) under `CORPORA_DIR/<output>`.
 
 ```bash
-# CLI — dir of .txt files
+# CLI — dir of .txt files (name must match a file under data/pipelines/<name>.json, not a /process mode alias)
 clinical-deid dataset ingest-run \
   --input data/corpora/raw_txts \
-  --pipeline fast \
-  --output-name raw_txts_fast_silver
+  --pipeline clinical-fast \
+  --output-name raw_txts_clinical_fast_silver
 
 # CLI — one-off file (no registration)
 clinical-deid dataset ingest-run \
   --input notes.jsonl \
-  --pipeline my-pipeline \
+  --pipeline clinical-fast \
   --output-jsonl /tmp/out.jsonl
 
 # API — source_path is resolved under CORPORA_DIR; '..' is rejected
@@ -243,8 +243,8 @@ curl -X POST http://localhost:8000/datasets/ingest-from-pipeline \
   -H "content-type: application/json" \
   -d '{
     "source_path": "raw_txts",
-    "pipeline_name": "fast",
-    "output_name": "raw_txts_fast_silver"
+    "pipeline_name": "clinical-fast",
+    "output_name": "raw_txts_clinical_fast_silver"
   }'
 ```
 

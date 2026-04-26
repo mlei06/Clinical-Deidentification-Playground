@@ -1,5 +1,6 @@
 import type { EntitySpanResponse } from '../api/types';
 import { CANONICAL_LABELS } from './canonicalLabels';
+import { entitySpanKey } from './entitySpanKey';
 
 /**
  * Mirrors ``DEFAULT_LABEL_PRIORITY`` in ``clinical_deid/pipes/span_merge.py``
@@ -43,9 +44,20 @@ function hasOverlapWithKept(span: EntitySpanResponse, kept: EntitySpanResponse[]
   return kept.some((k) => overlaps(span, k));
 }
 
+export type ResolveStrategyId = 'label_priority' | 'longest_wins' | 'leftmost_first';
+
+export const RESOLVE_STRATEGY_LABEL: Record<ResolveStrategyId, string> = {
+  label_priority: 'Label priority',
+  longest_wins: 'Longest wins',
+  leftmost_first: 'Leftmost first',
+};
+
 /**
  * Same greedy merge as ``merge_label_priority`` / ``apply_resolve_spans(..., strategy="label_priority")``.
  * Higher-priority labels (earlier in *labelPriority*) win; ties break by longer span, then leftmost.
+ *
+ * Calling with an empty ``labelPriority`` collapses every label to the same rank,
+ * making length the primary sort key — i.e. "longest wins."
  */
 export function mergeLabelPrioritySpans(
   spans: EntitySpanResponse[],
@@ -72,49 +84,59 @@ export function mergeLabelPrioritySpans(
   return kept;
 }
 
-/** Stable key for a character range (same as traceConflicts.conflictRangeKey). */
+/**
+ * Greedy "leftmost first" — sort by start ascending, **shorter** spans winning ties,
+ * then label, then deterministic. Earlier, smaller chunks beat later, larger ones.
+ */
+export function mergeLeftmostFirstSpans(spans: EntitySpanResponse[]): EntitySpanResponse[] {
+  const all = [...spans].sort((a, b) => {
+    if (a.start !== b.start) return a.start - b.start;
+    const la = a.end - a.start;
+    const lb = b.end - b.start;
+    if (la !== lb) return la - lb;
+    return a.label.localeCompare(b.label);
+  });
+  const kept: EntitySpanResponse[] = [];
+  for (const span of all) {
+    if (!hasOverlapWithKept(span, kept)) {
+      kept.push(span);
+    }
+  }
+  kept.sort((a, b) => a.start - b.start || a.end - b.end || a.label.localeCompare(b.label));
+  return kept;
+}
+
+export function applyResolveStrategy(
+  spans: EntitySpanResponse[],
+  strategy: ResolveStrategyId,
+): EntitySpanResponse[] {
+  switch (strategy) {
+    case 'label_priority':
+      return mergeLabelPrioritySpans(spans);
+    case 'longest_wins':
+      return mergeLabelPrioritySpans(spans, []);
+    case 'leftmost_first':
+      return mergeLeftmostFirstSpans(spans);
+  }
+}
+
+/** Stable key for a character range. Retained for span-level rendering hooks. */
 export function spanRangeKey(start: number, end: number): string {
   return `${start}-${end}`;
 }
 
-/** Group spans that share identical [start, end). */
-export function groupSpansByExactRange(spans: EntitySpanResponse[]): Map<string, EntitySpanResponse[]> {
-  const m = new Map<string, EntitySpanResponse[]>();
-  for (const s of spans) {
-    const k = spanRangeKey(s.start, s.end);
-    const list = m.get(k) ?? [];
-    list.push(s);
-    m.set(k, list);
-  }
-  return m;
-}
+// ---------------------------------------------------------------------------
+// Overlap groups (connected components of the overlap graph)
+// ---------------------------------------------------------------------------
 
-export interface SpanConflictSet {
-  start: number;
-  end: number;
-  text: string;
-  spans: EntitySpanResponse[];
-}
-
-/**
- * Ranges where two or more spans share the same indices (possibly different labels).
- */
-export function findConflictSets(
-  spans: EntitySpanResponse[],
-  originalText: string,
-): SpanConflictSet[] {
-  const byRange = groupSpansByExactRange(spans);
-  const out: SpanConflictSet[] = [];
-  for (const [, list] of byRange) {
-    if (list.length <= 1) continue;
-    const uniqLabels = new Set(list.map((s) => s.label));
-    if (uniqLabels.size <= 1) continue;
-    const { start, end } = list[0]!;
-    const text = originalText.slice(start, end);
-    out.push({ start, end, text, spans: [...list] });
-  }
-  out.sort((a, b) => a.start - b.start || a.end - b.end);
-  return out;
+export interface OverlapGroup {
+  /** Stable id derived from extents + member set; remains valid as long as the same members exist. */
+  id: string;
+  members: EntitySpanResponse[];
+  minStart: number;
+  maxEnd: number;
+  /** ``originalText.slice(minStart, maxEnd)`` — convenience for headers / titles. */
+  excerpt: string;
 }
 
 /** Lower index in CANONICAL_LABELS = higher priority for display / default primary. */
@@ -133,43 +155,179 @@ export function pickPrimarySpan(spans: EntitySpanResponse[]): EntitySpanResponse
 }
 
 /**
+ * Connected-component grouping of *spans* by overlap. Groups with a single member
+ * (i.e. spans that don't overlap anything) are dropped — only conflicts are returned.
+ *
+ * Uses a sweepline over span endpoints to merge overlapping intervals into the same
+ * union-find component, so this runs in O(n log n).
+ */
+export function findOverlapGroups(
+  spans: EntitySpanResponse[],
+  originalText: string,
+): OverlapGroup[] {
+  if (spans.length < 2) return [];
+
+  const indexed = spans.map((s, i) => ({ s, i }));
+  // Sort by start asc, end desc — long-extent spans seen first within a coordinate.
+  indexed.sort((a, b) => a.s.start - b.s.start || b.s.end - a.s.end);
+
+  const parent = new Array(spans.length).fill(0).map((_, i) => i);
+  const find = (x: number): number => {
+    let cur = x;
+    while (parent[cur] !== cur) {
+      parent[cur] = parent[parent[cur]];
+      cur = parent[cur];
+    }
+    return cur;
+  };
+  const union = (a: number, b: number) => {
+    const ra = find(a);
+    const rb = find(b);
+    if (ra !== rb) parent[ra] = rb;
+  };
+
+  // Active set: spans we've started but not yet exited. We keep them ordered by end asc
+  // so we can drop everything with end <= current.start cheaply.
+  const active: { idx: number; end: number }[] = [];
+  for (const { s, i } of indexed) {
+    while (active.length > 0 && active[0]!.end <= s.start) {
+      active.shift();
+    }
+    for (const a of active) union(a.idx, i);
+    // Insert maintaining end-asc order.
+    const insertAt = active.findIndex((a) => a.end > s.end);
+    const node = { idx: i, end: s.end };
+    if (insertAt < 0) active.push(node);
+    else active.splice(insertAt, 0, node);
+  }
+
+  const components = new Map<number, number[]>();
+  for (let i = 0; i < spans.length; i++) {
+    const r = find(i);
+    const list = components.get(r) ?? [];
+    list.push(i);
+    components.set(r, list);
+  }
+
+  const out: OverlapGroup[] = [];
+  for (const memberIdxs of components.values()) {
+    if (memberIdxs.length < 2) continue;
+    const members = memberIdxs
+      .map((i) => spans[i]!)
+      .sort((a, b) => a.start - b.start || a.end - b.end || a.label.localeCompare(b.label));
+    const minStart = members.reduce((m, x) => Math.min(m, x.start), Infinity);
+    const maxEnd = members.reduce((m, x) => Math.max(m, x.end), -Infinity);
+    const firstKey = entitySpanKey(members[0]!);
+    out.push({
+      id: `g${minStart}-${maxEnd}-${members.length}-${firstKey}`,
+      members,
+      minStart,
+      maxEnd,
+      excerpt: originalText.slice(minStart, maxEnd),
+    });
+  }
+  out.sort((a, b) => a.minStart - b.minStart || a.maxEnd - b.maxEnd);
+  return out;
+}
+
+function memberKeySet(group: OverlapGroup): Set<string> {
+  return new Set(group.members.map((m) => entitySpanKey(m)));
+}
+
+/** Drop every member of *group* from *spans*, then re-add *kept*. */
+export function keepInOverlapGroup(
+  spans: EntitySpanResponse[],
+  group: OverlapGroup,
+  kept: EntitySpanResponse,
+): EntitySpanResponse[] {
+  const drop = memberKeySet(group);
+  const keptKey = entitySpanKey(kept);
+  const next = spans.filter((s) => !drop.has(entitySpanKey(s)));
+  // Avoid a duplicate if *kept* somehow survived the filter (shouldn't, but defensive).
+  if (!next.some((s) => entitySpanKey(s) === keptKey)) next.push(kept);
+  next.sort(
+    (a, b) => a.start - b.start || a.end - b.end || a.label.localeCompare(b.label),
+  );
+  return next;
+}
+
+/** Drop every member of *group* from *spans*. */
+export function dropOverlapGroup(
+  spans: EntitySpanResponse[],
+  group: OverlapGroup,
+): EntitySpanResponse[] {
+  const drop = memberKeySet(group);
+  return spans.filter((s) => !drop.has(entitySpanKey(s)));
+}
+
+// ---------------------------------------------------------------------------
+// Coverage segments (highlighter substrate)
+// ---------------------------------------------------------------------------
+
+export type CoverageSegment =
+  | { kind: 'plain'; start: number; end: number }
+  | { kind: 'span'; start: number; end: number; span: EntitySpanResponse }
+  | { kind: 'overlap'; start: number; end: number; spans: EntitySpanResponse[] };
+
+/**
+ * Sweepline over span endpoints. Returns a contiguous, non-overlapping list of
+ * segments covering ``[0, textLength)``. Segments where two or more spans cover
+ * the same characters are emitted with ``kind: 'overlap'``; this is the
+ * substrate for the conflict-strip overlay.
+ *
+ * The output is order-stable — segments are sorted by ``start`` and adjacent
+ * segments with the same kind are not merged (so callers can key by index).
+ */
+export function buildCoverageSegments(
+  textLength: number,
+  spans: EntitySpanResponse[],
+): CoverageSegment[] {
+  if (textLength <= 0) return [];
+  if (spans.length === 0) {
+    return [{ kind: 'plain', start: 0, end: textLength }];
+  }
+
+  // Boundaries: every span start, every span end, plus 0 and textLength.
+  const boundarySet = new Set<number>([0, textLength]);
+  for (const s of spans) {
+    if (s.start >= 0 && s.start <= textLength) boundarySet.add(s.start);
+    if (s.end >= 0 && s.end <= textLength) boundarySet.add(s.end);
+  }
+  const boundaries = [...boundarySet].sort((a, b) => a - b);
+
+  const segments: CoverageSegment[] = [];
+  for (let i = 0; i < boundaries.length - 1; i++) {
+    const start = boundaries[i]!;
+    const end = boundaries[i + 1]!;
+    if (start === end) continue;
+    const covering = spans.filter((s) => s.start <= start && s.end >= end);
+    if (covering.length === 0) {
+      segments.push({ kind: 'plain', start, end });
+    } else if (covering.length === 1) {
+      segments.push({ kind: 'span', start, end, span: covering[0]! });
+    } else {
+      segments.push({ kind: 'overlap', start, end, spans: covering });
+    }
+  }
+  return segments;
+}
+
+/**
  * One span per exact range — the primary label wins for rendering the annotated source.
+ * Retained for surrogate output rendering, which has its own ambiguity to resolve.
  */
 export function dedupeSpansKeepPrimary(spans: EntitySpanResponse[]): EntitySpanResponse[] {
-  const byRange = groupSpansByExactRange(spans);
+  const byRange = new Map<string, EntitySpanResponse[]>();
+  for (const s of spans) {
+    const k = spanRangeKey(s.start, s.end);
+    const list = byRange.get(k) ?? [];
+    list.push(s);
+    byRange.set(k, list);
+  }
   const out: EntitySpanResponse[] = [];
   for (const list of byRange.values()) {
     out.push(pickPrimarySpan(list));
   }
   out.sort((a, b) => a.start - b.start || a.end - b.end);
   return out;
-}
-
-/** After resolution: remove every span at this range, then add the kept span. */
-export function resolveConflictKeepSpan(
-  spans: EntitySpanResponse[],
-  kept: EntitySpanResponse,
-): EntitySpanResponse[] {
-  const rk = spanRangeKey(kept.start, kept.end);
-  const next = spans.filter((s) => spanRangeKey(s.start, s.end) !== rk);
-  next.push(kept);
-  next.sort((a, b) => a.start - b.start || a.end - b.end);
-  return next;
-}
-
-/** After resolution: drop every span at this range — the user opted to keep none of the candidates. */
-export function resolveConflictDropAll(
-  spans: EntitySpanResponse[],
-  range: { start: number; end: number },
-): EntitySpanResponse[] {
-  const rk = spanRangeKey(range.start, range.end);
-  return spans.filter((s) => spanRangeKey(s.start, s.end) !== rk);
-}
-
-export function rangeHasUnresolvedConflict(
-  conflictSets: SpanConflictSet[],
-  start: number,
-  end: number,
-): boolean {
-  return conflictSets.some((c) => c.start === start && c.end === end);
 }

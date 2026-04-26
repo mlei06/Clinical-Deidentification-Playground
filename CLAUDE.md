@@ -43,7 +43,7 @@ All mutable state lives under `data/` and all model weights live under `models/`
 | What | Storage | Location |
 |------|---------|----------|
 | Pipelines | JSON files | `data/pipelines/{name}.json` (mutable via UI or on disk). **Shipped examples:** `clinical-fast`, `presidio`, `clinical-transformer`, `clinical-transformer-presidio` (tracked JSON). |
-| Eval results | JSON files | `data/evaluations/{pipeline}_{timestamp}.json`. **Shipped:** `discharge-summaries__<pipeline>.json` for the tracked `discharge_summaries` corpus; regenerate with `python scripts/emit_discharge_eval_snapshots.py` |
+| Eval results | JSON files | `data/evaluations/{pipeline}_{timestamp}.json` (Playground **Evaluate**, `POST /eval/run`, and **`clinical-deid eval`** — all browsable in the UI via `GET /eval/runs`). **Shipped doc snapshots:** `discharge-summaries__<pipeline>.json` for the tracked `discharge_summaries` corpus; regenerate with `python scripts/emit_discharge_eval_snapshots.py` |
 | Inference runs | JSON files | `data/inference_runs/{pipeline}_{timestamp}.json` |
 | Models | Directories | `models/{framework}/{name}/` |
 | Datasets | JSONL under corpora | `data/corpora/{name}/corpus.jsonl` + `dataset.json` (cached analytics). BRAT is ingest/export only — not stored as the canonical corpus layout |
@@ -141,11 +141,17 @@ React 19 + TypeScript + Vite 8 + Tailwind CSS v4. Key libraries:
 
 The Vite dev server (port 3000) proxies `/api/*` to `localhost:8000` with path rewrite (strips `/api` prefix). Frontend code calls `/api/pipelines`, which hits `localhost:8000/pipelines`.
 
-### Three built-in profiles
+### CLI profiles, shipped pipelines, and deploy modes
 
-- **fast** — regex + whitelist + blacklist + resolve (~10ms, no ML)
-- **balanced** — adds presidio NER (falls back to fast if not installed)
+**CLI `--profile`** (in `profiles.py`, for `run` / `batch` / `eval` when you are **not** using `--pipeline`):
+
+- **fast** — regex + whitelist + blacklist + resolve (~10 ms, no ML)
+- **balanced** — adds presidio NER (falls back to fast if not installed) — **default** when neither `--pipeline` nor `--config` is set
 - **accurate** — adds consistency propagation + confidence-based span resolution
+
+**Shipped saved pipelines** (JSON under `data/pipelines/`, stem = name): `clinical-fast`, `presidio`, `clinical-transformer`, `clinical-transformer-presidio`. Use `--pipeline <name>` or the Playground catalog.
+
+**Deploy mode aliases** (`data/modes.json`) map a short name to a saved pipeline for `POST /process/<mode>`, `/process/scrub`, and Production. Seeded: `fast` → `clinical-fast` (**`default_mode`**), `presidio` → `presidio`, `transformer` → `clinical-transformer`, `transformer_presidio` → `clinical-transformer-presidio`. These names are **not** the same as CLI `--profile` `balanced` / `accurate` (no built-in `balanced` mode in `modes.json`).
 
 ## Key directories
 
@@ -290,7 +296,7 @@ clinical-deid setup                 # Verify deps, init DB
 clinical-deid serve                 # Start API server
 ```
 
-Pipeline commands (`run`, `batch`, `eval`) support `--profile` (fast/balanced/accurate), `--pipeline` (saved pipeline by name), `--config` (custom JSON file), and `--redactor` (tag/surrogate).
+Pipeline commands (`run`, `batch`, `eval`) support `--profile` (fast / balanced / accurate), `--pipeline` (saved pipeline name such as `clinical-fast` — **overrides** `--profile`), `--config` (custom JSON file), and `--redactor` (tag/surrogate).
 
 ## Evaluation
 

@@ -2,7 +2,7 @@
 
 | Document | Contents |
 |----------|----------|
-| [../README.md](../README.md) | Repo quick start, CLI, layout, API table |
+| [../README.md](../README.md) | Repo quick start, **CLI profiles vs `data/pipelines` vs `modes.json`**, layout, API table |
 | [configuration.md](configuration.md) | Environment variables, auth scopes, CORS, body limits, `.env` resolution |
 | [api.md](api.md) | HTTP API reference (paths, auth notes) |
 | [deployment.md](deployment.md) | Single-API production layout, Docker, volumes, security |

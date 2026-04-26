@@ -27,11 +27,13 @@ import {
 import { CANONICAL_LABELS } from '../../lib/canonicalLabels';
 import { entitySpanKey } from '../../lib/entitySpanKey';
 import {
-  findConflictSets,
-  mergeLabelPrioritySpans,
-  resolveConflictDropAll,
-  resolveConflictKeepSpan,
+  findOverlapGroups,
+  applyResolveStrategy,
+  keepInOverlapGroup,
+  dropOverlapGroup,
   dedupeSpansKeepPrimary,
+  type OverlapGroup,
+  type ResolveStrategyId,
 } from '../../lib/spanOverlapConflicts';
 import type { EntitySpanResponse } from '../../api/types';
 
@@ -73,9 +75,7 @@ export default function DocumentReviewer({
   const setFileResolved = useProductionStore((s) => s.setFileResolved);
   const saveFileOutput = useProductionStore((s) => s.saveFileOutput);
 
-  const [saveMode, setSaveMode] = useState<SavedOutputMode>(
-    file.savedOutput?.mode ?? 'annotated',
-  );
+  const [savingMode, setSavingMode] = useState<SavedOutputMode | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [note, setNote] = useState(file.note ?? '');
@@ -106,8 +106,8 @@ export default function DocumentReviewer({
     setOutputCollapsed(false);
     setSpanPopover(null);
     setSpanLabelDraft('');
-    setSaveMode(file.savedOutput?.mode ?? 'annotated');
-  }, [file.id, file.savedOutput?.mode]);
+    setSavingMode(null);
+  }, [file.id]);
 
   useEffect(() => {
     if (!spanPopover) return;
@@ -145,21 +145,18 @@ export default function DocumentReviewer({
     });
   }, [file.annotations, file.detectedAt]);
 
-  const conflictSets = useMemo(
-    () => findConflictSets(file.annotations, file.originalText),
+  const overlapGroups = useMemo(
+    () => findOverlapGroups(file.annotations, file.originalText),
     [file.annotations, file.originalText],
   );
 
-  const overlapConflictRangeKeys = useMemo(
-    () => new Set(conflictSets.map((c) => `${c.start}-${c.end}`)),
-    [conflictSets],
-  );
-
-  const overlapSpanCandidatesByRange = useMemo(() => {
-    const m = new Map<string, EntitySpanResponse[]>();
-    for (const c of conflictSets) m.set(`${c.start}-${c.end}`, c.spans);
+  const groupBySpanKey = useMemo(() => {
+    const m = new Map<string, OverlapGroup>();
+    for (const g of overlapGroups) {
+      for (const s of g.members) m.set(entitySpanKey(s), g);
+    }
     return m;
-  }, [conflictSets]);
+  }, [overlapGroups]);
 
   const preview = useMemo(() => previewBytes(file), [file]);
   const stale = useMemo(() => isSavedOutputStale(file), [file]);
@@ -209,46 +206,58 @@ export default function DocumentReviewer({
     }
   };
 
-  const handleResolveConflict = useCallback(
-    (kept: EntitySpanResponse) => {
+  const handleResolveGroupKeep = useCallback(
+    (group: OverlapGroup, kept: EntitySpanResponse) => {
       updateFile(datasetId, file.id, {
-        annotations: resolveConflictKeepSpan(file.annotations, kept),
+        annotations: keepInOverlapGroup(file.annotations, group, kept),
       });
     },
     [datasetId, file.id, file.annotations, updateFile],
   );
 
-  const handleDropConflict = useCallback(
-    (range: { start: number; end: number }) => {
+  const handleResolveGroupDrop = useCallback(
+    (group: OverlapGroup) => {
       updateFile(datasetId, file.id, {
-        annotations: resolveConflictDropAll(file.annotations, range),
+        annotations: dropOverlapGroup(file.annotations, group),
       });
     },
     [datasetId, file.id, file.annotations, updateFile],
   );
 
-  const handleQuickResolve = useCallback(() => {
-    updateFile(datasetId, file.id, {
-      annotations: mergeLabelPrioritySpans(file.annotations),
-    });
-  }, [datasetId, file.id, file.annotations, updateFile]);
+  const handleResolveAllOverlaps = useCallback(
+    (strategy: ResolveStrategyId) => {
+      updateFile(datasetId, file.id, {
+        annotations: applyResolveStrategy(file.annotations, strategy),
+      });
+    },
+    [datasetId, file.id, file.annotations, updateFile],
+  );
 
-  const handleSave = useCallback(async () => {
+  const focusGroup = useCallback((group: OverlapGroup) => {
+    const preferred = group.members[0];
+    if (preferred) setActiveSpanKey(entitySpanKey(preferred));
+    setPulseRange({ start: group.minStart, end: group.maxEnd });
+    highlighterRef.current?.scrollToRange(group.minStart, group.maxEnd);
+  }, []);
+
+  const handleSave = useCallback(async (mode: SavedOutputMode) => {
     setSaveError(null);
     setIsSaving(true);
+    setSavingMode(mode);
     try {
       const f = useProductionStore
         .getState()
         .datasets[datasetId]?.files.find((x) => x.id === file.id);
       if (!f) return;
-      const output = await buildSavedOutput({ file: f, mode: saveMode, reviewer });
+      const output = await buildSavedOutput({ file: f, mode, reviewer });
       saveFileOutput(datasetId, file.id, output);
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : 'save failed');
     } finally {
       setIsSaving(false);
+      setSavingMode(null);
     }
-  }, [datasetId, file.id, reviewer, saveFileOutput, saveMode]);
+  }, [datasetId, file.id, reviewer, saveFileOutput]);
 
   const commitNote = () => {
     updateFile(datasetId, file.id, { note: note.trim() || undefined });
@@ -309,28 +318,25 @@ export default function DocumentReviewer({
         return;
       }
       if (e.key === ']' || e.key === '[') {
-        if (conflictSets.length === 0) return;
+        if (overlapGroups.length === 0) return;
         e.preventDefault();
         const direction: 1 | -1 = e.key === ']' ? 1 : -1;
-        const currentIdx = conflictSets.findIndex(
-          (c) => activeSpanKey != null && c.spans.some((s) => entitySpanKey(s) === activeSpanKey),
-        );
-        const next =
+        const currentIdx =
+          activeSpanKey != null
+            ? overlapGroups.findIndex((g) => g.id === groupBySpanKey.get(activeSpanKey)?.id)
+            : -1;
+        const nextIdx =
           currentIdx < 0
             ? direction > 0
               ? 0
-              : conflictSets.length - 1
-            : (currentIdx + direction + conflictSets.length) % conflictSets.length;
-        const c = conflictSets[next];
-        const preferred = c.spans[0];
-        if (preferred) setActiveSpanKey(entitySpanKey(preferred));
-        setPulseRange({ start: c.start, end: c.end });
-        highlighterRef.current?.scrollToRange(c.start, c.end);
+              : overlapGroups.length - 1
+            : (currentIdx + direction + overlapGroups.length) % overlapGroups.length;
+        focusGroup(overlapGroups[nextIdx]!);
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [activeSpanKey, conflictSets, ghostSelection]);
+  }, [activeSpanKey, overlapGroups, groupBySpanKey, ghostSelection, focusGroup]);
 
   const leftColumnHeader = (
     <div className="flex w-full items-center justify-between gap-2">
@@ -413,11 +419,11 @@ export default function DocumentReviewer({
 
   const saveControl = (
     <SaveOutputButton
-      mode={saveMode}
-      onModeChange={setSaveMode}
       onSave={handleSave}
       isSaving={isSaving}
+      savingMode={savingMode}
       isStale={stale}
+      savedMode={file.savedOutput?.mode ?? null}
       block
     />
   );
@@ -503,14 +509,12 @@ export default function DocumentReviewer({
                   onClearPendingSelection={() => setGhostSelection(null)}
                   pendingGhostRange={ghostSelection}
                   pulseRange={pulseRange}
-                  overlapConflictRangeKeys={overlapConflictRangeKeys}
-                  overlapSpanCandidatesByRange={overlapSpanCandidatesByRange}
-                  onOverlapConflictClick={(_rangeKey, spans) => {
-                    const kept = spans[0];
-                    if (!kept) return;
-                    setActiveSpanKey(entitySpanKey(kept));
-                    setPulseRange({ start: kept.start, end: kept.end });
-                    highlighterRef.current?.scrollToRange(kept.start, kept.end);
+                  onOverlapClick={(spans) => {
+                    const member = spans[0];
+                    if (!member) return;
+                    const group = groupBySpanKey.get(entitySpanKey(member));
+                    if (!group) return;
+                    focusGroup(group);
                   }}
                   onSpanResize={handleSpanResize}
                 />
@@ -569,10 +573,10 @@ export default function DocumentReviewer({
               }}
               activeSpanKey={activeSpanKey}
               onActiveSpanKeyChange={setActiveSpanKey}
-              conflictSets={conflictSets}
-              onResolveConflict={handleResolveConflict}
-              onDropConflict={handleDropConflict}
-              onQuickResolveLabelPriority={handleQuickResolve}
+              overlapGroups={overlapGroups}
+              onResolveGroupKeep={handleResolveGroupKeep}
+              onResolveGroupDrop={handleResolveGroupDrop}
+              onResolveAllOverlaps={handleResolveAllOverlaps}
               saveControl={saveControl}
               showGhostPanel={false}
             />

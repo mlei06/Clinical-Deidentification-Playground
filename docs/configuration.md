@@ -187,6 +187,8 @@ CORS middleware allows requests from origins in `CLINICAL_DEID_CORS_ORIGINS` (de
 
 Production deploy settings are stored in `data/modes.json`. This file is managed via the `/deploy` API endpoints and the Deploy tab in the UI. It maps inference mode names to pipelines and defines an optional pipeline allowlist applied to inference-scoped `/process/*` calls.
 
+**Seeded** `modes` → `pipeline` (and `default_mode`) ship with the repo: `fast` → `clinical-fast` (**default**), `presidio` → `presidio`, `transformer` → `clinical-transformer`, `transformer_presidio` → `clinical-transformer-presidio`. That is **separate** from the CLI’s `--profile` `fast` / `balanced` / `accurate` (see `src/clinical_deid/profiles.py`).
+
 In Docker Compose, mount `./data` **writable** if operators use `PUT /deploy` from the Playground; a read-only mount blocks saving deploy changes.
 
 ## Pipelines vs API output mode
