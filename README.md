@@ -1,22 +1,79 @@
 # Clinical-Deidentification-Playground
 
-A **local-first NER platform** — compose modular detection **pipes** into named **pipelines**, evaluate against gold-standard corpora, and expose **inference HTTP APIs** with an **auditable** response trail (spans, timing, optional per-step traces).
+## What It Does
 
-The default configuration ships a **clinical de-identification pack** (HIPAA Safe Harbor label space, regex pattern library, surrogate strategies, risk/coverage profile), so the platform works out of the box for PHI detection. The clinical domain is a *pack*, not a baked-in assumption: swap the label space, pattern pack, surrogate pack, and risk profile to target any NER task. A minimal `generic_pii` pack ships alongside the clinical pack; custom packs register at startup. See [docs/configuration.md](docs/configuration.md) for pack-selection env vars (`CLINICAL_DEID_LABEL_SPACE_NAME`, `CLINICAL_DEID_RISK_PROFILE_NAME`).
+A **local-first NER pipeline platform**: compose modular detectors (regex, Presidio, HuggingFace, LLM) into named pipelines, evaluate against gold corpora with multi-mode metrics, generate and manage training datasets, and serve auditable inference via HTTP API.
 
-**API types:** inference JSON uses `EntitySpanResponse` for spans; the Python model is `EntitySpan` in `clinical_deid.domain`. There is no generated label enum in `domain.py`—use `clinical_deid.labels` and plain strings.
+Ships with a **clinical de-identification pack** (HIPAA Safe Harbor label space, regex patterns, surrogate strategies, risk/coverage profile) as the default configuration — so it works out of the box for PHI detection. The clinical domain is a *pack*, not a baked-in assumption. Swap the label space, pattern pack, surrogate pack, and risk profile to target any NER task. A minimal `generic_pii` pack ships alongside; custom packs register at startup.
 
-High-level flow:
+**Key capabilities:**
+- Visual pipeline builder (drag-and-drop, auto-generated config forms from JSON Schema)
+- 11 pipe types: `regex_ner`, `whitelist`, `blacklist`, `presidio_ner`, `huggingface_ner`, `neuroner_ner`, `llm_ner`, `label_mapper`, `label_filter`, `resolve_spans`, `consistency_propagator`
+- **Shipped example pipelines** (under `data/pipelines/`, name = filename stem): `clinical-fast`, `presidio`, `clinical-transformer`, `clinical-transformer-presidio` — plus seed **inference modes** in `data/modes.json` (`fast` → `clinical-fast` by default)
+- Evaluation: 4 matching modes (strict, partial, token-level, boundary), per-label breakdown, risk-weighted recall, HIPAA Safe Harbor coverage report, confusion matrix
+- **Shipped eval snapshots** for the `discharge_summaries` gold set (`data/evaluations/discharge-summaries__*.json`); refresh with `python scripts/emit_discharge_eval_snapshots.py` after changing pipelines or the corpus
+- Dataset tools: JSONL/BRAT import, compose, transform, LLM synthesis, export to CoNLL/spaCy/HuggingFace/BRAT
+- HuggingFace fine-tuning pipeline (`clinical-deid train run`)
+- Full audit trail (SQLite) on every inference call
 
-1. **Train locally** — Prepare annotated data (JSONL, BRAT, and other ingest paths in the Python package), export to your trainer of choice, save checkpoints under [`models/`](./models/README.md).
-2. **Configure & compose** — Define pipes (detectors, span transforms, redactors) and merge strategies; persist named pipelines as JSON files in `data/pipelines/`.
-3. **Infer & audit** — Call `POST /process/{pipeline_name}` (or batch); responses include `request_id`, detected spans, redacted text, `processing_time_ms`, and `intermediary_trace` when the pipeline config enables step capture. All calls are logged to a unified SQLite audit trail.
-4. **Evaluate** — Run `clinical-deid eval --corpus data.jsonl` or `POST /eval/run` to compute strict, partial, token-level, and risk-weighted metrics against gold data.
-5. **Playground UI** — A React (Vite + TypeScript) frontend for building pipelines visually, running inference with live span highlighting, evaluating against gold corpora, and managing whitelist/blacklist dictionaries.
+## Quick Start
 
-**Design priority:** keep **registering new pipes** as low-friction as possible — Pydantic config, `forward` implementation, and **`register()`**; optional catalog line and `ui_*` hints only when needed.
+```bash
+# Backend
+python -m venv .venv && source .venv/bin/activate
+pip install -e ".[dev]"
+clinical-deid setup          # verify deps, init DB
+clinical-deid serve           # API on http://localhost:8000
 
-**Documentation:** [docs/README.md](docs/README.md) (index), [PROJECT_OVERVIEW.md](./PROJECT_OVERVIEW.md) (architecture), [docs/deployment.md](docs/deployment.md) (Docker / production), [docs/configuration.md](docs/configuration.md) (env & auth).
+# Frontend (separate terminal)
+cd frontend && npm install && npm run dev   # http://localhost:3000
+```
+
+Open `http://localhost:3000` → **Pipeline Builder** to compose a pipeline, then **Inference** to test it. See [SETUP.md](SETUP.md) for detailed installation options and optional extras.
+
+## Video Links
+Demo+Technical Walkthrough
+https://youtu.be/iKYWic1IqJQ
+
+## Evaluation
+
+The platform ships three built-in profiles for out-of-the-box use:
+
+| Profile | Pipes | Latency |
+|---------|-------|---------|
+| **fast** | regex_ner + whitelist + blacklist + resolve_spans | ~10 ms |
+| **balanced** | + presidio_ner (spaCy NER fallback) | ~200 ms |
+| **accurate** | + consistency_propagator + confidence-based resolution | ~300 ms |
+
+Four evaluation modes supported: **strict** (exact span + label), **exact boundary** (ignore label), **partial overlap** (any span overlap, same label), **token-level** (per-character BIO). Metrics computed: precision, recall, F1, risk-weighted recall (HIPAA severity weights), per-label breakdown, label confusion matrix, HIPAA Safe Harbor identifier coverage (18 identifiers), worst-document ranking.
+
+```bash
+# Evaluate a pipeline against a gold JSONL corpus
+clinical-deid eval --corpus data/corpora/my-dataset/corpus.jsonl --pipeline my-pipeline
+```
+
+**Demo gold set — `discharge_summaries`:** seven short clinical snippets with span **gold labels** in `corpus.jsonl` (layered surrogate / model metadata on some lines under `document.metadata` from the **Production UI** export flow), plus cached stats in `dataset.json`. The repo **tracks** that corpus so Evaluate and the CLI use the same files.
+
+Strict micro-F1 and risk-weighted recall (RWR) on that corpus, for each **shipped** pipeline (regenerate after edits — see [data/README.md](data/README.md)):
+
+| Pipeline | Strict F1 (micro) | Risk-weighted recall |
+|----------|-------------------:|---------------------:|
+| `clinical-fast` | 0.43 | 0.26 |
+| `presidio` | 0.42 | 0.59 |
+| `clinical-transformer` | 0.68 | 0.78 |
+| `clinical-transformer-presidio` | 0.54 | 0.78 |
+
+Full per-label tables and confusion matrices: `data/evaluations/discharge-summaries__<pipeline>.json`. **Regenerate:** `python scripts/emit_discharge_eval_snapshots.py` (requires the same optional extras you use to load each pipeline, e.g. Presidio + spaCy + HF weights).
+
+> The same eval can be run from **Playground → Evaluate**; HTTP details are in [docs/api.md](docs/api.md).
+
+**Larger benchmark — mimic-10k (optional download):** MIMIC-III clinical notes ship with PHI already redacted (replaced by `[** ... **]` placeholders) but with **no span annotations**, so they cannot be used for evaluation directly. For a large-scale labeled set, synthetic PHI was reinjected at those positions using the surrogate pipeline (see [SETUP.md](SETUP.md)). That optional archive is **not** in git; the discharge set above is the repo-default teaching corpus.
+
+---
+
+**End-to-end flow:** train or import data → save models under [`models/`](./models/README.md) → compose pipelines in `data/pipelines/` (Playground, CLI, or API) → run inference and evaluation → optional SQLite **audit** on every process call. Pack selection (label space, risk profile, etc.) is env-driven; see [docs/configuration.md](docs/configuration.md) (`CLINICAL_DEID_LABEL_SPACE_NAME`, …).
+
+**Developer note:** new pipes are a Pydantic config + `forward` + `register()`. **Documentation index:** [docs/README.md](docs/README.md), [PROJECT_OVERVIEW.md](./PROJECT_OVERVIEW.md), [docs/deployment.md](docs/deployment.md), [docs/api.md](docs/api.md).
 
 ### Repository layout
 
@@ -24,7 +81,8 @@ All mutable runtime state lives under `data/`; model weights live under `models/
 
 | Path | Purpose |
 |------|---------|
-| `frontend/` | React (Vite + TypeScript) playground UI |
+| `frontend/` | Playground UI (Vite + React + TypeScript) |
+| `frontend-production/` | Production UI (inference-scoped batch reviewer) |
 | `data/pipelines/` | Named pipeline configs (JSON files, git-versioned) |
 | `data/modes.json` | Deploy configuration (inference modes, pipeline allowlist) |
 | `data/evaluations/` | Eval result JSON files |
@@ -49,6 +107,8 @@ clinical-deid setup          # verify deps, download spaCy model, init DB
 ```
 
 Optional extras for specific pipes: `pip install -e ".[presidio]"`, `pip install -e ".[ner]"`, `pip install -e ".[llm]"`, etc. (see `pyproject.toml`).
+
+**Presidio** does not pull spaCy model weights by itself: configure `python -m spacy download` for the `presidio_ner` `model` you use; HF-based Presidio models also need `en_core_web_sm` and a transformers install (see [docs/pipes-and-pipelines.md](docs/pipes-and-pipelines.md), `presidio_ner`).
 
 `pip` is the canonical install path; `uv.lock` is committed for reproducible builds when using `uv sync` / `uv pip install -e ".[dev]"`, but is not required.
 
@@ -92,29 +152,45 @@ clinical-deid serve --port 8000 --reload
 
 Pipeline commands (`run`, `batch`, `eval`) support `--profile` (fast/balanced/accurate), `--pipeline` (saved pipeline by name), `--config` (custom JSON file), and `--redactor` (tag/surrogate).
 
-## Frontend (Playground UI)
+## Web UIs: Playground vs Production app
 
-The frontend is a React + TypeScript app (Vite, Tailwind CSS) with nine top-level views:
-
-| View | Route | What it does |
-|------|-------|-------------|
-| **Pipeline Builder** | `/create` | Visual drag-and-drop pipeline composer |
-| **Pipelines** | `/pipelines` | Browse saved pipelines: description, pipe chain, output label space |
-| **Inference** | `/inference` | Paste text, see spans + redacted output + trace |
-| **Production** | `/production` | Dataset-centric assisted NER workspace (separate product surface) |
-| **Evaluate** | `/evaluate` | Run evals, view metrics/confusion matrix, compare runs |
-| **Datasets** | `/datasets` | Register, browse, compose, transform, generate datasets |
-| **Dictionaries** | `/dictionaries` | Upload/manage whitelist & blacklist term lists |
-| **Deploy** | `/deploy` | Configure production inference modes & pipeline allowlist |
-| **Audit** | `/audit` | Browse audit trail with stats, filters, detail panel |
+The repo ships **two** React (Vite + TypeScript) apps over the same HTTP API. They differ by **API key scope**: the **Playground** uses an **admin** key (full configuration); the **Production** app uses an **inference** key (process + read-only support surfaces). *Naming note:* the Playground has a **“Production”** page for deploy-mode batch review; the separate **Production UI** app is the inference-scoped batch reviewer below.
 
 ```bash
-cd frontend
-npm install
-npm run dev          # default http://localhost:3000 (see frontend/vite.config.ts)
+cd frontend && npm install && npm run dev              # Playground — http://localhost:3000
+cd frontend-production && npm install && npm run dev   # Production UI — http://localhost:3001
 ```
 
-Configure `VITE_API_BASE_URL` / `VITE_API_KEY` via `frontend/.env.local` when the API is not proxied under `/api`. The dev server proxies `/api` to `localhost:8000` by default. For **Datasets → Upload JSONL** (or large multipart bodies), ensure `CLINICAL_DEID_MAX_BODY_BYTES` on the API is high enough, or you will get **413**.
+Set `VITE_API_BASE_URL` and `VITE_API_KEY` in each app’s `frontend` / `frontend-production` `.env.local` as needed. Dev servers proxy `/api` to `localhost:8000` by default. Large dataset uploads need a high enough `CLINICAL_DEID_MAX_BODY_BYTES` on the API (otherwise **413**).
+
+### Playground — `frontend/` (admin)
+
+For authors, evaluators, and operators who manage pipelines, corpora, and deploy config.
+
+| View | Route | What you can do there |
+|------|--------|------------------------|
+| **Create** | `/create` | **Visual pipeline builder** (XYFlow canvas), per-pipe settings from **JSON Schema** forms, save pipelines to the server. |
+| **Pipelines** | `/pipelines` | **List and inspect** saved pipelines: description, ordered pipe list, **output label space**, compute/refresh server-side labels, raw JSON, **rename** and **delete**. |
+| **Inference** | `/inference` | **Single-document** run: pick a **saved pipeline**, **output mode** (annotated / redacted / surrogate), run on typed or uploaded text, **highlight** spans, optional per-pipe **trace** timeline, **hand-edit** spans and resolve overlap conflicts, **save/load** inference snapshots, **export** results. |
+| **Production** | `/production` | **Deploy-mode** assisted workflow: choose an inference **mode** (maps to a pipeline via `modes.json`), set **reviewer** id, queue **documents**, **batch** run pending items, per-doc **review** and **export**; uses **deploy health** for mode availability. |
+| **Evaluate** | `/evaluate` | Pick pipeline + **registered dataset**, start an eval run, view **strict** (and related) **metrics**, per-label table, **confusion matrix**, optional **redaction** / risk views, **compare** two runs. |
+| **Datasets** | `/datasets` | **Register** server-side paths, **preview** documents, **compose** / **transform** / **LLM generate**, training **export**; **upload** JSONL when configured. |
+| **Dictionaries** | `/dictionaries` | Upload and manage **whitelist** and **blacklist** term lists used by pipes. |
+| **Deploy** | `/deploy` | Edit **inference modes** and **pipeline allowlist** (who `POST /process/{mode}` may hit when scoped). |
+| **Audit** | `/audit` | Search and open **local** audit log records; optional **production** log proxy for operators. |
+
+### Production UI — `frontend-production/` (inference)
+
+For day-to-day reviewers and batch consumers **without** admin credentials. Datasets in this app are **browser-local** (IndexedDB) unless you add server features separately.
+
+| Area | Route | What you can do there |
+|------|--------|------------------------|
+| **Library** | `/library` | Create, rename, duplicate, and delete **local** datasets; open the workspace or **export** flow; filter by completion. |
+| **Workspace** | `/datasets/:id/files` | **File list** for the active dataset, **document reviewer** (highlights, edits), **batch detection** using a **deploy mode**, keyboard shortcuts, run progress. |
+| **Export** | `/datasets/:id/export` | Download results (**redacted**, **annotated**, or **surrogate + annotated**). |
+| **Audit** | `/audit` | Read-only audit trail (as allowed for the inference key). |
+
+**Not available** with a typical inference key: create/edit **named pipelines** on the server, **register** server **datasets**, change **deploy** or **dictionaries** — use the Playground (admin) for those.
 
 ## Run the API
 
@@ -128,56 +204,7 @@ Default SQLite database: `./data/app.sqlite` (audit log only). Override with `CL
 
 ### HTTP API
 
-| Area | Method | Path | Description |
-|------|--------|------|-------------|
-| Core | `GET` | `/health` | Liveness |
-| Pipelines | `GET` | `/pipelines/pipe-types` | Pipe catalog, install hints, JSON Schema for configs |
-| Pipelines | `POST` | `/pipelines/pipe-types/{name}/labels` | Compute label space for a detector given config |
-| Pipelines | `GET` | `/pipelines/ner/builtins` | Bundled regex / whitelist label names |
-| Pipelines | `POST` | `/pipelines/whitelist/parse-lists` | Parse uploaded list files for whitelist config |
-| Pipelines | `POST` | `/pipelines/blacklist/parse-wordlists` | Merge uploads into blacklist terms |
-| Pipelines | `POST` | `/pipelines` | Create named pipeline from JSON config |
-| Pipelines | `GET` | `/pipelines` | List pipelines |
-| Pipelines | `GET` | `/pipelines/{name}` | Pipeline config |
-| Pipelines | `PUT` | `/pipelines/{name}` | Update pipeline config |
-| Pipelines | `DELETE` | `/pipelines/{name}` | Delete pipeline |
-| Pipelines | `POST` | `/pipelines/{name}/validate` | Validate config without saving |
-| Dictionaries | `GET` | `/dictionaries` | List all uploaded dictionaries |
-| Dictionaries | `GET` | `/dictionaries/{kind}/{name}` | Dictionary metadata |
-| Dictionaries | `GET` | `/dictionaries/{kind}/{name}/preview` | Preview first N terms |
-| Dictionaries | `GET` | `/dictionaries/{kind}/{name}/terms` | Full term list (paginated) |
-| Dictionaries | `POST` | `/dictionaries` | Upload a new dictionary file |
-| Dictionaries | `DELETE` | `/dictionaries/{kind}/{name}` | Delete a dictionary |
-| Datasets | `GET` | `/datasets` | List registered datasets |
-| Datasets | `POST` | `/datasets` | Register dataset from local path on the API host |
-| Datasets | `POST` | `/datasets/upload` | Multipart JSONL upload (browser or Production **Register on server**; admin key; see [docs/api.md](docs/api.md)) |
-| Datasets | `GET` | `/datasets/{name}` | Dataset detail + analytics |
-| Datasets | `PUT` | `/datasets/{name}` | Update description/metadata |
-| Datasets | `DELETE` | `/datasets/{name}` | Delete dataset directory under corpora |
-| Datasets | `POST` | `/datasets/{name}/refresh` | Recompute analytics |
-| Datasets | `GET` | `/datasets/{name}/preview` | Preview documents (paginated) |
-| Datasets | `GET` | `/datasets/{name}/documents/{doc_id}` | Full document with spans |
-| Datasets | `POST` | `/datasets/compose` | Compose multiple datasets |
-| Datasets | `POST` | `/datasets/transform` | Apply transforms to dataset |
-| Datasets | `POST` | `/datasets/generate` | Generate synthetic data via LLM |
-| Process | `POST` | `/process/redact` | Redact/surrogate from edited spans |
-| Process | `POST` | `/process/scrub` | Zero-config clean using default mode |
-| Process | `POST` | `/process/{pipeline_name}` | Run pipeline (name or mode alias) |
-| Process | `POST` | `/process/{pipeline_name}/batch` | Batch variant |
-| Eval | `POST` | `/eval/run` | Run evaluation against dataset |
-| Eval | `GET` | `/eval/runs` | List eval results |
-| Eval | `GET` | `/eval/runs/{id}` | Eval result detail |
-| Eval | `POST` | `/eval/compare` | Compare two eval runs |
-| Audit | `GET` | `/audit/logs` | Query audit trail (filtered, paginated) |
-| Audit | `GET` | `/audit/logs/{id}` | Audit log detail |
-| Audit | `GET` | `/audit/stats` | Aggregate stats |
-| Deploy | `GET` | `/deploy` | Get deploy config (modes + allowlist) |
-| Deploy | `PUT` | `/deploy` | Update deploy config |
-| Deploy | `GET` | `/deploy/health` | Per-mode availability (Production UI) |
-| Deploy | `GET` | `/deploy/pipelines` | List deployable pipeline names |
-| Models | `GET` | `/models` | List models from filesystem |
-| Models | `GET` | `/models/{framework}/{name}` | Model manifest details |
-| Models | `POST` | `/models/refresh` | Re-scan models directory |
+**Full reference:** [docs/api.md](docs/api.md) (all routes, request bodies, and auth). **Interactive OpenAPI** (`/docs`, `/openapi.json`) is available when API keys are disabled. The API covers: health, pipeline CRUD and validation, per-pipe config helpers, `POST /process/{pipeline|mode}` and batch, eval runs and comparison, dataset registry and transforms, dictionaries, deploy config, audit, and model registry.
 
 ## Example pipeline config
 
@@ -195,7 +222,7 @@ Pipelines are JSON documents — sequential steps with detectors feeding into sp
 }
 ```
 
-Save as `data/pipelines/my-pipeline.json` or create via `POST /pipelines`.
+Save as `data/pipelines/my-pipeline.json` or create from **Playground → Create**.
 
 ## Example JSONL line (training / evaluation)
 
@@ -209,43 +236,3 @@ Save as `data/pipelines/my-pipeline.json` or create via `POST /pipelines`.
 }
 ```
 
-## PhysioNet raw to BRAT (optional)
-
-Requires `pip install -e ".[scripts]"` (pandas):
-
-```bash
-python scripts/process_physionet.py \
-  --text data/raw/physionet/id.text \
-  --annotations data/raw/physionet/ann.csv \
-  --output data/corpora/physionet/brat
-```
-
-## ASQ-PHI synthetic queries to JSONL / BRAT
-
-```bash
-python scripts/process_asq_phi.py \
-  --input data/raw/ASQ-PHI/synthetic_clinical_queries.txt \
-  --output-jsonl data/corpora/asq_phi/jsonl/asq_phi.jsonl
-```
-
-### Dataset analytics (CLI)
-
-```bash
-python scripts/dataset_analytics.py --jsonl tests/fixtures/sample.jsonl
-python scripts/dataset_analytics.py --brat-corpus data/corpora/physionet/brat
-```
-
-### Dataset transforms (CLI)
-
-```bash
-python scripts/transform_dataset.py --brat-corpus data/corpora/physionet/brat \
-  --label-map scripts/label_maps/physionet_to_deid_example.json \
-  --target-documents 500 --seed 42 \
-  --output-jsonl data/corpora/sample500.jsonl
-```
-
-## Tests
-
-```bash
-pytest
-```

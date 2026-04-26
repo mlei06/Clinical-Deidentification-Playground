@@ -25,8 +25,12 @@ data/raw/*
 !data/raw/.gitkeep
 data/corpora/*
 !data/corpora/.gitkeep
+# Ship a small gold corpus + manifest for demo/docs (see data/README.md)
+!data/corpora/discharge_summaries/
+!data/corpora/discharge_summaries/**
 data/evaluations/*
 !data/evaluations/.gitkeep
+!data/evaluations/discharge-summaries__*.json
 data/inference_runs/*
 !data/inference_runs/.gitkeep
 # Pipelines and modes.json ship as tracked seed files; ignore anything else

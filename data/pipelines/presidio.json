@@ -1,0 +1,161 @@
+{
+  "pipes": [
+    {
+      "type": "presidio_ner",
+      "config": {
+        "model": "spacy/en_core_web_lg",
+        "entities": null,
+        "language": "en",
+        "source_name": "presidio_ner",
+        "skip_overlapping": false
+      }
+    },
+    {
+      "type": "regex_ner",
+      "config": {
+        "source_name": "regex_ner",
+        "pattern_pack": "clinical_phi",
+        "skip_overlapping": true,
+        "labels": {
+          "ACCOUNT": {
+            "enabled": false,
+            "remap": null,
+            "custom_pattern": null
+          },
+          "ADDRESS": {
+            "enabled": true,
+            "remap": "LOCATION",
+            "custom_pattern": null
+          },
+          "DATE_TIME": {
+            "enabled": true,
+            "remap": "DATE",
+            "custom_pattern": null
+          },
+          "DEVICE_ID": {
+            "enabled": true,
+            "remap": "DATE",
+            "custom_pattern": null
+          },
+          "FAX": {
+            "enabled": true,
+            "remap": "EMAIL",
+            "custom_pattern": null
+          },
+          "IP_ADDRESS": {
+            "enabled": false,
+            "remap": null,
+            "custom_pattern": null
+          },
+          "LICENSE": {
+            "enabled": false,
+            "remap": null,
+            "custom_pattern": null
+          },
+          "MRN": {
+            "enabled": true,
+            "remap": "ID",
+            "custom_pattern": null
+          },
+          "OHIP": {
+            "enabled": true,
+            "remap": "ID",
+            "custom_pattern": null
+          },
+          "POSTAL_CODE_CA": {
+            "enabled": true,
+            "remap": "LOCATION",
+            "custom_pattern": null
+          },
+          "SIN": {
+            "enabled": true,
+            "remap": "ID",
+            "custom_pattern": null
+          },
+          "SSN": {
+            "enabled": true,
+            "remap": "ID",
+            "custom_pattern": null
+          },
+          "URL": {
+            "enabled": false,
+            "remap": null,
+            "custom_pattern": null
+          },
+          "VEHICLE_ID": {
+            "enabled": false,
+            "remap": null,
+            "custom_pattern": null
+          },
+          "ZIP_CODE_US": {
+            "enabled": true,
+            "remap": "LOCATION",
+            "custom_pattern": null
+          }
+        }
+      }
+    },
+    {
+      "type": "whitelist",
+      "config": {
+        "source_name": "whitelist",
+        "skip_overlapping": false,
+        "labels": {
+          "NAME": {
+            "enabled": true,
+            "remap": null,
+            "terms": [
+              "Sarah"
+            ],
+            "disabled_dictionaries": [
+              "local_places_unambig_v2",
+              "us_cities",
+              "us_hospitals",
+              "us_states"
+            ]
+          },
+          "LOCATION": {
+            "enabled": true,
+            "remap": null,
+            "terms": [],
+            "disabled_dictionaries": [
+              "female_first_names",
+              "last_names",
+              "male-first-names"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "type": "blacklist",
+      "config": {
+        "dict_config": {
+          "disabled_dictionaries": [
+            "common_words",
+            "sno_edited",
+            "commonest_words"
+          ]
+        },
+        "match": "any_token",
+        "apply_to_labels": null,
+        "load_all_dictionaries": true
+      }
+    }
+  ],
+  "description": "Clinical Transformer — regex + whitelist + blacklist + HuggingFace NER",
+  "output_label_space": [
+    "AGE",
+    "DATE",
+    "EMAIL",
+    "FACILITY",
+    "HOSPITAL",
+    "ID",
+    "LOCATION",
+    "NAME",
+    "NRP",
+    "ORGANIZATION",
+    "PHONE"
+  ],
+  "output_label_space_updated_at": "2026-04-26T06:00:14.252993+00:00"
+}

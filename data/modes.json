@@ -1,4 +1,21 @@
 {
-  "modes": {},
-  "default_mode": null
+  "modes": {
+    "fast": {
+      "pipeline": "clinical-fast",
+      "description": "Shipped: regex_ner, whitelist, blacklist, resolve (no ML)"
+    },
+    "presidio": {
+      "pipeline": "presidio",
+      "description": "Shipped: presidio_ner (spaCy large) + regex_ner (skip_overlapping)"
+    },
+    "transformer": {
+      "pipeline": "clinical-transformer",
+      "description": "Shipped: regex + whitelist + HF mimic-clinicalbert-sentence + resolve"
+    },
+    "transformer_presidio": {
+      "pipeline": "clinical-transformer-presidio",
+      "description": "Shipped: regex + HF + presidio (double stack; needs spaCy + HF weights)"
+    }
+  },
+  "default_mode": "fast"
 }
