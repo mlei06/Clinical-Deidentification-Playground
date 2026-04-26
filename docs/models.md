@@ -100,7 +100,7 @@ Registered Hugging Face token-classification checkpoints use the **`model`** fie
 }
 ```
 
-See [pipes-and-pipelines.md](pipes-and-pipelines.md) and [training-core-design.md](training-core-design.md) for training outputs and manifest expectations.
+See [pipes-and-pipelines.md](pipes-and-pipelines.md) for how models are referenced from pipe configs.
 
 ### Presidio with custom models
 

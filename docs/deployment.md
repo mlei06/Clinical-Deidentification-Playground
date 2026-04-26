@@ -40,4 +40,4 @@ OpenAPI (`/docs`, `/redoc`, `/openapi.json`) is **disabled** for anonymous clien
 
 ## Smoke test
 
-See [staging-smoke.md](staging-smoke.md) for a manual checklist after deploy.
+After deploy, verify `/health` returns `200`, run a `POST /process/{pipeline}` call with sample text, and check `GET /audit/logs` shows the request.

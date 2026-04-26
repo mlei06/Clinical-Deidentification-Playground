@@ -78,7 +78,7 @@ clinical-deid dict delete whitelist hospitals
 # Dataset management
 clinical-deid dataset list
 clinical-deid dataset register data/corpus.jsonl --name i2b2-2014
-clinical-deid dataset register data/brat/ --name physionet --format brat-dir
+clinical-deid dataset import-brat data/brat/ --name physionet
 clinical-deid dataset show i2b2-2014
 clinical-deid dataset delete i2b2-2014
 

@@ -18,7 +18,7 @@ interface RunArgs {
 }
 
 /**
- * Selection-based detection per docs/design/production-ui-assisted-ner-datasets.md §4.1.
+ * Selection-based detection: runs POST /process/{target} for each selected file.
  * Runs `POST /process/{target}` for each selected file and REPLACES annotations
  * on success (no merging with previous spans or human edits).
  */

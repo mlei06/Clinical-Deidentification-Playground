@@ -305,10 +305,6 @@ The full pipe system (11 cataloged types), CLI, FastAPI, Playground UI (9 views)
 ## What's not built yet
 
 - **Rich production file ingest** — drag-and-drop corpus upload to Production UI (batch today is API-driven / copy-paste workflows; extend as needed).
-- NER dataset creation (bulk ingest → pipeline → review → BRAT/JSONL, plus
-  surrogate-aligned spans) has landed end-to-end — see
-  [docs/plans/dataset-creation-implementation.md](docs/plans/dataset-creation-implementation.md)
-  for the milestone breakdown (IMPL-M1 through IMPL-M8).
 
 ## Conventions
 

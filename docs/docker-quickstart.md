@@ -148,6 +148,4 @@ Set `VITE_API_BASE_URL` (and `VITE_API_KEY` if the API uses auth) **before**
 
 ## 7. Post-deploy sanity check
 
-After the first bring-up, walk the checklist in
-[staging-smoke.md](staging-smoke.md) — it covers health, auth scopes, a real
-`/process` call, and the audit log.
+After the first bring-up, verify `/health` returns `200`, confirm auth scopes work by hitting a protected endpoint with your API key, run a real `/process` call, and check `/audit/logs` shows the request.

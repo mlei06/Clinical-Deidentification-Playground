@@ -49,4 +49,4 @@ def init_db() -> None:
     """Create all tables (audit_log)."""
     from clinical_deid.tables import AuditLogRecord  # noqa: F401
 
-    SQLModel.metadata.create_all(get_engine())
+    SQLModel.metadata.create_all(get_engine(), checkfirst=True)

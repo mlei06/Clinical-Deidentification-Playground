@@ -10,11 +10,11 @@ A **local-first platform** for clinical text de-identification. Three complement
 
 1. **Local training** — Prepare annotated data, export to your trainer (spaCy, HuggingFace, etc.), and train or fine-tune models **on your machines**. Artifacts live under `models/` (see `models/README.md`) and are referenced from pipe configs so detectors stay reproducible.
 
-2. **Pipeline composition** — Configure **pipes** (regex, whitelist, Presidio, pyDeid, LLM, combinators, redactors) and compose them into named **pipelines** (JSON files in `data/pipelines/`, registry-backed). The API supports creating/updating pipelines, validation, and machine-readable config schemas with `ui_*` hints for building forms.
+2. **Pipeline composition** — Configure **pipes** (regex, whitelist, Presidio, LLM, HuggingFace, combinators, redactors) and compose them into named **pipelines** (JSON files in `data/pipelines/`, registry-backed). The API supports creating/updating pipelines, validation, and machine-readable config schemas with `ui_*` hints for building forms.
 
 3. **Inference for services** — Expose **HTTP endpoints** so upstream systems send text (or batch items) and receive de-identified output plus **auditable** metadata: `request_id`, spans, timings, pipeline name, and optional **intermediary traces** when the pipeline enables step capture. All operations are logged to a unified SQLite audit trail.
 
-4. **Playground UI** — A **React + TypeScript web UI** (Vite, Tailwind CSS) with seven views: **(a)** visual pipeline builder, **(b)** inference with span highlighting and step trace, **(c)** eval dashboard with metrics/confusion matrix/comparison, **(d)** dataset management (register, compose, transform, generate), **(e)** dictionary management, **(f)** deploy configuration (inference modes, pipeline allowlist), **(g)** audit log viewer with stats and local/production toggle.
+4. **Playground UI** — A **React + TypeScript web UI** (Vite, Tailwind CSS) with nine views: **(a)** visual pipeline builder, **(b)** pipeline catalog, **(c)** inference with span highlighting and step trace, **(d)** eval dashboard with metrics/confusion matrix/comparison, **(e)** dataset management (register, compose, transform, generate), **(f)** dictionary management, **(g)** deploy configuration (inference modes, pipeline allowlist), **(h)** audit log viewer with stats, **(i)** production NER workspace.
 
 ---
 
@@ -50,7 +50,7 @@ FastAPI backend with SQLite for audit only, React + TypeScript frontend. Python 
 | **Transforms** | Label remapping, random resize (downsample/upsample), boost by label, train/valid/test split reassignment. |
 | **Composition** | Merge, interleave, proportional sampling across multiple corpora. |
 | **LLM synthesis** | Few-shot clinical note generation via OpenAI-compatible API. Prompt templates, PHI extraction, span alignment. |
-| **Playground UI** | React + TypeScript (Vite, Tailwind). 7 views: pipeline builder, inference, eval dashboard, datasets, dictionaries, deploy config, audit log viewer. |
+| **Playground UI** | React + TypeScript (Vite, Tailwind). 9 views: pipeline catalog, pipeline builder, inference, eval dashboard, datasets, dictionaries, deploy config, audit log viewer, production NER workspace. |
 | **Dataset API + CLI** | REST API: register, browse, compose, transform, LLM generate. CLI: `dataset list/register/show/delete`. |
 | **Deploy config** | Inference modes mapped to pipelines and pipeline allowlist — managed via UI and `data/modes.json`. |
 | **Tests** | 27+ test files covering API, ingestion, analytics, transforms, synthesis, config, compose, pipeline execution, span resolution, datasets, eval. |
@@ -209,15 +209,20 @@ Multiple detectors then consensus merge (no `parallel` pipe type — use a linea
 | `DELETE` | `/dictionaries/{kind}/{name}` | Delete dictionary |
 | `GET` | `/datasets` | List registered datasets |
 | `POST` | `/datasets` | Register dataset from local path |
+| `POST` | `/datasets/upload` | Multipart JSONL upload |
+| `POST` | `/datasets/import/brat` | Convert BRAT tree on disk → JSONL |
 | `GET` | `/datasets/{name}` | Dataset detail + analytics |
 | `PUT` | `/datasets/{name}` | Update description/metadata |
 | `DELETE` | `/datasets/{name}` | Delete dataset directory under corpora |
 | `POST` | `/datasets/{name}/refresh` | Recompute analytics |
 | `GET` | `/datasets/{name}/preview` | Preview documents (paginated) |
 | `GET` | `/datasets/{name}/documents/{doc_id}` | Full document with spans |
+| `POST` | `/datasets/{name}/export` | Export to CoNLL/spaCy/HuggingFace/BRAT |
 | `POST` | `/datasets/compose` | Compose multiple datasets |
 | `POST` | `/datasets/transform` | Apply transforms to dataset |
 | `POST` | `/datasets/generate` | Generate synthetic data via LLM |
+| `POST` | `/process/redact` | Redact/surrogate from edited spans |
+| `POST` | `/process/scrub` | Zero-config clean using default mode |
 | `POST` | `/process/{pipeline_name}` | Run pipeline on text; auditable JSON response |
 | `POST` | `/process/{pipeline_name}/batch` | Batch process |
 | `POST` | `/eval/run` | Run pipeline against gold dataset |
@@ -229,6 +234,7 @@ Multiple detectors then consensus merge (no `parallel` pipe type — use a linea
 | `GET` | `/audit/stats` | Aggregate stats |
 | `GET` | `/deploy` | Get deploy config (modes + allowlist) |
 | `PUT` | `/deploy` | Update deploy config |
+| `GET` | `/deploy/health` | Per-mode availability |
 | `GET` | `/deploy/pipelines` | List deployable pipeline names |
 | `GET` | `/models` | List models from filesystem |
 | `GET` | `/models/{framework}/{name}` | Model manifest details |
@@ -273,7 +279,6 @@ src/clinical_deid/
     presidio_ner/            # Microsoft Presidio wrapper
     huggingface_ner/         # HF token-classification models under models/huggingface/
     neuroner_ner/            # NeuroNER HTTP client
-    llm_ner.py               # LLM-prompted detection
     presidio_anonymizer/     # Presidio redaction (legacy; not in default pipe catalog)
     surrogate/               # Surrogate replacement (legacy; not in default pipe catalog)
   api/
@@ -324,20 +329,6 @@ src/clinical_deid/
 8. **Three profiles** — `fast` (regex-only), `balanced` (+ presidio), `accurate` (+ consistency propagation + span resolution). CLI defaults to `balanced`.
 9. **Name-based pipeline routes** — Pipelines are identified by name (e.g., `/pipelines/my-pipeline`), not UUIDs. Simpler, human-readable, filesystem-backed.
 10. **One eval implementation, many ingest paths** — local filesystem, API request, or future UI uploads should all normalize to `AnnotatedDocument` iterators before scoring.
-
----
-
-## Implementation phases
-
-| Phase | Scope | Status |
-|---|---|---|
-| **1. Pipe system + composition** | Protocol, registry, built-in pipes, combinators, JSON serialization | Done |
-| **2. API + CLI** | Pipeline CRUD, process, batch, dict, dataset, audit CLI commands, profiles | Done |
-| **3. Evaluation** | Multi-mode matching, risk-weighted recall, HIPAA coverage, eval runner, eval API | Done |
-| **4. Storage refactor** | Filesystem-first pipelines + eval + datasets, unified audit trail | Done |
-| **5. Playground UI** | React + Vite: pipeline builder, inference, eval, datasets, dictionaries, deploy, audit | Done |
-| **6. Dataset & Deploy APIs** | Dataset register/compose/transform/generate, deploy config, audit production proxy | Done |
-| **7. Training & Models** | Dataset export formats, `clinical-deid train run`, `huggingface_ner` pipe, model scan | Done |
 
 ---
 
