@@ -97,8 +97,6 @@ export function useBatchDetect() {
               target,
               processingTimeMs: res.processing_time_ms,
               clearResolved: clearResolved && file.resolved,
-              surrogateText: null,
-              annotationsOnSurrogate: null,
               autoResolve: stamp,
             });
           } catch (err) {

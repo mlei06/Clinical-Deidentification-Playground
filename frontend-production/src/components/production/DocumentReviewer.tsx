@@ -1,29 +1,16 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
-import {
-  CheckCircle2,
-  Flag,
-  Plus,
-  RotateCcw,
-  PanelRightClose,
-  PanelRightOpen,
-} from 'lucide-react';
+import { Plus, RotateCcw, PanelRightClose, PanelRightOpen } from 'lucide-react';
 import SpanHighlighter, { type SpanHighlighterHandle } from '../shared/SpanHighlighter';
-import RedactedView from '../shared/RedactedView';
 import LabelBadge from '../shared/LabelBadge';
 import SpanEditor from '../shared/SpanEditor';
-import SaveOutputButton from '../shared/SaveOutputButton';
-import ReviewerDualPane from '../shared/ReviewerDualPane';
 import ColorKeyPopover from '../shared/ColorKeyPopover';
+import PreviewColumn from './PreviewColumn';
 import {
+  effectiveSurrogateSeed,
   useProductionStore,
+  type Dataset,
   type DatasetFile,
-  type SavedOutputMode,
 } from './store';
-import {
-  buildSavedOutput,
-  isSavedOutputStale,
-  previewBytes,
-} from './savedOutput';
 import { CANONICAL_LABELS } from '../../lib/canonicalLabels';
 import { entitySpanKey } from '../../lib/entitySpanKey';
 import {
@@ -31,7 +18,6 @@ import {
   applyResolveStrategy,
   keepInOverlapGroup,
   dropOverlapGroup,
-  dedupeSpansKeepPrimary,
   type OverlapGroup,
   type ResolveStrategyId,
 } from '../../lib/spanOverlapConflicts';
@@ -39,6 +25,7 @@ import type { EntitySpanResponse } from '../../api/types';
 
 interface DocumentReviewerProps {
   datasetId: string;
+  dataset: Dataset;
   file: DatasetFile;
   reviewer: string;
   hideEditorPanel?: boolean;
@@ -50,41 +37,22 @@ interface GhostSelection {
   text: string;
 }
 
-function formatSavedAt(iso: string): string {
-  try {
-    const d = new Date(iso);
-    return d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
-  } catch {
-    return iso;
-  }
-}
-
-const MODE_LABELS: Record<SavedOutputMode, string> = {
-  annotated: 'annotated',
-  redacted: 'redacted',
-  surrogate_annotated: 'surrogate',
-};
-
 export default function DocumentReviewer({
   datasetId,
+  dataset,
   file,
   reviewer,
   hideEditorPanel = false,
 }: DocumentReviewerProps) {
   const updateFile = useProductionStore((s) => s.updateFile);
-  const setFileResolved = useProductionStore((s) => s.setFileResolved);
-  const saveFileOutput = useProductionStore((s) => s.saveFileOutput);
+  const setFileSurrogateSeed = useProductionStore((s) => s.setFileSurrogateSeed);
 
-  const [savingMode, setSavingMode] = useState<SavedOutputMode | null>(null);
-  const [isSaving, setIsSaving] = useState(false);
-  const [saveError, setSaveError] = useState<string | null>(null);
-  const [note, setNote] = useState(file.note ?? '');
   const [activeSpanKey, setActiveSpanKey] = useState<string | null>(null);
   const [flashSpanKey, setFlashSpanKey] = useState<string | null>(null);
   const [ghostSelection, setGhostSelection] = useState<GhostSelection | null>(null);
   const [pulseRange, setPulseRange] = useState<{ start: number; end: number } | null>(null);
   const [addLabel, setAddLabel] = useState<string>('OTHER');
-  const [outputCollapsed, setOutputCollapsed] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
   const [spanPopover, setSpanPopover] = useState<{
     key: string;
     span: EntitySpanResponse;
@@ -97,16 +65,12 @@ export default function DocumentReviewer({
   const highlighterRef = useRef<SpanHighlighterHandle>(null);
 
   useEffect(() => {
-    setNote(file.note ?? '');
-    setSaveError(null);
     setActiveSpanKey(null);
     setFlashSpanKey(null);
     setGhostSelection(null);
     setPulseRange(null);
-    setOutputCollapsed(false);
     setSpanPopover(null);
     setSpanLabelDraft('');
-    setSavingMode(null);
   }, [file.id]);
 
   useEffect(() => {
@@ -158,14 +122,6 @@ export default function DocumentReviewer({
     return m;
   }, [overlapGroups]);
 
-  const preview = useMemo(() => previewBytes(file), [file]);
-  const stale = useMemo(() => isSavedOutputStale(file), [file]);
-
-  const surrogateDisplaySpans = useMemo(() => {
-    if (!preview || preview.mode !== 'surrogate_annotated') return [];
-    return dedupeSpansKeepPrimary(preview.spans);
-  }, [preview]);
-
   const handleChangeSpans = (spans: EntitySpanResponse[]) => {
     updateFile(datasetId, file.id, { annotations: spans });
   };
@@ -184,7 +140,6 @@ export default function DocumentReviewer({
 
   const handleSpanResize = useCallback(
     (key: string, start: number, end: number) => {
-      setSaveError(null);
       const f = useProductionStore
         .getState()
         .datasets[datasetId]?.files.find((x) => x.id === file.id);
@@ -239,37 +194,6 @@ export default function DocumentReviewer({
     setPulseRange({ start: group.minStart, end: group.maxEnd });
     highlighterRef.current?.scrollToRange(group.minStart, group.maxEnd);
   }, []);
-
-  const handleSave = useCallback(async (mode: SavedOutputMode) => {
-    setSaveError(null);
-    setIsSaving(true);
-    setSavingMode(mode);
-    try {
-      const f = useProductionStore
-        .getState()
-        .datasets[datasetId]?.files.find((x) => x.id === file.id);
-      if (!f) return;
-      const output = await buildSavedOutput({ file: f, mode, reviewer });
-      saveFileOutput(datasetId, file.id, output);
-    } catch (err) {
-      setSaveError(err instanceof Error ? err.message : 'save failed');
-    } finally {
-      setIsSaving(false);
-      setSavingMode(null);
-    }
-  }, [datasetId, file.id, reviewer, saveFileOutput]);
-
-  const commitNote = () => {
-    updateFile(datasetId, file.id, { note: note.trim() || undefined });
-  };
-
-  const toggleFlagged = () => {
-    updateFile(datasetId, file.id, { flagged: !file.flagged });
-  };
-
-  const toggleResolved = () => {
-    setFileResolved(datasetId, file.id, !file.resolved);
-  };
 
   const addSpanFromGhost = () => {
     if (!ghostSelection) return;
@@ -338,95 +262,7 @@ export default function DocumentReviewer({
     return () => window.removeEventListener('keydown', onKey);
   }, [activeSpanKey, overlapGroups, groupBySpanKey, ghostSelection, focusGroup]);
 
-  const leftColumnHeader = (
-    <div className="flex w-full items-center justify-between gap-2">
-      <div className="flex min-w-0 flex-wrap items-center gap-2">
-        <ColorKeyPopover />
-        {uniqueLabels.length > 0 && (
-          <div className="flex flex-wrap gap-1">
-            {uniqueLabels.slice(0, 5).map((l) => (
-              <LabelBadge key={l} label={l} />
-            ))}
-            {uniqueLabels.length > 5 && (
-              <span className="text-[10px] text-gray-400">+{uniqueLabels.length - 5}</span>
-            )}
-          </div>
-        )}
-      </div>
-      <button
-        type="button"
-        onClick={() => setOutputCollapsed((c) => !c)}
-        className="shrink-0 inline-flex items-center gap-0.5 rounded border border-gray-200 bg-white px-1.5 py-0.5 text-[10px] font-medium text-gray-600 hover:bg-gray-50"
-        title={outputCollapsed ? 'Show output column' : 'Hide output column'}
-      >
-        {outputCollapsed ? <PanelRightOpen size={11} /> : <PanelRightClose size={11} />}
-        {outputCollapsed ? 'Output' : 'Hide'}
-      </button>
-    </div>
-  );
-
-  const statusLine = (() => {
-    if (!file.savedOutput) return 'No saved output';
-    const t = formatSavedAt(file.savedOutput.savedAt);
-    const label = MODE_LABELS[file.savedOutput.mode];
-    return `Saved · ${label} · ${t}${stale ? ' · stale' : ''}`;
-  })();
-
-  const rightColumnHeader = (
-    <div className="flex w-full min-w-0 items-center justify-between gap-2">
-      <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-gray-500">
-        Output
-      </span>
-      <span
-        className={`min-w-0 truncate text-[10px] ${
-          stale ? 'text-amber-700' : 'text-gray-500'
-        }`}
-        title={statusLine}
-      >
-        {statusLine}
-      </span>
-    </div>
-  );
-
-  const renderRightPane = () => {
-    if (saveError) {
-      return (
-        <p className="mb-2 rounded border border-red-100 bg-red-50/90 px-2 py-1 text-xs text-red-800">
-          {saveError}
-        </p>
-      );
-    }
-    if (!preview) {
-      return (
-        <p className="text-xs text-gray-400">
-          No saved output yet. Use{' '}
-          <strong className="font-medium text-gray-500">Save</strong> in the Spans panel
-          to capture the current annotations.
-        </p>
-      );
-    }
-    if (preview.mode === 'annotated') {
-      return <SpanHighlighter text={preview.text} spans={preview.spans} />;
-    }
-    if (preview.mode === 'redacted') {
-      return <RedactedView text={preview.text} />;
-    }
-    if (surrogateDisplaySpans.length > 0) {
-      return <SpanHighlighter text={preview.text} spans={surrogateDisplaySpans} />;
-    }
-    return <RedactedView text={preview.text} />;
-  };
-
-  const saveControl = (
-    <SaveOutputButton
-      onSave={handleSave}
-      isSaving={isSaving}
-      savingMode={savingMode}
-      isStale={stale}
-      savedMode={file.savedOutput?.mode ?? null}
-      block
-    />
-  );
+  const seed = effectiveSurrogateSeed(file, dataset);
 
   return (
     <section ref={rootRef} className="flex min-h-0 flex-1 flex-col" tabIndex={-1}>
@@ -441,7 +277,18 @@ export default function DocumentReviewer({
             {file.lastDetectionTarget && ` · via ${file.lastDetectionTarget}`}
           </span>
         </div>
-        <div className="ml-auto flex flex-wrap items-center gap-2">
+        <div className="ml-auto flex items-center gap-2">
+          <ColorKeyPopover />
+          {uniqueLabels.length > 0 && (
+            <div className="flex flex-wrap gap-1">
+              {uniqueLabels.slice(0, 5).map((l) => (
+                <LabelBadge key={l} label={l} />
+              ))}
+              {uniqueLabels.length > 5 && (
+                <span className="text-[10px] text-gray-400">+{uniqueLabels.length - 5}</span>
+              )}
+            </div>
+          )}
           {annotationsDiffer && (
             <button
               type="button"
@@ -455,104 +302,89 @@ export default function DocumentReviewer({
           )}
           <button
             type="button"
-            onClick={toggleFlagged}
-            className={`flex items-center gap-1 rounded border px-3 py-1.5 text-xs font-medium ${
-              file.flagged
-                ? 'border-amber-300 bg-amber-100 text-amber-900'
-                : 'border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100'
-            }`}
+            onClick={() => setPreviewOpen((v) => !v)}
+            className="inline-flex items-center gap-1 rounded border border-gray-200 bg-white px-2 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50"
+            title={previewOpen ? 'Hide preview column' : 'Show redacted / surrogate preview'}
           >
-            <Flag size={12} />
-            {file.flagged ? 'Flagged' : 'Flag'}
-          </button>
-          <button
-            type="button"
-            onClick={toggleResolved}
-            className={`flex items-center gap-1 rounded px-3 py-1.5 text-xs font-medium ${
-              file.resolved
-                ? 'bg-green-700 text-white hover:bg-green-800'
-                : 'border border-green-200 bg-green-50 text-green-800 hover:bg-green-100'
-            }`}
-            title="Mark annotations final for export"
-          >
-            <CheckCircle2 size={12} />
-            {file.resolved ? 'Resolved' : 'Mark resolved'}
+            {previewOpen ? <PanelRightClose size={12} /> : <PanelRightOpen size={12} />}
+            {previewOpen ? 'Hide preview' : 'Preview'}
           </button>
         </div>
       </header>
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-row overflow-hidden">
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <ReviewerDualPane
-            outputCollapsed={outputCollapsed}
-            leftHeader={leftColumnHeader}
-            rightHeader={rightColumnHeader}
-            left={
-              <div className="relative">
-                <SpanHighlighter
-                  ref={highlighterRef}
-                  text={file.originalText}
-                  spans={file.annotations}
-                  activeSpanKey={activeSpanKey}
-                  flashSpanKey={flashSpanKey}
-                  onSpanHover={setActiveSpanKey}
-                  onSpanClick={(span, key, anchor) => {
-                    setSpanPopover({
-                      key,
-                      span,
-                      left: Math.max(8, Math.min(anchor.left, window.innerWidth - 220)),
-                      top: anchor.bottom + 6,
-                    });
-                    setSpanLabelDraft(span.label);
-                  }}
-                  onUncoveredSelection={(sel) => setGhostSelection(sel)}
-                  onClearPendingSelection={() => setGhostSelection(null)}
-                  pendingGhostRange={ghostSelection}
-                  pulseRange={pulseRange}
-                  onOverlapClick={(spans) => {
-                    const member = spans[0];
-                    if (!member) return;
-                    const group = groupBySpanKey.get(entitySpanKey(member));
-                    if (!group) return;
-                    focusGroup(group);
-                  }}
-                  onSpanResize={handleSpanResize}
-                />
-                {ghostSelection && (
-                  <div className="pointer-events-auto sticky bottom-0 left-0 right-0 mt-3 flex flex-wrap items-center gap-2 rounded border border-amber-200 bg-amber-50/95 px-2 py-2 text-[11px] text-amber-950 shadow-sm">
-                    <span className="font-medium">Add as:</span>
-                    <select
-                      value={addLabel}
-                      onChange={(e) => setAddLabel(e.target.value)}
-                      className="rounded border border-amber-200 bg-white px-2 py-0.5 text-gray-700"
-                    >
-                      {CANONICAL_LABELS.map((l) => (
-                        <option key={l} value={l}>
-                          {l}
-                        </option>
-                      ))}
-                    </select>
-                    <button
-                      type="button"
-                      onClick={addSpanFromGhost}
-                      className="inline-flex items-center gap-1 rounded bg-amber-600 px-2 py-0.5 text-white hover:bg-amber-700"
-                    >
-                      <Plus size={11} />
-                      Add span
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setGhostSelection(null)}
-                      className="text-[10px] text-amber-800/80 underline hover:text-amber-950"
-                    >
-                      Dismiss
-                    </button>
-                  </div>
-                )}
-              </div>
-            }
-            right={<div className="min-h-[120px] text-sm">{renderRightPane()}</div>}
+        <div className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-auto p-4">
+          <SpanHighlighter
+            ref={highlighterRef}
+            text={file.originalText}
+            spans={file.annotations}
+            activeSpanKey={activeSpanKey}
+            flashSpanKey={flashSpanKey}
+            onSpanHover={setActiveSpanKey}
+            onSpanClick={(span, key, anchor) => {
+              setSpanPopover({
+                key,
+                span,
+                left: Math.max(8, Math.min(anchor.left, window.innerWidth - 220)),
+                top: anchor.bottom + 6,
+              });
+              setSpanLabelDraft(span.label);
+            }}
+            onUncoveredSelection={(sel) => setGhostSelection(sel)}
+            onClearPendingSelection={() => setGhostSelection(null)}
+            pendingGhostRange={ghostSelection}
+            pulseRange={pulseRange}
+            onOverlapClick={(spans) => {
+              const member = spans[0];
+              if (!member) return;
+              const group = groupBySpanKey.get(entitySpanKey(member));
+              if (!group) return;
+              focusGroup(group);
+            }}
+            onSpanResize={handleSpanResize}
           />
+          {ghostSelection && (
+            <div className="pointer-events-auto sticky bottom-0 left-0 right-0 mt-3 flex flex-wrap items-center gap-2 rounded border border-amber-200 bg-amber-50/95 px-2 py-2 text-[11px] text-amber-950 shadow-sm">
+              <span className="font-medium">Add as:</span>
+              <select
+                value={addLabel}
+                onChange={(e) => setAddLabel(e.target.value)}
+                className="rounded border border-amber-200 bg-white px-2 py-0.5 text-gray-700"
+              >
+                {CANONICAL_LABELS.map((l) => (
+                  <option key={l} value={l}>
+                    {l}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                onClick={addSpanFromGhost}
+                className="inline-flex items-center gap-1 rounded bg-amber-600 px-2 py-0.5 text-white hover:bg-amber-700"
+              >
+                <Plus size={11} />
+                Add span
+              </button>
+              <button
+                type="button"
+                onClick={() => setGhostSelection(null)}
+                className="text-[10px] text-amber-800/80 underline hover:text-amber-950"
+              >
+                Dismiss
+              </button>
+            </div>
+          )}
+          {!previewOpen && (
+            <button
+              type="button"
+              onClick={() => setPreviewOpen(true)}
+              className="absolute right-0 top-1/2 z-10 -translate-y-1/2 rounded-l border border-r-0 border-gray-200 bg-white px-1 py-3 text-[10px] font-semibold uppercase tracking-wide text-gray-500 shadow-sm hover:bg-gray-50"
+              title="Show preview column"
+              style={{ writingMode: 'vertical-rl' }}
+            >
+              Preview
+            </button>
+          )}
         </div>
         {!hideEditorPanel && (
           <aside className="flex w-[min(38%,520px)] min-w-[280px] max-w-[560px] shrink-0 flex-col border-l border-gray-200 bg-gray-50/90">
@@ -561,9 +393,9 @@ export default function DocumentReviewer({
               spans={file.annotations}
               onChange={handleChangeSpans}
               onReset={handleReset}
-              isApplying={isSaving}
+              isApplying={false}
               isDirty={annotationsDiffer}
-              error={saveError}
+              error={null}
               ghostSelection={ghostSelection}
               onClearGhostSelection={() => setGhostSelection(null)}
               onNavigateToGhost={() => {
@@ -577,26 +409,26 @@ export default function DocumentReviewer({
               onResolveGroupKeep={handleResolveGroupKeep}
               onResolveGroupDrop={handleResolveGroupDrop}
               onResolveAllOverlaps={handleResolveAllOverlaps}
-              saveControl={saveControl}
               showGhostPanel={false}
             />
           </aside>
         )}
+        {previewOpen && (
+          <div className="flex w-[min(40%,560px)] min-w-[300px] max-w-[640px] shrink-0">
+            <PreviewColumn
+              datasetId={datasetId}
+              fileId={file.id}
+              originalText={file.originalText}
+              annotations={file.annotations}
+              reviewer={reviewer}
+              seed={seed}
+              onSeedChange={(s) => setFileSurrogateSeed(datasetId, file.id, s)}
+              onClose={() => setPreviewOpen(false)}
+            />
+          </div>
+        )}
       </div>
 
-      <div className="shrink-0 border-t border-gray-200 bg-white px-3 py-2">
-        <div className="flex items-center gap-2">
-          <label className="text-[11px] font-medium text-gray-500">Reviewer note</label>
-          <input
-            type="text"
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-            onBlur={commitNote}
-            placeholder="Optional — stored with this file and in export metadata"
-            className="flex-1 rounded border border-gray-200 bg-white px-2 py-1 text-xs text-gray-800 focus:border-blue-400 focus:outline-none"
-          />
-        </div>
-      </div>
       {spanPopover && (
         <div
           ref={popoverRef}

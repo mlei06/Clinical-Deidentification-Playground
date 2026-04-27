@@ -224,6 +224,55 @@ def test_address_po_box() -> None:
     assert _labels_for("Mail to P.O. Box 1234 in town.", "ADDRESS")
 
 
+def _spans_intersect(a, b) -> bool:
+    return a.start < b.end and b.start < a.end
+
+
+def test_no_duplicate_spans_after_remap_collision() -> None:
+    """``MRN`` remapped to ``ID`` plus a native ``ID`` match at the same range
+    must not produce two ``ID`` spans at the same offsets."""
+    cfg = RegexNerConfig(
+        labels={"MRN": RegexLabelSettings(remap="ID")},
+    )
+    pipe = RegexNerPipe(cfg)
+    out = pipe.forward(_doc("MRN: 1234567"))
+    id_spans = [s for s in out.spans if s.label == "ID"]
+    keys = {(s.start, s.end) for s in id_spans}
+    assert len(keys) == len(id_spans), f"duplicate ID spans: {id_spans}"
+
+
+def test_no_internal_self_overlap_across_labels() -> None:
+    """The pipe's own matches must be non-overlapping after reconciliation."""
+    pipe = RegexNerPipe(RegexNerConfig())
+    out = pipe.forward(
+        _doc(
+            "Patient MRN: 1234567 admitted 04/27/1985. "
+            "Email john@example.com phone 555-123-4567."
+        )
+    )
+    spans = list(out.spans)
+    for i, a in enumerate(spans):
+        for b in spans[i + 1 :]:
+            assert not _spans_intersect(a, b), (
+                f"self-overlap in regex_ner output: {a} ↔ {b}"
+            )
+
+
+def test_dedupe_internal_overlaps_can_be_disabled() -> None:
+    cfg = RegexNerConfig(
+        labels={"MRN": RegexLabelSettings(remap="ID")},
+        dedupe_internal_overlaps=False,
+    )
+    pipe = RegexNerPipe(cfg)
+    out = pipe.forward(_doc("MRN: 1234567"))
+    id_spans = [s for s in out.spans if s.label == "ID"]
+    # With reconciliation off, the raw match set retains every alternative,
+    # including the nested ``1234567`` that ``ID`` itself matches.
+    assert len(id_spans) >= 2, (
+        f"expected raw overlap when dedupe is off, got: {id_spans}"
+    )
+
+
 def test_hospital_avoids_bare_word() -> None:
     """The hospital-keyword alone shouldn't match without a preceding name."""
     pipe = RegexNerPipe(RegexNerConfig())

@@ -202,6 +202,7 @@ export default function WorkspaceView() {
             ) : (
               <DocumentReviewer
                 datasetId={active.id}
+                dataset={active}
                 file={currentFile}
                 reviewer={reviewer}
                 hideEditorPanel={focusMode}

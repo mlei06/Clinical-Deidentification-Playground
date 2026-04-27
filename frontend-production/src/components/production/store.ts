@@ -11,21 +11,6 @@ import type { ResolveStrategyId } from '../../lib/spanOverlapConflicts';
 
 export type ExportOutputType = 'redacted' | 'annotated' | 'surrogate_annotated';
 
-export type SavedOutputMode = 'annotated' | 'redacted' | 'surrogate_annotated';
-
-export interface SavedOutput {
-  mode: SavedOutputMode;
-  /** null when mode === 'annotated'; export uses file.originalText. */
-  text: string | null;
-  /** Snapshot at save time. annotated → snapshot of annotations; redacted → []; surrogate → aligned spans. */
-  spans: EntitySpanResponse[];
-  /** Snapshot of file.annotations at save time. Drives staleness detection. */
-  annotationsAtSave: EntitySpanResponse[];
-  /** Hash of file.originalText at save time. Defensive against future text mutations. */
-  sourceTextHash: string;
-  savedAt: string;
-}
-
 export type DetectionStatus =
   | 'pending'
   | 'processing'
@@ -58,11 +43,8 @@ export interface DatasetFile {
   processingTimeMs?: number;
   /** Set when detection ran with auto-resolve enabled; cleared otherwise. */
   lastAutoResolve?: AutoResolveStamp | null;
-  /** @deprecated migrated to `savedOutput`; retained for back-compat through M4. */
-  surrogateText?: string | null;
-  /** @deprecated migrated to `savedOutput`; retained for back-compat through M4. */
-  annotationsOnSurrogate?: EntitySpanResponse[] | null;
-  savedOutput?: SavedOutput | null;
+  /** Per-file surrogate seed override. Falls back to the dataset default. */
+  surrogateSeed?: string;
   createdAt: string;
 }
 
@@ -73,6 +55,8 @@ export interface Dataset {
   updatedAt: string;
   defaultDetectionMode: string;
   exportOutputType: ExportOutputType;
+  /** Default seed used at export when a file has no per-file override. */
+  defaultSurrogateSeed?: string;
   /** When set + enabled, detection auto-resolves overlapping spans before annotations land. */
   autoResolveOverlaps?: DatasetAutoResolveSetting;
   files: DatasetFile[];
@@ -99,6 +83,7 @@ interface State extends UiState {
 
   setDatasetExportType: (id: string, t: ExportOutputType) => void;
   setDatasetDefaultMode: (id: string, mode: string) => void;
+  setDatasetDefaultSurrogateSeed: (id: string, seed: string | undefined) => void;
   setDatasetAutoResolveOverlaps: (
     id: string,
     setting: DatasetAutoResolveSetting | undefined,
@@ -109,10 +94,9 @@ interface State extends UiState {
   clearFiles: (datasetId: string) => void;
   updateFile: (datasetId: string, fileId: string, patch: Partial<DatasetFile>) => void;
   setFileResolved: (datasetId: string, fileId: string, resolved: boolean) => void;
+  setFileFlagged: (datasetId: string, fileId: string, flagged: boolean) => void;
+  setFileSurrogateSeed: (datasetId: string, fileId: string, seed: string | undefined) => void;
   setCurrentFile: (datasetId: string, fileId: string | null) => void;
-
-  saveFileOutput: (datasetId: string, fileId: string, output: SavedOutput) => void;
-  clearFileOutput: (datasetId: string, fileId: string) => void;
 
   replaceFileAnnotations: (
     datasetId: string,
@@ -122,8 +106,6 @@ interface State extends UiState {
       target: string;
       processingTimeMs?: number;
       clearResolved: boolean;
-      surrogateText?: string | null;
-      annotationsOnSurrogate?: EntitySpanResponse[] | null;
       autoResolve?: AutoResolveStamp | null;
     },
   ) => void;
@@ -134,6 +116,10 @@ export const DEFAULT_EXPORT_TYPE: ExportOutputType = 'annotated';
 export function makeId(stem: string): string {
   const safe = stem.replace(/[^a-zA-Z0-9_-]+/g, '_').slice(0, 48) || 'id';
   return `${safe}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function makeDefaultSeed(): string {
+  return Math.floor(Math.random() * 1_000_000_000).toString(36);
 }
 
 function nowIso(): string {
@@ -150,6 +136,7 @@ function newDataset(name: string, seed?: Partial<Dataset>): Dataset {
     updatedAt: t,
     defaultDetectionMode: seed?.defaultDetectionMode ?? '',
     exportOutputType: seed?.exportOutputType ?? DEFAULT_EXPORT_TYPE,
+    defaultSurrogateSeed: seed?.defaultSurrogateSeed ?? makeDefaultSeed(),
     files: seed?.files ?? [],
     currentFileId: seed?.currentFileId ?? null,
   };
@@ -222,29 +209,38 @@ function migrateLegacyQueue(legacy: {
   };
 }
 
-const PERSIST_VERSION = 3;
+const PERSIST_VERSION = 4;
 const PERSIST_KEY = 'clinical-deid-production:v2';
 
-function migrateLegacySurrogate(persisted: PersistedShape): PersistedShape {
+interface LegacyV3DatasetFile {
+  savedOutput?: unknown;
+  surrogateText?: unknown;
+  annotationsOnSurrogate?: unknown;
+  [k: string]: unknown;
+}
+
+/**
+ * v3 → v4: drop the per-file ``savedOutput`` snapshot and the deprecated
+ * ``surrogateText`` / ``annotationsOnSurrogate`` fields. Outputs are now
+ * derived on demand from current annotations; persisting snapshots was the
+ * only thing keeping the staleness machinery alive. Lossy by design — users
+ * regenerate from the Export tab.
+ */
+function dropSavedOutputs(persisted: PersistedShape): PersistedShape {
   if (!persisted.datasets) return persisted;
   const datasets: Record<string, Dataset> = {};
   for (const [id, ds] of Object.entries(persisted.datasets)) {
     datasets[id] = {
       ...ds,
+      defaultSurrogateSeed: ds.defaultSurrogateSeed ?? makeDefaultSeed(),
       files: ds.files.map((f) => {
-        if (f.savedOutput) return f;
-        if (f.surrogateText && f.annotationsOnSurrogate?.length) {
-          const savedOutput: SavedOutput = {
-            mode: 'surrogate_annotated',
-            text: f.surrogateText,
-            spans: f.annotationsOnSurrogate,
-            annotationsAtSave: [],
-            sourceTextHash: '__legacy__',
-            savedAt: f.createdAt,
-          };
-          return { ...f, savedOutput };
-        }
-        return f;
+        const {
+          savedOutput: _savedOutput,
+          surrogateText: _surrogateText,
+          annotationsOnSurrogate: _annotationsOnSurrogate,
+          ...rest
+        } = f as unknown as LegacyV3DatasetFile;
+        return rest as unknown as DatasetFile;
       }),
     };
   }
@@ -278,7 +274,7 @@ const persistOptions: PersistOptions<State, PersistedShape> = {
     };
     if (Array.isArray(legacy.docs)) next = migrateLegacyQueue(legacy);
     else next = persisted as PersistedShape;
-    if (version < 3) next = migrateLegacySurrogate(next);
+    if (version < 4) next = dropSavedOutputs(next);
     return next;
   },
 };
@@ -333,6 +329,7 @@ export const useProductionStore = create<State>()(
         const copy = newDataset(newName, {
           defaultDetectionMode: src.defaultDetectionMode,
           exportOutputType: src.exportOutputType,
+          defaultSurrogateSeed: src.defaultSurrogateSeed,
           files: src.files.map((f) => ({
             ...f,
             id: makeId(f.sourceLabel),
@@ -363,6 +360,18 @@ export const useProductionStore = create<State>()(
             datasets: {
               ...s.datasets,
               [id]: { ...ds, defaultDetectionMode: mode, updatedAt: nowIso() },
+            },
+          };
+        }),
+
+      setDatasetDefaultSurrogateSeed: (id, seed) =>
+        set((s) => {
+          const ds = s.datasets[id];
+          if (!ds) return s;
+          return {
+            datasets: {
+              ...s.datasets,
+              [id]: { ...ds, defaultSurrogateSeed: seed, updatedAt: nowIso() },
             },
           };
         }),
@@ -453,6 +462,34 @@ export const useProductionStore = create<State>()(
           };
         }),
 
+      setFileFlagged: (datasetId, fileId, flagged) =>
+        set((s) => {
+          const ds = s.datasets[datasetId];
+          if (!ds) return s;
+          const files = ds.files.map((f) => (f.id === fileId ? { ...f, flagged } : f));
+          return {
+            datasets: {
+              ...s.datasets,
+              [datasetId]: { ...ds, files, updatedAt: nowIso() },
+            },
+          };
+        }),
+
+      setFileSurrogateSeed: (datasetId, fileId, seed) =>
+        set((s) => {
+          const ds = s.datasets[datasetId];
+          if (!ds) return s;
+          const files = ds.files.map((f) =>
+            f.id === fileId ? { ...f, surrogateSeed: seed } : f,
+          );
+          return {
+            datasets: {
+              ...s.datasets,
+              [datasetId]: { ...ds, files, updatedAt: nowIso() },
+            },
+          };
+        }),
+
       setCurrentFile: (datasetId, fileId) =>
         set((s) => {
           const ds = s.datasets[datasetId];
@@ -461,36 +498,6 @@ export const useProductionStore = create<State>()(
             datasets: {
               ...s.datasets,
               [datasetId]: { ...ds, currentFileId: fileId },
-            },
-          };
-        }),
-
-      saveFileOutput: (datasetId, fileId, output) =>
-        set((s) => {
-          const ds = s.datasets[datasetId];
-          if (!ds) return s;
-          const files = ds.files.map((f) =>
-            f.id === fileId ? { ...f, savedOutput: output } : f,
-          );
-          return {
-            datasets: {
-              ...s.datasets,
-              [datasetId]: { ...ds, files, updatedAt: nowIso() },
-            },
-          };
-        }),
-
-      clearFileOutput: (datasetId, fileId) =>
-        set((s) => {
-          const ds = s.datasets[datasetId];
-          if (!ds) return s;
-          const files = ds.files.map((f) =>
-            f.id === fileId ? { ...f, savedOutput: null } : f,
-          );
-          return {
-            datasets: {
-              ...s.datasets,
-              [datasetId]: { ...ds, files, updatedAt: nowIso() },
             },
           };
         }),
@@ -508,10 +515,7 @@ export const useProductionStore = create<State>()(
               detectionStatus: 'ready' as DetectionStatus,
               lastDetectionTarget: opts.target,
               processingTimeMs: opts.processingTimeMs,
-              surrogateText: opts.surrogateText ?? null,
-              annotationsOnSurrogate: opts.annotationsOnSurrogate ?? null,
               lastAutoResolve: opts.autoResolve ?? null,
-              savedOutput: null,
               resolved: opts.clearResolved ? false : f.resolved,
               error: undefined,
             };
@@ -551,4 +555,9 @@ export function useHasHydrated(): boolean {
     return () => unsubFinish?.();
   }, []);
   return hydrated;
+}
+
+/** Effective surrogate seed for a file: per-file override, then dataset default, then fallback. */
+export function effectiveSurrogateSeed(file: DatasetFile, dataset: Dataset): string {
+  return file.surrogateSeed ?? dataset.defaultSurrogateSeed ?? '0';
 }

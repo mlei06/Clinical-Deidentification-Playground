@@ -1,4 +1,4 @@
-import { useMemo, useState, useCallback, useEffect, type ReactNode } from 'react';
+import { useMemo, useState, useCallback, useEffect } from 'react';
 import { clsx } from 'clsx';
 import {
   Trash2,
@@ -37,8 +37,6 @@ interface SpanEditorProps {
   onResolveGroupKeep?: (group: OverlapGroup, kept: EntitySpanResponse) => void;
   onResolveGroupDrop?: (group: OverlapGroup) => void;
   onResolveAllOverlaps?: (strategy: ResolveStrategyId) => void;
-  /** Optional save control rendered above Reset (replaces the old "Update output" button). */
-  saveControl?: ReactNode;
   showGhostPanel?: boolean;
 }
 
@@ -65,7 +63,6 @@ export default function SpanEditor({
   onResolveGroupKeep,
   onResolveGroupDrop,
   onResolveAllOverlaps,
-  saveControl,
   showGhostPanel = true,
 }: SpanEditorProps) {
   const DROP_ALL_CHOICE = '__drop_all__';
@@ -225,21 +222,18 @@ export default function SpanEditor({
           )}
         </div>
 
-        <div className="flex flex-col gap-1">
-          {saveControl && <div className="flex w-full">{saveControl}</div>}
-          <button
-            type="button"
-            onClick={onReset}
-            disabled={!isDirty || isApplying}
-            className="w-full rounded border border-gray-200 bg-white px-2 py-1.5 font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-40"
-            title="Revert to the spans detected by the pipeline"
-          >
-            <span className="inline-flex items-center justify-center gap-1">
-              <RotateCcw size={12} />
-              Reset span edits
-            </span>
-          </button>
-        </div>
+        <button
+          type="button"
+          onClick={onReset}
+          disabled={!isDirty || isApplying}
+          className="w-full rounded border border-gray-200 bg-white px-2 py-1.5 font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-40"
+          title="Revert to the spans detected by the pipeline"
+        >
+          <span className="inline-flex items-center justify-center gap-1">
+            <RotateCcw size={12} />
+            Reset span edits
+          </span>
+        </button>
       </div>
 
       {error && (

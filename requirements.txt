@@ -1,0 +1,36 @@
+# Core dependencies (required)
+fastapi>=0.115.0,<1.0
+uvicorn[standard]>=0.32.0
+sqlmodel>=0.0.22,<0.1.0
+pydantic>=2.9.0,<3.0
+pydantic-settings>=2.6.0,<3.0
+python-multipart>=0.0.12
+click>=8.1.0,<9.0
+
+# Dev / test (pip install -e ".[dev]")
+pandas>=2.0.0
+faker>=2.0.0
+pytest>=8.0.0
+pytest-cov>=5.0.0
+httpx>=0.27.0
+ruff>=0.6.0
+
+# Optional: Presidio NER pipe (pip install -e ".[presidio]")
+# presidio-analyzer>=2.2.0
+# presidio-anonymizer>=2.2.0
+
+# Optional: spaCy / HuggingFace NER pipe (pip install -e ".[ner]")
+# spacy>=3.5.0
+
+# Optional: HuggingFace fine-tuning (pip install -e ".[train]")
+# transformers>=4.44.0
+# torch>=2.2.0
+# datasets>=2.20.0
+# seqeval>=1.2.2
+# accelerate>=0.33.0
+
+# Optional: Parquet export (pip install -e ".[parquet]")
+# pyarrow>=14.0.0
+
+# Requires Python 3.11+
+# Install everything: pip install -e ".[all]"

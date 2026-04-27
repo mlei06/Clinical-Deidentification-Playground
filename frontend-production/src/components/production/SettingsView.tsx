@@ -1,10 +1,7 @@
 import { Link } from 'react-router-dom';
 import { ArrowLeft } from 'lucide-react';
-import DatasetExportBar from './DatasetExportBar';
-import {
-  useActiveDataset,
-  useProductionStore,
-} from './store';
+import ExportStep from './ExportStep';
+import { useActiveDataset, useProductionStore } from './store';
 
 export default function SettingsView() {
   const active = useActiveDataset();
@@ -21,7 +18,7 @@ export default function SettingsView() {
   return (
     <div className="flex h-full flex-col bg-gray-50">
       <header className="flex flex-wrap items-center gap-2 border-b border-gray-200 bg-white px-4 py-3">
-        <h1 className="text-sm font-semibold text-gray-900">Review and export</h1>
+        <h1 className="text-sm font-semibold text-gray-900">Export</h1>
         <span className="text-xs text-gray-400">{active.name}</span>
         <Link
           to={`/datasets/${active.id}/files`}
@@ -32,10 +29,8 @@ export default function SettingsView() {
         </Link>
       </header>
 
-      <div className="min-h-0 flex-1 overflow-auto p-4">
-        <section className="rounded-lg border border-gray-200 bg-white shadow-sm">
-          <DatasetExportBar dataset={active} reviewer={reviewer} />
-        </section>
+      <div className="min-h-0 flex-1">
+        <ExportStep dataset={active} reviewer={reviewer} />
       </div>
     </div>
   );

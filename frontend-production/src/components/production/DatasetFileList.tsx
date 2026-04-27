@@ -8,6 +8,7 @@ import {
   Circle,
   Trash2,
   ClipboardPaste,
+  Flag,
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { useVirtualizer } from '@tanstack/react-virtual';
@@ -109,6 +110,8 @@ export default function DatasetFileList({
   const removeFile = useProductionStore((s) => s.removeFile);
   const clearFiles = useProductionStore((s) => s.clearFiles);
   const setCurrentFile = useProductionStore((s) => s.setCurrentFile);
+  const setFileResolved = useProductionStore((s) => s.setFileResolved);
+  const setFileFlagged = useProductionStore((s) => s.setFileFlagged);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [filter, setFilter] = useState<'all' | 'pending' | 'resolved' | 'error'>('all');
   const [showPaste, setShowPaste] = useState(false);
@@ -275,6 +278,8 @@ export default function DatasetFileList({
         onToggleSelected={onToggleSelected}
         currentFileId={dataset.currentFileId}
         onSelectCurrent={(id) => setCurrentFile(dataset.id, id)}
+        onToggleResolved={(f) => setFileResolved(dataset.id, f.id, !f.resolved)}
+        onToggleFlagged={(f) => setFileFlagged(dataset.id, f.id, !f.flagged)}
         onRemove={(f) => {
           if (confirm(`Remove "${f.sourceLabel}"?`)) removeFile(dataset.id, f.id);
         }}
@@ -301,6 +306,8 @@ interface FileRowProps {
   isSelected: boolean;
   onToggleSelected: (id: string) => void;
   onSelectCurrent: (id: string) => void;
+  onToggleResolved: (f: DatasetFile) => void;
+  onToggleFlagged: (f: DatasetFile) => void;
   onRemove: (f: DatasetFile) => void;
 }
 
@@ -310,13 +317,16 @@ function FileRow({
   isSelected,
   onToggleSelected,
   onSelectCurrent,
+  onToggleResolved,
+  onToggleFlagged,
   onRemove,
 }: FileRowProps) {
   const Icon = STATUS_ICONS[f.detectionStatus];
+  const spanCount = f.detectionStatus === 'ready' ? f.annotations.length : null;
   return (
     <div
       className={clsx(
-        'flex h-9 items-center gap-2 border-l-2 border-b border-gray-100 px-2 text-xs transition-colors',
+        'flex h-9 items-center gap-1.5 border-l-2 border-b border-gray-100 px-2 text-xs transition-colors',
         isCurrent
           ? 'border-l-gray-900 bg-gray-50 text-gray-900'
           : 'border-l-transparent text-gray-700 hover:bg-gray-50',
@@ -339,21 +349,46 @@ function FileRow({
         />
         <span className="min-w-0 flex-1 truncate font-medium">{f.sourceLabel}</span>
         <span className="shrink-0 text-[10px] text-gray-400">
-          {f.resolved ? (
-            <span className="inline-flex items-center gap-0.5 text-green-600">
-              <CheckCircle2 size={10} />
-              {f.annotations.length}
-            </span>
-          ) : f.detectionStatus === 'ready' ? (
-            `${f.annotations.length}`
-          ) : f.detectionStatus === 'processing' ? (
-            '...'
-          ) : f.detectionStatus === 'error' ? (
-            'err'
-          ) : (
-            ''
-          )}
+          {spanCount != null
+            ? spanCount
+            : f.detectionStatus === 'processing'
+              ? '...'
+              : f.detectionStatus === 'error'
+                ? 'err'
+                : ''}
         </span>
+      </button>
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          onToggleFlagged(f);
+        }}
+        className={clsx(
+          'rounded p-0.5',
+          f.flagged
+            ? 'text-amber-600 hover:bg-amber-50'
+            : 'text-gray-300 hover:bg-gray-100 hover:text-amber-500',
+        )}
+        title={f.flagged ? 'Unflag' : 'Flag'}
+      >
+        <Flag size={11} />
+      </button>
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          onToggleResolved(f);
+        }}
+        className={clsx(
+          'rounded p-0.5',
+          f.resolved
+            ? 'text-green-600 hover:bg-green-50'
+            : 'text-gray-300 hover:bg-gray-100 hover:text-green-500',
+        )}
+        title={f.resolved ? 'Mark unresolved' : 'Mark resolved'}
+      >
+        <CheckCircle2 size={11} />
       </button>
       <button
         type="button"
@@ -376,6 +411,8 @@ interface FileListBodyProps {
   onToggleSelected: (id: string) => void;
   currentFileId: string | null;
   onSelectCurrent: (id: string) => void;
+  onToggleResolved: (f: DatasetFile) => void;
+  onToggleFlagged: (f: DatasetFile) => void;
   onRemove: (f: DatasetFile) => void;
   emptyMessage: string;
 }
@@ -386,6 +423,8 @@ function FileListBody({
   onToggleSelected,
   currentFileId,
   onSelectCurrent,
+  onToggleResolved,
+  onToggleFlagged,
   onRemove,
   emptyMessage,
 }: FileListBodyProps) {
@@ -419,6 +458,8 @@ function FileListBody({
                 isSelected={selectedIds.has(f.id)}
                 onToggleSelected={onToggleSelected}
                 onSelectCurrent={onSelectCurrent}
+                onToggleResolved={onToggleResolved}
+                onToggleFlagged={onToggleFlagged}
                 onRemove={onRemove}
               />
             </li>
@@ -464,6 +505,8 @@ function FileListBody({
                 isSelected={selectedIds.has(f.id)}
                 onToggleSelected={onToggleSelected}
                 onSelectCurrent={onSelectCurrent}
+                onToggleResolved={onToggleResolved}
+                onToggleFlagged={onToggleFlagged}
                 onRemove={onRemove}
               />
             </div>

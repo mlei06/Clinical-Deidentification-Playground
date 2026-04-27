@@ -375,7 +375,7 @@ const SpanHighlighter = forwardRef<SpanHighlighterHandle, SpanHighlighterProps>(
       <pre
         ref={rootRef}
         onMouseUp={handleMouseUp}
-        className="whitespace-pre-wrap break-words font-mono text-sm leading-relaxed"
+        className="block w-full whitespace-pre-wrap break-words font-mono text-sm leading-relaxed"
       >
         {segments.map((seg, i) => {
           const sliceText = text.slice(seg.start, seg.end);

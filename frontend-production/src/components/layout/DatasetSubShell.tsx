@@ -1,8 +1,7 @@
 import { NavLink, useLocation } from 'react-router-dom';
 import { clsx } from 'clsx';
 import { FileText, Download } from 'lucide-react';
-import type { Dataset, DatasetFile } from '../../components/production/store';
-import { isSavedOutputStale } from '../../components/production/savedOutput';
+import type { Dataset } from '../../components/production/store';
 
 interface DatasetSubShellProps {
   dataset: Dataset;
@@ -17,17 +16,12 @@ interface SubTab {
   disabled?: boolean;
 }
 
-function fileNeedsExport(f: DatasetFile): boolean {
-  if (!f.savedOutput) return true;
-  return isSavedOutputStale(f);
-}
-
 export default function DatasetSubShell({ dataset }: DatasetSubShellProps) {
   const location = useLocation();
   const id = dataset.id;
   const total = dataset.files.length;
-  const exportPending = dataset.files.filter(fileNeedsExport).length;
   const resolved = dataset.files.filter((f) => f.resolved).length;
+  const exportable = total;
 
   const tabs: SubTab[] = [
     {
@@ -41,8 +35,9 @@ export default function DatasetSubShell({ dataset }: DatasetSubShellProps) {
       to: `/datasets/${id}/export`,
       label: 'Export',
       icon: Download,
-      badge: exportPending > 0 ? exportPending : undefined,
-      badgeTone: exportPending > 0 ? 'warn' : 'neutral',
+      badge: exportable > 0 ? exportable : undefined,
+      badgeTone: 'neutral',
+      disabled: total === 0,
     },
   ];
 

@@ -13,6 +13,7 @@ from clinical_deid.pipes.detector_label_mapping import (
     apply_detector_label_mapping,
     effective_detector_labels,
 )
+from clinical_deid.pipes.span_merge import merge_longest_non_overlapping
 from clinical_deid.pipes.ui_schema import field_ui
 
 # ---------------------------------------------------------------------------
@@ -393,6 +394,26 @@ class RegexNerConfig(BaseModel):
         ),
     )
 
+    dedupe_internal_overlaps: bool = Field(
+        default=True,
+        description=(
+            "Reconcile this pipe's own matches before they are added to the "
+            "document so it never emits duplicate or overlapping spans with "
+            "itself. Runs after label remap using a longest-match-wins greedy "
+            "merge — within a single rule-based pipe a longer match is by "
+            "construction the more specific one (e.g. ``Fax: 555-987-6543`` "
+            "beats the embedded phone digits). Cross-pipe label conflicts are "
+            "still settled by ``resolve_spans`` downstream. Disable only if "
+            "you need the raw, unfiltered match set."
+        ),
+        json_schema_extra=field_ui(
+            ui_group="General",
+            ui_order=100,
+            ui_widget="switch",
+            ui_advanced=True,
+        ),
+    )
+
     @property
     def label_mapping(self) -> dict[str, str | None]:
         """Derived label mapping for the DetectorWithLabelMapping protocol."""
@@ -461,21 +482,29 @@ class RegexNerPipe(ConfigurablePipe):
     def forward(self, doc: AnnotatedDocument) -> AnnotatedDocument:
         text = doc.document.text
         found: list[EntitySpan] = []
-        seen: set[tuple[int, int, str]] = set()
         for r in self._resolved:
             for m in r.compiled.finditer(text):
-                key = (m.start(), m.end(), r.label)
-                if key not in seen:
-                    seen.add(key)
-                    found.append(
-                        EntitySpan(
-                            start=m.start(),
-                            end=m.end(),
-                            label=r.label,
-                            confidence=1.0,
-                            source=self._config.source_name,
-                        )
+                found.append(
+                    EntitySpan(
+                        start=m.start(),
+                        end=m.end(),
+                        label=r.label,
+                        confidence=1.0,
+                        source=self._config.source_name,
                     )
-        found.sort(key=lambda s: (s.start, s.end, s.label))
+                )
         found = apply_detector_label_mapping(found, self._config.label_mapping)
+
+        # Reconcile *after* remap. Two distinct base labels can collapse to the
+        # same output label (e.g. ``MRN`` → ``ID`` colliding with native ``ID``)
+        # at the same range, and patterns under different labels routinely match
+        # nested or overlapping ranges (e.g. ``MRN: 12345`` and bare ``12345``).
+        # Longest-first wins: within one rule-based pipe a longer match is by
+        # construction more specific (the FAX pattern matched its keyword *and*
+        # the digits; the PHONE pattern only matched the digits — FAX wins).
+        if self._config.dedupe_internal_overlaps and found:
+            found = merge_longest_non_overlapping([found])
+        else:
+            found.sort(key=lambda s: (s.start, s.end, s.label))
+
         return accumulate_spans(doc, found, skip_overlapping=self._config.skip_overlapping)

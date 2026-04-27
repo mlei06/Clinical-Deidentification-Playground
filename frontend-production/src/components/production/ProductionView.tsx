@@ -3,7 +3,6 @@ import { Play, Loader2, Square, AlertCircle, CheckCircle2, Keyboard } from 'luci
 import DatasetSwitcher from './DatasetSwitcher';
 import DatasetFileList from './DatasetFileList';
 import DocumentReviewer from './DocumentReviewer';
-import DatasetExportBar from './DatasetExportBar';
 import { useModes } from '../../hooks/useModes';
 import {
   useProductionStore,
@@ -312,6 +311,7 @@ export default function ProductionView() {
             ) : (
               <DocumentReviewer
                 datasetId={active.id}
+                dataset={active}
                 file={currentFile}
                 reviewer={reviewer}
               />
@@ -319,7 +319,6 @@ export default function ProductionView() {
           ) : (
             <EmptyPane message="No file selected. Add files or pick one from the list." />
           )}
-          <DatasetExportBar dataset={active} reviewer={reviewer} />
         </div>
       </div>
       {showShortcuts && (
