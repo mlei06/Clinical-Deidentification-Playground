@@ -76,16 +76,18 @@ clinical-deid eval --corpus data/corpora/discharge_summaries/corpus.jsonl --prof
 
 **Demo gold set — `discharge_summaries`:** seven short clinical snippets with span **gold labels** in `corpus.jsonl` (layered surrogate / model metadata on some lines under `document.metadata` from the **Production UI** export flow), plus cached stats in `dataset.json`. The repo **tracks** that corpus so Evaluate and the CLI use the same files.
 
-Strict micro-F1 and risk-weighted recall (RWR) on that corpus, for each **shipped** pipeline (regenerate after edits — see [data/README.md](data/README.md)):
+Strict micro-F1, precision, recall, and risk-weighted recall (RWR) on that corpus, for each **shipped** pipeline. Run snapshots are tracked under `data/evaluations/` — regenerate after edits with `python scripts/emit_discharge_eval_snapshots.py` (see [data/README.md](data/README.md)):
 
-| Pipeline | Strict F1 (micro) | Risk-weighted recall |
-|----------|-------------------:|---------------------:|
-| `clinical-fast` | 0.43 | 0.26 |
-| `presidio` | 0.42 | 0.59 |
-| `clinical-transformer` | 0.68 | 0.78 |
-| `clinical-transformer-presidio` | 0.54 | 0.78 |
+| Pipeline | Precision | Recall | Strict F1 | Risk-weighted recall |
+|----------|----------:|-------:|----------:|---------------------:|
+| `clinical-fast` | 0.74 | 0.30 | 0.43 | 0.26 |
+| `presidio` | 0.36 | 0.55 | 0.44 | 0.60 |
+| `clinical-transformer` | 0.65 | 0.75 | **0.69** | **0.79** |
+| `clinical-transformer-presidio` | 0.43 | 0.75 | 0.55 | 0.79 |
 
-Full per-label tables and confusion matrices: `data/evaluations/discharge-summaries__<pipeline>.json`. **Regenerate:** `python scripts/emit_discharge_eval_snapshots.py` (requires the same optional extras you use to load each pipeline, e.g. Presidio + spaCy + HF weights).
+**Key takeaways from these runs:** `clinical-fast` (regex + whitelist) has the highest precision but misses names entirely — it catches 0 of 22 NAME spans since regex cannot generalize to unseen proper nouns. Adding Presidio (`presidio` pipeline) recovers name recall but at high cost: 55 false positives vs 6, and DATE precision collapses to 0.37 due to over-firing. The `clinical-transformer` HuggingFace model gives the best overall result — NAME F1 jumps to 0.89, LOCATION to 0.89, and HOSPITAL to 1.0. Combining transformer with Presidio (`clinical-transformer-presidio`) does **not** improve recall (stays 0.75) but doubles false positives, confirming that Presidio adds noise rather than coverage on top of a trained NER model. AGE (4 gold spans) is missed by every pipeline — a shared blind spot across regex patterns, Presidio, and the current HF model.
+
+Full per-label breakdowns and confusion matrices: `data/evaluations/<pipeline>_<timestamp>.json`. **Regenerate:** `python scripts/emit_discharge_eval_snapshots.py` (requires the same optional extras you use to load each pipeline, e.g. Presidio + spaCy + HF weights).
 
 **Where eval results are stored:** Every run from **Playground → Evaluate** or **`POST /eval/run`**, and every **`clinical-deid eval`**, writes a JSON file under **`data/evaluations/`** (default; override with `CLINICAL_DEID_EVALUATIONS_DIR`). Files are named **`{pipeline_name}_{YYYYMMDD_HHMMSS}.json`** (UTC). The **Evaluate** view lists and opens past runs from that folder via `GET /eval/runs` — so CLI and UI runs share the same history. Tracked `discharge-summaries__<pipeline>.json` files in the same directory are precomputed **snapshots** for docs (see [data/README.md](data/README.md)).
 
