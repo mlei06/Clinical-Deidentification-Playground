@@ -148,6 +148,25 @@ class BatchProcessRequest(BaseModel):
     items: list[ProcessRequest] = Field(..., max_length=MAX_BATCH_SIZE)
 
 
+class PreviewProcessRequest(BaseModel):
+    """Body for ``POST /process/preview``.
+
+    Lets the playground run an unsaved pipeline JSON against ad-hoc text. The
+    pipeline is constructed in memory; nothing is persisted and no audit
+    record is emitted.
+    """
+
+    text: str = Field(..., max_length=MAX_TEXT_LENGTH)
+    config: dict[str, Any] = Field(
+        ...,
+        description="Pipeline JSON ({\"pipes\": [...]}) — same shape as a saved pipeline file.",
+    )
+    request_id: str | None = None
+    include_surrogate_spans: bool = False
+    surrogate_seed: int | None = None
+    surrogate_consistency: bool = True
+
+
 class BatchProcessResponse(BaseModel):
     results: list[ProcessResponse]
     total_processing_time_ms: float
@@ -246,6 +265,39 @@ class ComputeLabelsResponse(BaseModel):
         ...,
         description="Canonical detector labels after entity_map (inputs to label_mapping).",
     )
+
+
+class PipeReadinessRequest(BaseModel):
+    """Body for ``POST /pipelines/pipe-types/{name}/readiness``.
+
+    Omit *config* to check readiness against the catalog defaults; send the
+    pipe's current config to surface config-dependent issues (e.g. a Hugging
+    Face model name that has not been downloaded).
+    """
+
+    config: dict[str, Any] | None = None
+
+
+class PipeReadinessResponse(BaseModel):
+    """Result of a config-aware readiness check for a single pipe type.
+
+    ``ok = installed and check_ready ok and no missing dependencies``.
+    """
+
+    installed: bool
+    ok: bool
+    missing: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Missing-dependency tags from the pipe's ``dependencies_fn`` "
+            "(e.g. ``model:foo``). Empty when the config is valid."
+        ),
+    )
+    ready_details: dict[str, Any] | None = Field(
+        default=None,
+        description="Granular result from the pipe's ``check_ready`` hook, if any.",
+    )
+    install_hint: str | None = None
 
 
 class PrefixLabelSpaceRequest(BaseModel):

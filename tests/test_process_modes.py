@@ -54,6 +54,41 @@ def test_process_output_mode_default_is_redacted(client) -> None:
     assert "[PHONE]" in body["redacted_text"]
 
 
+def test_process_preview_runs_unsaved_pipeline(client) -> None:
+    """``/process/preview`` lets the playground run an unsaved pipeline JSON."""
+    r = client.post(
+        "/process/preview",
+        json={"text": PHONE_TEXT, "config": REGEX_ONLY},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["pipeline_name"] == "__preview__"
+    assert any(s["label"] == "PHONE" for s in body["spans"])
+    # Trace is always on for preview
+    assert body["intermediary_trace"] is not None
+    assert len(body["intermediary_trace"]) >= 1
+
+
+def test_process_preview_invalid_pipeline_returns_422(client) -> None:
+    r = client.post(
+        "/process/preview",
+        json={"text": "hello", "config": {"pipes": [{"type": "no_such_pipe"}]}},
+    )
+    assert r.status_code == 422
+
+
+def test_process_preview_does_not_audit(client) -> None:
+    """Preview is throwaway — should not create an audit record."""
+    before = client.get("/audit/logs").json()
+    before_count = len(before.get("items", before)) if isinstance(before, dict) else len(before)
+
+    client.post("/process/preview", json={"text": PHONE_TEXT, "config": REGEX_ONLY})
+
+    after = client.get("/audit/logs").json()
+    after_count = len(after.get("items", after)) if isinstance(after, dict) else len(after)
+    assert after_count == before_count
+
+
 def test_process_batch_output_mode(client) -> None:
     name = _create_pipeline(client, name="proc-batch-mode")
     r = client.post(

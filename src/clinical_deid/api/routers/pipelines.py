@@ -22,6 +22,8 @@ from clinical_deid.api.schemas import (
     ParseListFileResult,
     ParseListFilesResponse,
     PipelineDetail,
+    PipeReadinessRequest,
+    PipeReadinessResponse,
     PipeTypeInfo,
     PrefixLabelSpaceRequest,
     PrefixLabelSpaceResponse,
@@ -47,9 +49,12 @@ from clinical_deid.pipes.label_space import (
 )
 from clinical_deid.pipes.registry import (
     compute_base_labels,
+    get_catalog_entry,
     get_label_space_bundle,
     load_pipeline,
     pipe_availability,
+    pipe_check_ready,
+    pipe_dependencies,
     registered_pipes,
     resolve_dynamic_options,
     validate_pipeline_config,
@@ -203,6 +208,36 @@ def compute_pipe_labels(name: str, body: ComputeLabelsRequest | None = None) -> 
     config = body.config if body else None
     labels = compute_base_labels(name, config)
     return ComputeLabelsResponse(labels=labels)
+
+
+@router.post(
+    "/pipe-types/{name}/readiness",
+    response_model=PipeReadinessResponse,
+    dependencies=[require_admin],
+)
+def pipe_readiness(
+    name: str, body: PipeReadinessRequest | None = None
+) -> PipeReadinessResponse:
+    """Check whether a pipe type can actually run, given its current config.
+
+    Combines the catalog's ``check_ready`` hook (runtime-only deps like a
+    Docker sidecar or downloaded weights) with ``dependencies_fn`` (config-
+    dependent deps like a referenced model name). The response is shaped for
+    the playground rail to render a status badge per pipe.
+    """
+    if get_catalog_entry(name) is None:
+        raise HTTPException(status_code=404, detail=f"unknown pipe type {name!r}")
+    config = body.config if body else None
+    runtime = pipe_check_ready(name)
+    missing = pipe_dependencies(name, config) if runtime["installed"] else []
+    ok = bool(runtime["installed"] and runtime["ready"] and not missing)
+    return PipeReadinessResponse(
+        installed=runtime["installed"],
+        ok=ok,
+        missing=missing,
+        ready_details=runtime["ready_details"],
+        install_hint=runtime["install_hint"],
+    )
 
 
 @router.post(

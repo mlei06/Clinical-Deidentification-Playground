@@ -345,6 +345,45 @@ def pipe_dependencies(pipe_name: str, config: dict[str, Any] | None) -> list[str
         return [f"dependency_check_error:{pipe_name}:{exc}"]
 
 
+def pipe_check_ready(pipe_name: str) -> dict[str, Any]:
+    """Run the catalog ``check_ready`` hook (if any) for *pipe_name*.
+
+    Returns a dict with:
+
+    - ``installed`` (bool): whether the pipe is currently registered
+    - ``ready`` (bool): ``installed`` and (if ``check_ready`` is defined) the
+      hook reported ready
+    - ``ready_details`` (dict | None): granular detail from ``check_ready``
+    - ``install_hint`` (str | None): the catalog's install_hint when present
+
+    Unknown pipe names return ``installed=False`` / ``ready=False``.
+    """
+    entry = get_catalog_entry(pipe_name)
+    if entry is None:
+        return {
+            "installed": False,
+            "ready": False,
+            "ready_details": None,
+            "install_hint": None,
+        }
+    installed = pipe_name in _REGISTRY
+    ready = installed
+    ready_details: dict[str, Any] | None = None
+    if installed and entry.check_ready is not None:
+        try:
+            check_fn = _import_dotted(entry.check_ready)
+            ready, ready_details = check_fn()
+        except Exception as exc:
+            ready = False
+            ready_details = {"error": str(exc)}
+    return {
+        "installed": installed,
+        "ready": ready,
+        "ready_details": ready_details,
+        "install_hint": entry.install_hint,
+    }
+
+
 def pipe_availability() -> list[dict[str, Any]]:
     """Return each known pipe type with its install status.
 

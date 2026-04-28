@@ -7,13 +7,14 @@ import time
 
 from fastapi import APIRouter, Header, HTTPException
 
-from clinical_deid.api.auth import InferenceCaller, require_inference
+from clinical_deid.api.auth import InferenceCaller, require_admin, require_inference
 from clinical_deid.api.deps import SessionDep
 from clinical_deid.api.schemas import (
     BatchProcessRequest,
     BatchProcessResponse,
     OutputMode,
     EntitySpanResponse,
+    PreviewProcessRequest,
     ProcessRequest,
     ProcessResponse,
     RedactRequest,
@@ -27,6 +28,7 @@ from clinical_deid.api.services.inference import (
     log_audit,
     process_single,
 )
+from clinical_deid.pipes.registry import load_pipeline
 from clinical_deid.domain import EntitySpan
 from clinical_deid.config import get_settings
 from clinical_deid.mode_config import load_mode_config
@@ -203,6 +205,42 @@ def scrub_text(
         output_mode=body.output_mode,
         span_count=len(resp.spans),
         processing_time_ms=resp.processing_time_ms,
+    )
+
+
+@router.post(
+    "/preview",
+    response_model=ProcessResponse,
+    dependencies=[require_admin],
+)
+def process_preview(
+    body: PreviewProcessRequest,
+    output_mode: OutputMode = OutputMode.annotated,
+) -> ProcessResponse:
+    """Run an unsaved pipeline JSON against ad-hoc text with full tracing.
+
+    Built for the playground's authoring test pane: pipeline is built in
+    memory, no audit record is emitted, no deploy allowlist applies. Admin
+    only.
+    """
+    try:
+        pipe_chain = load_pipeline(body.config)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=422, detail=f"failed to build pipeline: {exc}"
+        ) from exc
+
+    return process_single(
+        body.text,
+        body.request_id,
+        pipe_chain,
+        "__preview__",
+        body.config,
+        trace=True,
+        output_mode=output_mode,
+        include_surrogate_spans=body.include_surrogate_spans,
+        surrogate_seed=body.surrogate_seed,
+        surrogate_consistency=body.surrogate_consistency,
     )
 
 

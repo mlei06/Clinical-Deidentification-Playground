@@ -391,3 +391,32 @@ def test_label_space_bundle_404_for_compute_pipe(client) -> None:
 def test_label_space_bundle_404_for_unknown_pipe(client) -> None:
     r = client.get("/pipelines/pipe-types/no_such_pipe/label-space-bundle")
     assert r.status_code == 404
+
+
+def test_pipe_readiness_built_in_pipe(client) -> None:
+    """A pipe with no check_ready and no dependencies_fn is always ready."""
+    r = client.post("/pipelines/pipe-types/regex_ner/readiness", json={})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["installed"] is True
+    assert body["ok"] is True
+    assert body["missing"] == []
+
+
+def test_pipe_readiness_unknown_pipe(client) -> None:
+    r = client.post("/pipelines/pipe-types/no_such_pipe/readiness", json={})
+    assert r.status_code == 404
+
+
+def test_pipe_readiness_reflects_missing_dependencies(client) -> None:
+    """huggingface_ner reports a missing model when config points to one not on disk."""
+    r = client.post(
+        "/pipelines/pipe-types/huggingface_ner/readiness",
+        json={"config": {"model": "definitely-not-a-real-model"}},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    # The pipe is shipped/built-in, but its config-dependent deps fail.
+    assert body["installed"] is True
+    assert body["ok"] is False
+    assert any("definitely-not-a-real-model" in tag for tag in body["missing"])
