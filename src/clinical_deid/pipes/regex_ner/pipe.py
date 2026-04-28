@@ -1,4 +1,23 @@
-"""Regex-only PHI detection with built-in clinical patterns per label."""
+"""Regex-only PHI detection with built-in clinical patterns per label.
+
+Design notes:
+
+* Label surface is intentionally narrow (~12 labels). Sub-types like ``MRN``,
+  ``DEA``, ``OHIP`` etc. all collapse into ``ID`` because regex alone cannot
+  reliably tell them apart — the keyword *is* the disambiguator, and for
+  redaction/surrogate purposes they're treated identically. Specialized labels
+  belong to ML detectors that have semantic signal, not to regex.
+* Keyword-anchored alternatives narrow the emitted span to the entity itself
+  via uniquely-named ``entity_*`` capture groups. This keeps the keyword (e.g.
+  ``"Phone "``, ``"MRN: "``, ``"Illinois "``) out of the span so redaction
+  output stays correct: ``"Phone 4086569015"`` → ``"Phone [PHONE]"`` rather
+  than ``"[PHONE]"``. ``forward()`` extracts the first matched ``entity_*``
+  group's offsets; when no such group is present the full match is used.
+* Bare-digit fallbacks (``\\b\\d{6,10}\\b`` for IDs, the 9/11-digit OCR phone
+  variants) have been removed — they were responsible for the bulk of false
+  positives on lab values, lot numbers, and dosing. Numeric IDs now require
+  keyword context.
+"""
 
 from __future__ import annotations
 
@@ -31,10 +50,6 @@ _US_STATES = (
     "District of Columbia|Puerto Rico"
 )
 
-# ---------------------------------------------------------------------------
-# Month / season helpers
-# ---------------------------------------------------------------------------
-
 _MONTH = (
     "Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|"
     "Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?"
@@ -44,10 +59,6 @@ _SEASON = r"winter|spring|summer|autumn|fall"
 
 _ORDINAL = r"(?:st|nd|rd|th)"
 
-# ---------------------------------------------------------------------------
-# Street-address suffix list
-# ---------------------------------------------------------------------------
-
 _STREET_SUFFIX = (
     "Street|St|Avenue|Ave|Boulevard|Blvd|Drive|Dr|Road|Rd|"
     "Lane|Ln|Court|Ct|Place|Pl|Circle|Cir|Way|"
@@ -55,20 +66,16 @@ _STREET_SUFFIX = (
     "Square|Sq|Plaza|Plz|Crescent|Cres|Alley|Aly|Loop|Row"
 )
 
-# ---------------------------------------------------------------------------
-# Hospital / organization trailing keywords
-# ---------------------------------------------------------------------------
-
-_HOSPITAL_KEYWORD = (
+# Hospital/clinic + corporate/academic keywords folded into one ORGANIZATION list.
+_ORG_KEYWORD = (
+    # Hospital / clinic
     r"Hospitals?|Medical\s+Center|Medical\s+Centre|Medical\s+Group|"
     r"Health\s+System|Health\s+Center|Health\s+Centre|"
     r"Healthcare|Health\s+Care|Cancer\s+Center|Cancer\s+Centre|"
     r"Children's\s+Hospital|Memorial\s+Hospital|"
     r"Clinic|Polyclinic|Infirmary|Sanitarium|Sanatorium|"
-    r"Urgent\s+Care|Surgery\s+Center"
-)
-
-_ORG_KEYWORD = (
+    r"Urgent\s+Care|Surgery\s+Center|"
+    # Corporate / academic
     r"Inc\.?|LLC|L\.L\.C\.|Corp\.?|Corporation|Co\.|Company|"
     r"Foundation|Ltd\.?|Limited|Group|Associates|Partners|"
     r"Pharmaceuticals?|Pharma|Laboratories|Labs?\.?|Industries|"
@@ -77,205 +84,186 @@ _ORG_KEYWORD = (
 )
 
 # ---------------------------------------------------------------------------
-# Built-in patterns
+# Patterns
 # ---------------------------------------------------------------------------
 
-# EMAIL: standard mailbox, plus obfuscated [at]/(at) and [dot]/(dot) forms.
+# EMAIL: standard mailbox + obfuscated [at]/(at)/[dot]/(dot) forms. Full match
+# is the entity in every alternative.
 _EMAIL = (
     r"\b[A-Za-z0-9._%+\-]+\s?@\s?[A-Za-z0-9][A-Za-z0-9\-\.]*\.[A-Za-z]{2,24}\b"
     r"|\b[A-Za-z0-9._%+\-]+\s*(?:\[at\]|\(at\))\s*"
     r"[A-Za-z0-9][A-Za-z0-9\-\.]*\s*(?:\[dot\]|\(dot\)|\.)\s*[A-Za-z]{2,24}\b"
 )
 
-# Phone: international, NANP, separator-required local, and keyword-anchored.
+# PHONE: separator-required raw forms + keyword-anchored. Folds the legacy
+# ``FAX`` label in (fax keyword is just one of the trigger words). The
+# 9-digit / 11-digit "OCR" variants from the previous pack are dropped — they
+# were a major false-positive source.
 _PHONE = (
-    # International with + prefix: +1 555 123 4567, +44 20 7946 0958
+    # International: +1 555 123 4567, +44 20 7946 0958
     r"\+\d{1,3}[-.\s]?\(?\d{1,4}\)?[-.\s]?\d{1,4}[-.\s]?\d{1,9}"
-    # (XXX) XXX-XXXX with parentheses
+    # (XXX) XXX-XXXX
     r"|\(\d{3}\)\s*\d{3}[-.\s]?\d{4}"
-    # XXX-XXX-XXXX or XXX.XXX.XXXX or XXX XXX XXXX (separator required)
+    # XXX-XXX-XXXX / XXX.XXX.XXXX / XXX XXX XXXX (separator required)
     r"|\b\d{3}[-.\s]\d{3}[-.\s]\d{4}\b"
-    # 9-digit / 11-digit local variants kept for OCR'd notes
-    r"|\(?(\d{3})\s*[\)\.\/\-\=\, ]*\s*\d{3}\s*[ \-\.\/\=]*\s*\d{3}\b"
-    r"|\(?(\d{3})\s*[\)\.\/\-\=\, ]*\s*\d{3}\s*[ \-\.\/\=]*\s*\d{5}\b"
-    # Keyword + digits: phone: 5551234567, mobile #555-1234, pager 1234
-    r"|(?:phone|tel|telephone|mobile|cell|cellular|pager|beeper|"
+    # Keyword + digits — narrowed to digits only. The keyword set absorbs the
+    # legacy FAX trigger words so faxes still detect; consumers that need to
+    # distinguish fax from phone can layer a dedicated detector.
+    r"|(?:phone|tel|telephone|mobile|cell|cellular|pager|beeper|fax|facsimile|"
     r"home\s+phone|work\s+phone|office\s+phone)\s*"
-    r"(?:number|num|no|#)?\s*[:#\-]?\s*\(?\+?\d[\d\s\-\.\(\)]{6,20}\d"
-    # Optional extension trailer
+    r"(?:number|num|no|#)?\s*[:#\-]?\s*"
+    r"(?P<entity_phone>\(?\+?\d[\d\s\-\.\(\)]{6,18}\d)"
     r"(?:\s*(?:x|ex|ext|extension)\.?\s*\(?\d+\)?)?"
 )
 
-# FAX: phone-like number with required fax-keyword context.
-_FAX = (
-    r"(?:fax|facsimile)\s*(?:number|num|no|#)?\s*"
-    r"[:#\-]?\s*\(?\+?\d[\d\s\-\.\(\)]{6,20}\d"
-)
-
-# Date: comprehensive patterns covering clinical note date formats.
+# DATE: numeric/named/ranges + keyword-anchored year (narrowed).
 _DATE = (
-    # --- Numeric formats ---
-    # MM/DD/YYYY or DD/MM/YYYY or MM-DD-YY
+    # Numeric formats
     r"\b\d{1,2}[\-\/\.]\d{1,2}[\-\/\.]\d{2,4}\b"
-    # YYYY/MM/DD or YYYY-MM-DD
     r"|\b\d{4}[\-\/\.]\d{1,2}[\-\/\.]\d{1,2}\b"
-    # MM/YYYY or YYYY/MM
     r"|\b\d{1,2}[\-\/]\d{4}\b"
     r"|\b\d{4}[\-\/]\d{1,2}\b"
-
-    # --- Numeric date ranges ---
+    # Numeric ranges
     r"|\b\d{1,2}\/\d{1,2}\-\d{1,2}\/\d{1,2}(?:\/\d{2,4})?\b"
     r"|\b\d{1,2}\/\d{1,2}\/\d{2,4}\-\d{1,2}\/\d{1,2}\/\d{2,4}\b"
-
-    # --- Named month forms ---
+    # Named months
     r"|\b(?:" + _MONTH + r")\.?\s+\d{1,2}(?:" + _ORDINAL + r")?\s*[\,\s]+\d{2,4}\b"
     r"|\b\d{1,2}(?:" + _ORDINAL + r")?\s+(?:of\s+)?(?:" + _MONTH + r")\.?\s*[\,\s]+\d{2,4}\b"
     r"|\b(?:" + _MONTH + r")\.?\s+\d{1,2}(?:" + _ORDINAL + r")?\b"
     r"|\b\d{1,2}(?:" + _ORDINAL + r")?\s+(?:of\s+)?(?:" + _MONTH + r")\b"
     r"|\b(?:" + _MONTH + r")\.?\s*(?:of\s+)?\d{4}\b"
     r"|\b(?:" + _MONTH + r")\.?\s*\'\d{2}\b"
-
-    # --- Named month ranges ---
+    # Named ranges
     r"|\b(?:" + _MONTH + r")\.?\s+\d{1,2}\s*(?:\-|to|through)\s*\d{1,2}\s*[\,\s]+\d{2,4}\b"
     r"|\b\d{1,2}\s*(?:\-|to|through)\s*\d{1,2}\s+(?:" + _MONTH + r")\.?\s*[\,\s]+\d{2,4}\b"
-
-    # --- Season + year ---
+    # Season + year
     r"|\b(?:" + _SEASON + r")\s*(?:of\s+)?\d{2,4}\b"
-
-    # --- Decades: 1990s, the 90s, '90s ---
+    # Decades
     r"|\b(?:19|20)\d0s\b"
     r"|\bthe\s+\d0s\b"
     r"|\'\d{2}s\b"
-
-    # --- Year ranges: 1990-2024, 1990 to 2024 ---
+    # Year ranges
     r"|\b(?:19|20)\d{2}\s*(?:\-|to|through|until)\s*(?:19|20)\d{2}\b"
-
-    # --- Holidays ---
+    # Holidays
     r"|\b(?:Christmas|Thanksgiving|Easter|Hanukkah|Rosh Hashanah|Ramadan|"
     r"New Year(?:'s)?(?:\s+Day)?|Independence Day|Memorial Day|"
     r"Victoria Day|Canada Day|Labour Day|Labor Day|Veterans Day|"
     r"Mother's Day|Father's Day|Valentine's Day)\b"
-
-    # --- Year with medical-event context ---
-    r"|\b(?:since|from|in|year|during|until|before|after|by|circa)\s+\d{4}\b"
+    # Year with medical-event context — narrowed so "since [DATE]" reads cleanly
+    r"|\b(?:since|from|in|year|during|until|before|after|by|circa)\s+"
+    r"(?P<entity_date_year>\d{4})\b"
 )
 
-# DATE_TIME: ISO 8601 timestamps and bare time-of-day expressions.
+# DATE_TIME: ISO 8601 timestamps + bare time-of-day. Full match in all branches.
 _DATE_TIME = (
-    # ISO 8601: 2024-01-15T14:30:00Z, 2024-01-15 14:30:00+05:30
     r"\b\d{4}-\d{2}-\d{2}[T\s]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?"
     r"(?:\s*Z|\s*[+-]\d{2}:?\d{2})?\b"
-    # 24-hour or 12-hour time: 14:30, 2:30 pm, 02:30 a.m.
     r"|\b(?:[01]?\d|2[0-3]):[0-5]\d(?::[0-5]\d)?(?:\s*[ap]\.?\s*m\.?)?\b"
-    # 10am, 10 p.m.
     r"|\b\d{1,2}\s*[ap]\.?\s*m\.?\b"
 )
 
-# AGE: explicit age phrases (HIPAA Safe Harbor: ages > 89 must be aggregated).
+# AGE: explicit age phrases. Keyword-anchored "age N" narrows to N. The legacy
+# ``\d{1,3}\s*[ymf]o?\b`` shorthand is dropped — it fired on "5 m", "5 f"
+# (units) far too often. Callers who need "55M/55F" gender-shorthand can layer
+# a dedicated detector.
 _AGE = (
-    # age 55, age: 55, aged 55, age is 55
-    r"\b(?:age[ds]?|aged)\s*(?:is|of|=|:)?\s*\d{1,3}\b"
-    # 55-year-old, 55 year old
+    # "age 55" / "aged 55" → narrowed to "55"
+    r"\b(?:age[ds]?|aged)\s*(?:is|of|=|:)?\s*(?P<entity_age_kw>\d{1,3})\b"
+    # 55-year-old / 55 years old / 55 y/o (full match)
     r"|\b\d{1,3}\s*[\-]?\s*year[\s\-]*old\b"
-    # 55 years old, 55 yrs old, 55 yo
     r"|\b\d{1,3}\s*(?:years?|yrs?)[\s\.\-]*old\b"
-    # 55 y/o, 55 y.o.
     r"|\b\d{1,3}\s*y[\s\.\/]\s*o\.?\b"
-    # 55M, 55F shorthand for "55-year-old male/female"
-    r"|\b\d{1,3}\s*[\-]?\s*[ymf]o?\b"
 )
 
-# MRN: medical record number with explicit context terms.
-_MRN = (
-    r"(?:mrn|medical\s+record(?:\s*(?:number|num|no|#))?|"
-    r"hospital\s+(?:number|#|num)|chart\s*(?:number|#|num|no)?|"
-    r"patient\s+(?:id|identifier|number|#)|case\s*(?:number|#|num|no)|"
-    r"empi)\s*"
-    r"(?:number|num|no|#)?\s*"
-    r"[\)\#\:\-\=\s\.]*\s*"
-    r"[a-zA-Z]*?\d+[\/\-\:]?\d*"
-)
-
-# ID: explicit ID prefix or patient/subject/study identifier.
+# ID: every keyword-anchored identifier (medical record, account, license,
+# certificate, DEA, NPI, VIN, license plate, device serial, UDI, OHIP, SIN,
+# patient/subject/study/enrollment IDs). Each alternative narrows to its own
+# uniquely-named entity_* group so the keyword is dropped from the span.
 _ID = (
-    r"\b(?:MRN|ID|EMPI|HCN|HRN|UPI)[\s:#]*\d+\b"
-    r"|\b(?:patient|subject|study|enrollment)\s+(?:id|identifier|number|#)"
-    r"\s*[:#]?\s*[A-Z0-9][A-Z0-9\-]{2,}\b"
-    r"|\b\d{6,10}\b"
+    # Medical record / chart / patient / case / EMPI
+    r"\b(?:mrn|medical\s+record(?:\s+(?:number|num|no|#))?|"
+    r"hospital\s+(?:number|num|no|#)|chart\s+(?:number|num|no|#)?|"
+    r"case\s+(?:number|num|no|#)|empi)\s*"
+    r"(?:number|num|no|#)?\s*[:#\-]?\s*"
+    r"(?P<entity_mrn>[A-Za-z]?\d[\dA-Za-z\-\/]{2,})\b"
+    # Patient/subject/study identifiers
+    r"|\b(?:patient|subject|study|enrollment)\s+"
+    r"(?:id|identifier|number|#)\s*[:#\-]?\s*"
+    r"(?P<entity_subject_id>[A-Z0-9][A-Z0-9\-]{2,})\b"
+    # Generic ID prefixes (HCN, HRN, UPI, generic ID:)
+    r"|\b(?:ID|HCN|HRN|UPI)[\s:#]+(?P<entity_generic_id>[A-Z0-9][\dA-Z\-]{2,})\b"
+    # Account
+    r"|\b(?:account|acct|acc)\s*(?:number|num|no|#)?\s*[:#\-]?\s*"
+    r"(?P<entity_account>\d[\dA-Z\-]{3,})\b"
+    # License plate — listed before the generic ``license`` alternative so
+    # ``License plate ABC1234`` doesn't match as ``license <plate>``.
+    r"|\b(?:license\s+plate|plate\s+number|plate\s+#|tag\s+number)\s*"
+    r"[:#\-]?\s*(?P<entity_plate>[A-Z0-9][A-Z0-9\-]{1,7}[A-Z0-9])\b"
+    # DEA: 2 letters + 7 digits — also before generic license.
+    r"|\bDEA\s*(?:number|num|no|#)?\s*[:#\-]?\s*"
+    r"(?P<entity_dea>[A-Z]{2}\d{7})\b"
+    # NPI: 10 digits
+    r"|\bNPI\s*(?:number|num|no|#)?\s*[:#\-]?\s*"
+    r"(?P<entity_npi>\d{10})\b"
+    # VIN: 17 chars, no I/O/Q
+    r"|\b(?:VIN|vehicle\s+identification\s+number)\s*"
+    r"(?:number|num|no|#)?\s*[:#\-]?\s*"
+    r"(?P<entity_vin>[A-HJ-NPR-Z0-9]{17})\b"
+    # License / certificate (generic — last among license-like alternatives).
+    r"|\b(?:licen[cs]e|lic\.?|certificate|cert\.?)\s*"
+    r"(?:number|num|no|#)?\s*[:#\-]?\s*"
+    r"(?P<entity_license>[A-Z0-9][\dA-Z\-]{3,})\b"
+    # Device / model serial
+    r"|\b(?:device\s+(?:id|number|serial|#)|serial\s+(?:number|num|no|#)|"
+    r"s\/n|s\.n\.|model\s+(?:number|num|no|#))\s*[:#\-]?\s*"
+    r"(?P<entity_serial>[A-Z0-9][A-Z0-9\-]{3,})\b"
+    # UDI (medical device unique identifier)
+    r"|\bUDI[\s:#\-]+(?P<entity_udi>[\dA-Z\(\)\+\-]{8,})\b"
+    # OHIP (Ontario health card): 4-3-3 digits + optional 2-letter version.
+    # Keyword-anchored only — the bare-digit form collided with phone numbers.
+    r"|\bOHIP[\s:#\-]+"
+    r"(?P<entity_ohip>\d{4}[- \/]?\d{3}[- \/]?\d{3}(?:[- \/]?[A-Z]{2})?)\b"
+    # SIN (Canadian social insurance number) — keyword-anchored.
+    r"|\bSIN[\s:#\-]+"
+    r"(?P<entity_sin>\d{3}[- \/]?\d{3}[- \/]?\d{3})\b"
 )
 
-# ACCOUNT: account number with required keyword context.
-_ACCOUNT = (
-    r"\b(?:account|acct|acc)\s*(?:number|num|no|#)?\s*"
-    r"[:#\-]?\s*\d[\dA-Z\-]{3,}\b"
-)
+# SSN: distinctive shape (XXX-XX-XXXX with consistent separator). Kept as its
+# own label because the surrogate strategy (mask, hash, faker) is specific.
+_SSN = r"\b\d{3}([- /]?)\d{2}\1\d{4}\b"
 
-# LICENSE: license/certificate number, plus DEA and NPI registries.
-_LICENSE = (
-    r"\b(?:licen[cs]e|lic\.?|certificate|cert\.?)\s*"
-    r"(?:number|num|no|#)?[\s:#\-]*[A-Z0-9][\dA-Z\-]{3,}\b"
-    r"|\bDEA\s*(?:number|num|no|#)?[\s:#\-]*[A-Z]{2}\d{7}\b"
-    r"|\bNPI\s*(?:number|num|no|#)?[\s:#\-]*\d{10}\b"
-)
-
-# VEHICLE_ID: VIN (17 chars, no I/O/Q) or license plate with context.
-_VEHICLE_ID = (
-    r"\b(?:VIN|vehicle\s+identification\s+number)\s*"
-    r"(?:number|num|no|#)?[\s:#\-]*[A-HJ-NPR-Z0-9]{17}\b"
-    r"|\b(?:license\s+plate|plate\s+number|plate\s+#|tag\s+number)"
-    r"\s*[:#\-]?\s*[A-Z0-9][A-Z0-9\s\-]{2,8}\b"
-)
-
-# DEVICE_ID: device or serial number with required keyword context.
-_DEVICE_ID = (
-    r"\b(?:device\s+(?:id|number|serial|#)|serial\s*(?:number|#|num|no)|"
-    r"s\/n|s\.n\.|model\s+(?:number|#|num|no))\s*"
-    r"[:#\-]?\s*[A-Z0-9][A-Z0-9\-]{3,}\b"
-    r"|\bUDI[\s:#\-]+[\dA-Z\(\)\+\-]{8,}\b"
-)
-
-# URL: http/https/ftp/file plus bare www. domains.
+# URL: scheme-prefixed + bare www.
 _URL = (
     r"\bhttps?:\/\/[^\s<>\"\)\]]+"
     r"|\b(?:ftp|ftps|file):\/\/[^\s<>\"\)\]]+"
     r"|\bwww\.[a-zA-Z0-9][a-zA-Z0-9\-]*(?:\.[a-zA-Z0-9\-]+)+(?:\/[^\s<>\"\)\]]*)?"
 )
 
-# IP_ADDRESS: IPv4 (octet-validated) and uncompressed IPv6.
+# IP_ADDRESS: octet-validated IPv4 + uncompressed IPv6.
 _IP_ADDRESS = (
     r"\b(?:25[0-5]|2[0-4]\d|1\d{2}|[1-9]?\d)"
     r"(?:\.(?:25[0-5]|2[0-4]\d|1\d{2}|[1-9]?\d)){3}\b"
     r"|\b(?:[a-fA-F0-9]{1,4}:){7}[a-fA-F0-9]{1,4}\b"
 )
 
-# HOSPITAL: capitalized words ending in a hospital/clinic keyword.
-# Both prefix and keyword require uppercase first letter (via (?-i:...)) so
-# stop-word phrases like "the hospital" don't trigger under re.IGNORECASE.
-_HOSPITAL = (
-    r"\b(?:(?-i:[A-Z])[A-Za-z'\.\-]+\s+){1,4}"
-    r"(?-i:" + _HOSPITAL_KEYWORD + r")\b"
-)
-
-# ORGANIZATION: capitalized words ending in a corporate/academic suffix.
+# ORGANIZATION: capitalized words ending in a hospital/corporate/academic
+# keyword. Folds the legacy ``HOSPITAL`` label in — regex cannot reliably
+# distinguish a hospital from a foundation, and downstream consumers usually
+# treat both as ``ORGANIZATION``.
 _ORGANIZATION = (
     r"\b(?:(?-i:[A-Z])[A-Za-z'\.\-]+\s+){1,4}"
     r"(?-i:" + _ORG_KEYWORD + r")\b"
 )
 
-_POSTAL_CA = r"\b[a-zA-Z]\d[a-zA-Z][ \-]?\d[a-zA-Z]\d\b"
-
-_OHIP = r"\b\d{4}[- \/]?\d{3}[- \/]?\d{3}[- \/]?[a-zA-Z]{0,2}\b"
-
-_SIN = r"\b\d{3}([- \/]?)\d{3}\1\d{3}\b"
-
-_SSN = r"\b\d{3}([- /]?)\d{2}\1\d{4}\b"
-
-# US zip code: state name followed by 5(+4) digit zip
-_ZIP_CODE_US = (
-    r"\b(?:" + _US_STATES + r")\s*[,.]?\s*(\d{5}(?:-\d{4})?)\b"
+# POSTAL_CODE: Canadian postal code (full match) + US zip after a state name
+# (narrowed to drop the captured state).
+_POSTAL_CODE = (
+    r"\b[a-zA-Z]\d[a-zA-Z][ \-]?\d[a-zA-Z]\d\b"
+    r"|\b(?:" + _US_STATES + r")\s*[,.]?\s*"
+    r"(?P<entity_zip>\d{5}(?:-\d{4})?)\b"
 )
 
-# Street addresses with common suffixes + optional apt/suite, plus PO Box.
+# ADDRESS: street with common suffix + optional unit, plus PO Box.
 _ADDRESS = (
     r"\b\d+\s+(?:[A-Za-z\.\']+\s+)?(?:[A-Za-z\.\']+\s+)?"
     r"(?:" + _STREET_SUFFIX + r")\.?"
@@ -289,23 +277,13 @@ _CLINICAL_PHI_PATTERNS: dict[str, str] = {
     "DATE_TIME": _DATE_TIME,
     "AGE": _AGE,
     "PHONE": _PHONE,
-    "FAX": _FAX,
     "EMAIL": _EMAIL,
     "ID": _ID,
-    "MRN": _MRN,
-    "ACCOUNT": _ACCOUNT,
-    "LICENSE": _LICENSE,
-    "VEHICLE_ID": _VEHICLE_ID,
-    "DEVICE_ID": _DEVICE_ID,
+    "SSN": _SSN,
     "URL": _URL,
     "IP_ADDRESS": _IP_ADDRESS,
-    "HOSPITAL": _HOSPITAL,
     "ORGANIZATION": _ORGANIZATION,
-    "POSTAL_CODE_CA": _POSTAL_CA,
-    "OHIP": _OHIP,
-    "SIN": _SIN,
-    "SSN": _SSN,
-    "ZIP_CODE_US": _ZIP_CODE_US,
+    "POSTAL_CODE": _POSTAL_CODE,
     "ADDRESS": _ADDRESS,
 }
 
@@ -401,10 +379,9 @@ class RegexNerConfig(BaseModel):
             "document so it never emits duplicate or overlapping spans with "
             "itself. Runs after label remap using a longest-match-wins greedy "
             "merge — within a single rule-based pipe a longer match is by "
-            "construction the more specific one (e.g. ``Fax: 555-987-6543`` "
-            "beats the embedded phone digits). Cross-pipe label conflicts are "
-            "still settled by ``resolve_spans`` downstream. Disable only if "
-            "you need the raw, unfiltered match set."
+            "construction the more specific one. Cross-pipe label conflicts "
+            "are still settled by ``resolve_spans`` downstream. Disable only "
+            "if you need the raw, unfiltered match set."
         ),
         json_schema_extra=field_ui(
             ui_group="General",
@@ -437,11 +414,17 @@ def default_base_labels() -> list[str]:
 
 
 class _ResolvedRegex:
-    __slots__ = ("label", "compiled")
+    __slots__ = ("label", "compiled", "entity_groups")
 
     def __init__(self, label: str, compiled: re.Pattern[str]) -> None:
         self.label = label
         self.compiled = compiled
+        # Pre-compute the indexes of all ``entity_*`` named groups so the hot
+        # path doesn't iterate the full groupindex per match.
+        self.entity_groups: tuple[int, ...] = tuple(
+            idx for name, idx in compiled.groupindex.items()
+            if name.startswith("entity_")
+        )
 
 
 def _resolve_regex(config: RegexNerConfig) -> list[_ResolvedRegex]:
@@ -458,6 +441,22 @@ def _resolve_regex(config: RegexNerConfig) -> list[_ResolvedRegex]:
             continue
         out.append(_ResolvedRegex(label, re.compile(pat, re.IGNORECASE)))
     return out
+
+
+def _entity_span(m: re.Match[str], entity_groups: tuple[int, ...]) -> tuple[int, int]:
+    """Return the narrowed entity span if any ``entity_*`` group matched.
+
+    Each pattern alternative that needs to drop a leading keyword declares a
+    uniquely-named ``entity_*`` capture group. Only one such group can match
+    per regex match (the alternatives are disjoint), so the first non-``None``
+    one wins. Patterns without ``entity_*`` groups fall through to the full
+    match span.
+    """
+    for idx in entity_groups:
+        s, e = m.span(idx)
+        if s != -1:
+            return s, e
+    return m.span()
 
 
 class RegexNerPipe(ConfigurablePipe):
@@ -484,10 +483,13 @@ class RegexNerPipe(ConfigurablePipe):
         found: list[EntitySpan] = []
         for r in self._resolved:
             for m in r.compiled.finditer(text):
+                start, end = _entity_span(m, r.entity_groups)
+                if start >= end:
+                    continue
                 found.append(
                     EntitySpan(
-                        start=m.start(),
-                        end=m.end(),
+                        start=start,
+                        end=end,
                         label=r.label,
                         confidence=1.0,
                         source=self._config.source_name,
@@ -496,12 +498,8 @@ class RegexNerPipe(ConfigurablePipe):
         found = apply_detector_label_mapping(found, self._config.label_mapping)
 
         # Reconcile *after* remap. Two distinct base labels can collapse to the
-        # same output label (e.g. ``MRN`` → ``ID`` colliding with native ``ID``)
-        # at the same range, and patterns under different labels routinely match
-        # nested or overlapping ranges (e.g. ``MRN: 12345`` and bare ``12345``).
-        # Longest-first wins: within one rule-based pipe a longer match is by
-        # construction more specific (the FAX pattern matched its keyword *and*
-        # the digits; the PHONE pattern only matched the digits — FAX wins).
+        # same output label at the same range, and patterns can match nested
+        # ranges (e.g. a year inside a date range). Longest-first wins.
         if self._config.dedupe_internal_overlaps and found:
             found = merge_longest_non_overlapping([found])
         else:

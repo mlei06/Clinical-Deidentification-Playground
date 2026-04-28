@@ -126,20 +126,16 @@ def test_age_patterns() -> None:
         assert _labels_for(text, "AGE"), f"AGE missed in: {text!r}"
 
 
-def test_hospital_patterns() -> None:
+def test_organization_patterns() -> None:
+    """Hospitals, clinics, and corporations all collapse into ORGANIZATION."""
     cases = [
+        # Hospitals / clinics
         "Admitted to Toronto General Hospital today.",
         "Transferred to Mount Sinai Medical Center.",
         "Seen at Mayo Clinic last week.",
         "Visit at Memorial Sloan Kettering Cancer Center.",
         "Referred to St. Jude Children's Hospital.",
-    ]
-    for text in cases:
-        assert _labels_for(text, "HOSPITAL"), f"HOSPITAL missed in: {text!r}"
-
-
-def test_organization_patterns() -> None:
-    cases = [
+        # Corporate / academic
         "Drug supplied by Pfizer Inc.",
         "Medication from Johnson & Johnson Pharmaceuticals.",
         "Studied at Harvard University.",
@@ -163,35 +159,46 @@ def test_ip_address_patterns() -> None:
     assert "10.0.0.1" in matches
 
 
-def test_fax_patterns() -> None:
+def test_fax_folds_into_phone() -> None:
+    """Fax-keyword phone numbers emit ``PHONE`` (FAX collapsed into PHONE)."""
     cases = [
         "Fax: 555-987-6543",
         "facsimile #555.123.4567",
         "fax number (212) 555-0100",
     ]
     for text in cases:
-        assert _labels_for(text, "FAX"), f"FAX missed in: {text!r}"
+        assert _labels_for(text, "PHONE"), f"PHONE missed in: {text!r}"
 
 
-def test_license_patterns() -> None:
-    assert _labels_for("Issued License #ABC12345 last year.", "LICENSE")
-    assert _labels_for("DEA AB1234567 on file.", "LICENSE")
-    assert _labels_for("NPI 1234567890 verified.", "LICENSE")
+def test_id_consolidates_keyword_anchored_identifiers() -> None:
+    """MRN, account, license, DEA, NPI, VIN, plate, serial, UDI, OHIP, SIN
+    all collapse into ``ID`` because regex alone cannot reliably tell them
+    apart and surrogate handling is identical for all of them."""
+    cases = [
+        "MRN: 1234567",
+        "Issued License #ABC12345 last year.",
+        "DEA AB1234567 on file.",
+        "NPI 1234567890 verified.",
+        "VIN 1HGCM82633A123456 issued.",
+        "License plate ABC-123 cited.",
+        "Pacemaker serial number SN-9981A.",
+        "UDI: 0123456789ABC.",
+        "Account #555000123 was billed.",
+        "acct: 9988-7766",
+        "OHIP 1234567890",
+        "SIN 123-456-789",
+    ]
+    for text in cases:
+        assert _labels_for(text, "ID"), f"ID missed in: {text!r}"
 
 
-def test_vehicle_id_patterns() -> None:
-    assert _labels_for("VIN 1HGCM82633A123456 issued.", "VEHICLE_ID")
-    assert _labels_for("License plate ABC-123 cited.", "VEHICLE_ID")
-
-
-def test_device_id_patterns() -> None:
-    assert _labels_for("Pacemaker serial number SN-9981A.", "DEVICE_ID")
-    assert _labels_for("UDI: 0123456789ABC.", "DEVICE_ID")
-
-
-def test_account_patterns() -> None:
-    assert _labels_for("Account #555000123 was billed.", "ACCOUNT")
-    assert _labels_for("acct: 9988-7766", "ACCOUNT")
+def test_postal_code_consolidates_us_and_canada() -> None:
+    """ZIP_CODE_US and POSTAL_CODE_CA are now both ``POSTAL_CODE``."""
+    # Canadian postal code (full match)
+    assert _labels_for("Toronto, ON M5V 3A8.", "POSTAL_CODE") == ["M5V 3A8"]
+    # US zip after state name (state captured but narrowed out of the entity)
+    assert _labels_for("Patient lives in California 94025.", "POSTAL_CODE") == ["94025"]
+    assert _labels_for("Springfield, Illinois 62704.", "POSTAL_CODE") == ["62704"]
 
 
 def test_date_time_patterns() -> None:
@@ -228,17 +235,17 @@ def _spans_intersect(a, b) -> bool:
     return a.start < b.end and b.start < a.end
 
 
-def test_no_duplicate_spans_after_remap_collision() -> None:
-    """``MRN`` remapped to ``ID`` plus a native ``ID`` match at the same range
+def test_no_duplicate_id_spans_after_remap_collision() -> None:
+    """An ``ID`` remap target plus the native ``ID`` match at the same range
     must not produce two ``ID`` spans at the same offsets."""
-    cfg = RegexNerConfig(
-        labels={"MRN": RegexLabelSettings(remap="ID")},
-    )
+    # The fax-keyword PHONE branch + the bare digits PHONE branch can both
+    # match identical ranges; dedupe should collapse them.
+    cfg = RegexNerConfig()
     pipe = RegexNerPipe(cfg)
-    out = pipe.forward(_doc("MRN: 1234567"))
-    id_spans = [s for s in out.spans if s.label == "ID"]
-    keys = {(s.start, s.end) for s in id_spans}
-    assert len(keys) == len(id_spans), f"duplicate ID spans: {id_spans}"
+    out = pipe.forward(_doc("Fax: 555-987-6543"))
+    phone_spans = [s for s in out.spans if s.label == "PHONE"]
+    keys = {(s.start, s.end) for s in phone_spans}
+    assert len(keys) == len(phone_spans), f"duplicate PHONE spans: {phone_spans}"
 
 
 def test_no_internal_self_overlap_across_labels() -> None:
@@ -258,26 +265,86 @@ def test_no_internal_self_overlap_across_labels() -> None:
             )
 
 
-def test_dedupe_internal_overlaps_can_be_disabled() -> None:
-    cfg = RegexNerConfig(
-        labels={"MRN": RegexLabelSettings(remap="ID")},
-        dedupe_internal_overlaps=False,
-    )
-    pipe = RegexNerPipe(cfg)
-    out = pipe.forward(_doc("MRN: 1234567"))
-    id_spans = [s for s in out.spans if s.label == "ID"]
-    # With reconciliation off, the raw match set retains every alternative,
-    # including the nested ``1234567`` that ``ID`` itself matches.
-    assert len(id_spans) >= 2, (
-        f"expected raw overlap when dedupe is off, got: {id_spans}"
-    )
-
-
-def test_hospital_avoids_bare_word() -> None:
-    """The hospital-keyword alone shouldn't match without a preceding name."""
+def test_organization_avoids_bare_keyword() -> None:
+    """The organization-keyword alone shouldn't match without a proper-noun
+    prefix (lower-case ``the hospital``, ``the clinic`` are not entities)."""
     pipe = RegexNerPipe(RegexNerConfig())
     out = pipe.forward(_doc("Discharged from the hospital today."))
-    hospital_spans = [s for s in out.spans if s.label == "HOSPITAL"]
-    # Bare 'the hospital' shouldn't trigger HOSPITAL — needs a proper-noun prefix.
+    org_spans = [s for s in out.spans if s.label == "ORGANIZATION"]
     assert all(text not in {"hospital", "the hospital"} for text in
-               [out.document.text[s.start:s.end].lower() for s in hospital_spans])
+               [out.document.text[s.start:s.end].lower() for s in org_spans])
+
+
+# ---------------------------------------------------------------------------
+# Boundary narrowing — keyword-anchored patterns must not capture the keyword
+# ---------------------------------------------------------------------------
+
+
+def test_phone_keyword_is_not_captured() -> None:
+    """``Phone 4086569015`` must emit only the digits, not the keyword."""
+    cases = {
+        "Phone 4086569015": "4086569015",
+        "Phone: 408-656-9015": "408-656-9015",
+        "phone number is 408-656-9015": "408-656-9015",
+        "Tel 555.123.4567": "555.123.4567",
+        "mobile 555-1234": "555-1234",
+        "Fax: 555-987-6543": "555-987-6543",
+    }
+    for text, expected in cases.items():
+        spans = _labels_for(text, "PHONE")
+        assert spans == [expected], f"{text!r} → {spans!r}, expected [{expected!r}]"
+
+
+def test_id_keyword_is_not_captured() -> None:
+    """Keyword-anchored ID patterns must emit only the identifier."""
+    cases = {
+        "MRN: 1234567": "1234567",
+        "Account #: 998877": "998877",
+        "DEA AB1234567": "AB1234567",
+        "NPI 1234567890": "1234567890",
+        "License plate ABC1234": "ABC1234",
+        "OHIP 1234567890": "1234567890",
+        "SIN 123-456-789": "123-456-789",
+    }
+    for text, expected in cases.items():
+        spans = _labels_for(text, "ID")
+        assert expected in spans, f"{text!r} → {spans!r}, expected {expected!r}"
+
+
+def test_age_keyword_is_not_captured() -> None:
+    """``age 55`` should emit just ``55``."""
+    spans = _labels_for("Patient age 55 admitted today.", "AGE")
+    assert spans == ["55"]
+    spans = _labels_for("aged 88 at admission", "AGE")
+    assert spans == ["88"]
+    # Non-keyword forms still emit the full natural phrase.
+    assert _labels_for("55-year-old female", "AGE") == ["55-year-old"]
+
+
+def test_date_year_context_is_not_captured() -> None:
+    """``since 2020`` should emit just ``2020`` rather than the full phrase."""
+    spans = _labels_for("Patient since 2020 with diabetes.", "DATE")
+    assert spans == ["2020"]
+
+
+def test_postal_code_state_is_not_captured() -> None:
+    """``Illinois 62704`` should emit just the zip."""
+    spans = _labels_for("Springfield, Illinois 62704.", "POSTAL_CODE")
+    assert spans == ["62704"]
+
+
+# ---------------------------------------------------------------------------
+# False-positive sanity — patterns we deliberately removed
+# ---------------------------------------------------------------------------
+
+
+def test_bare_digits_no_longer_match_id() -> None:
+    """Bare 6-10 digit clusters should no longer fire as ID (was a major FP)."""
+    for text in ["lab value 1234567", "lot 12345678", "score 9876543"]:
+        assert not _labels_for(text, "ID"), f"unexpected ID match in {text!r}"
+
+
+def test_unit_shorthand_does_not_match_age() -> None:
+    """``5 m``/``5 f`` (units) should not match AGE."""
+    for text in ["5 m", "5 f", "5 ml", "5 mg"]:
+        assert not _labels_for(text, "AGE"), f"unexpected AGE match in {text!r}"

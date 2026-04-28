@@ -7,11 +7,6 @@
         "pattern_pack": "clinical_phi",
         "skip_overlapping": false,
         "labels": {
-          "ACCOUNT": {
-            "enabled": false,
-            "remap": null,
-            "custom_pattern": null
-          },
           "ADDRESS": {
             "enabled": true,
             "remap": "LOCATION",
@@ -22,44 +17,9 @@
             "remap": "DATE",
             "custom_pattern": null
           },
-          "DEVICE_ID": {
-            "enabled": true,
-            "remap": "DATE",
-            "custom_pattern": null
-          },
-          "FAX": {
-            "enabled": true,
-            "remap": "EMAIL",
-            "custom_pattern": null
-          },
           "IP_ADDRESS": {
             "enabled": false,
             "remap": null,
-            "custom_pattern": null
-          },
-          "LICENSE": {
-            "enabled": false,
-            "remap": null,
-            "custom_pattern": null
-          },
-          "MRN": {
-            "enabled": true,
-            "remap": "ID",
-            "custom_pattern": null
-          },
-          "OHIP": {
-            "enabled": true,
-            "remap": "ID",
-            "custom_pattern": null
-          },
-          "POSTAL_CODE_CA": {
-            "enabled": true,
-            "remap": "LOCATION",
-            "custom_pattern": null
-          },
-          "SIN": {
-            "enabled": true,
-            "remap": "ID",
             "custom_pattern": null
           },
           "SSN": {
@@ -70,16 +30,6 @@
           "URL": {
             "enabled": false,
             "remap": null,
-            "custom_pattern": null
-          },
-          "VEHICLE_ID": {
-            "enabled": false,
-            "remap": null,
-            "custom_pattern": null
-          },
-          "ZIP_CODE_US": {
-            "enabled": true,
-            "remap": "LOCATION",
             "custom_pattern": null
           }
         }
@@ -142,16 +92,15 @@
       }
     }
   ],
-  "description": "Clinical Transformer — regex + whitelist + blacklist + HuggingFace NER",
+  "description": "Clinical Transformer \u2014 regex + whitelist + blacklist + HuggingFace NER",
   "output_label_space": [
     "AGE",
     "DATE",
     "EMAIL",
-    "HOSPITAL",
+    "ORGANIZATION",
     "ID",
     "LOCATION",
     "NAME",
-    "ORGANIZATION",
     "PHONE"
   ],
   "output_label_space_updated_at": "2026-04-25T19:03:31.583111+00:00"

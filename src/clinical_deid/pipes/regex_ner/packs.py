@@ -6,11 +6,14 @@ pattern library without forking the detector.
 
 Built-ins:
 
-- ``clinical_phi`` — HIPAA-oriented patterns (dates, MRN, SSN, street addresses,
-  hospital/clinic organization names, ...). This is the legacy set and remains
-  the default.
-- ``generic_pii`` — a minimal universal subset: EMAIL, PHONE, URL, IP_ADDRESS,
-  DATE, SSN. Safe to use when the clinical label set does not apply.
+- ``clinical_phi`` — HIPAA-oriented patterns over a deliberately compact label
+  set: ``DATE``, ``DATE_TIME``, ``AGE``, ``PHONE``, ``EMAIL``, ``ID``, ``SSN``,
+  ``URL``, ``IP_ADDRESS``, ``ORGANIZATION``, ``POSTAL_CODE``, ``ADDRESS``.
+  Sub-types like MRN/DEA/OHIP/VIN all collapse into ``ID`` because regex alone
+  cannot reliably tell them apart.
+- ``generic_pii`` — a minimal universal subset: ``EMAIL``, ``PHONE``, ``URL``,
+  ``IP_ADDRESS``, ``DATE``, ``SSN``. Safe to use when the clinical label set
+  does not apply.
 
 Register custom packs at startup::
 

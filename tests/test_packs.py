@@ -25,21 +25,27 @@ def test_regex_pack_registry_contains_builtins() -> None:
     assert "generic_pii" in list_pattern_packs()
 
 
-def test_regex_pack_clinical_has_hipaa_labels() -> None:
+def test_regex_pack_clinical_has_consolidated_labels() -> None:
     pack = get_pattern_pack("clinical_phi")
-    # A representative slice of the HIPAA label set should be present.
-    assert {"MRN", "SSN", "POSTAL_CODE_CA", "HOSPITAL", "OHIP"} <= set(pack.patterns)
+    # The pack ships a deliberately compact set of labels — sub-types like
+    # MRN/DEA/OHIP collapse into ``ID`` because regex alone cannot reliably
+    # tell them apart.
+    assert set(pack.patterns) == {
+        "ADDRESS", "AGE", "DATE", "DATE_TIME", "EMAIL", "ID",
+        "IP_ADDRESS", "ORGANIZATION", "PHONE", "POSTAL_CODE", "SSN", "URL",
+    }
 
 
-def test_regex_pack_generic_is_subset() -> None:
+def test_regex_pack_generic_is_universal_subset() -> None:
     generic = get_pattern_pack("generic_pii")
     clinical = get_pattern_pack("clinical_phi")
     assert set(generic.patterns) <= set(clinical.patterns)
     # Must not contain clinical-specific labels.
-    assert "MRN" not in generic.patterns
-    assert "HOSPITAL" not in generic.patterns
+    assert "ID" not in generic.patterns
+    assert "ORGANIZATION" not in generic.patterns
+    assert "ADDRESS" not in generic.patterns
     # But must cover universal labels.
-    assert {"EMAIL", "PHONE", "URL", "DATE", "IP_ADDRESS", "SSN"} == set(generic.patterns)
+    assert set(generic.patterns) == {"EMAIL", "PHONE", "URL", "DATE", "IP_ADDRESS", "SSN"}
 
 
 def test_regex_pack_register_roundtrip() -> None:
@@ -68,10 +74,10 @@ def test_regex_pipe_respects_pattern_pack() -> None:
     clinical_pipe = RegexNerPipe(clinical_cfg)
     generic_pipe = RegexNerPipe(generic_cfg)
 
-    assert "MRN" in clinical_pipe.base_labels
-    assert "HOSPITAL" in clinical_pipe.base_labels
-    assert "MRN" not in generic_pipe.base_labels
-    assert "HOSPITAL" not in generic_pipe.base_labels
+    assert "ID" in clinical_pipe.base_labels
+    assert "ORGANIZATION" in clinical_pipe.base_labels
+    assert "ID" not in generic_pipe.base_labels
+    assert "ORGANIZATION" not in generic_pipe.base_labels
     # Email is common to both.
     assert "EMAIL" in clinical_pipe.base_labels
     assert "EMAIL" in generic_pipe.base_labels
@@ -86,7 +92,11 @@ def test_surrogate_pack_clinical_covers_clinical_labels() -> None:
     pack = get_surrogate_pack("clinical_phi")
     assert pack.label_to_strategy["PATIENT"] == "Name"
     assert pack.label_to_strategy["MRN"] == "ID"
+    # POSTAL_CODE (the consolidated label emitted by the regex pack) and the
+    # legacy CA/US aliases all map to the same surrogate strategy.
+    assert pack.label_to_strategy["POSTAL_CODE"] == "Postal Code"
     assert pack.label_to_strategy["POSTAL_CODE_CA"] == "Postal Code"
+    assert pack.label_to_strategy["ZIP_CODE"] == "Postal Code"
     assert pack.label_to_strategy["HOSPITAL"] == "Organization"
 
 

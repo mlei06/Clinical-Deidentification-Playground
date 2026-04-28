@@ -86,7 +86,10 @@ _CLINICAL_PHI_LABEL_TO_STRATEGY: dict[str, str] = {
     "ADDRESS": "Address",
     "LOCATION_OTHER": "Address",
     # Postal
+    "POSTAL_CODE": "Postal Code",
     "POSTAL_CODE_CA": "Postal Code",
+    "ZIP_CODE": "Postal Code",
+    "ZIP_CODE_US": "Postal Code",
     # Organizations
     "HOSPITAL": "Organization",
     "ORGANIZATION": "Organization",
