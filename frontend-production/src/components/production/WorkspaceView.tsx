@@ -4,8 +4,8 @@ import {
   CheckCircle2,
   Keyboard,
   Loader2,
-  Maximize2,
-  Minimize2,
+  PanelLeftClose,
+  PanelLeftOpen,
   Play,
   Settings2,
   Square,
@@ -49,7 +49,7 @@ export default function WorkspaceView() {
     cancel,
   } = useWorkspaceController();
   const [showShortcuts, setShowShortcuts] = useState(false);
-  const [focusMode, setFocusMode] = useState(false);
+  const [showFiles, setShowFiles] = useState(true);
   const rootRef = useRef<HTMLDivElement | null>(null);
 
   useFileListKeybinds({
@@ -61,7 +61,7 @@ export default function WorkspaceView() {
   });
 
   useEffect(() => {
-    setFocusMode(false);
+    setShowFiles(true);
   }, [active?.id]);
 
   if (!active) {
@@ -129,12 +129,12 @@ export default function WorkspaceView() {
           )}
           <button
             type="button"
-            onClick={() => setFocusMode((v) => !v)}
+            onClick={() => setShowFiles((v) => !v)}
             className="inline-flex items-center gap-1 rounded border border-gray-200 bg-white px-2 py-1.5 text-xs text-gray-600 hover:bg-gray-50"
-            title={focusMode ? 'Exit focus mode' : 'Focus mode'}
+            title={showFiles ? 'Hide file list' : 'Show file list'}
           >
-            {focusMode ? <Minimize2 size={12} /> : <Maximize2 size={12} />}
-            {focusMode ? 'Exit focus' : 'Focus'}
+            {showFiles ? <PanelLeftClose size={12} /> : <PanelLeftOpen size={12} />}
+            Files
           </button>
           <button
             type="button"
@@ -179,7 +179,7 @@ export default function WorkspaceView() {
       </header>
 
       <div className="flex min-h-0 flex-1">
-        {!focusMode && (
+        {showFiles && (
           <DatasetFileList
             dataset={active}
             selectedIds={selectedIds}
@@ -205,7 +205,6 @@ export default function WorkspaceView() {
                 dataset={active}
                 file={currentFile}
                 reviewer={reviewer}
-                hideEditorPanel={focusMode}
               />
             )
           ) : (

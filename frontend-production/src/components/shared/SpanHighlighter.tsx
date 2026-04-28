@@ -13,8 +13,10 @@ import { labelColor } from '../../lib/labelColors';
 import { entitySpanKey, isRangeUncovered } from '../../lib/entitySpanKey';
 import {
   buildCoverageSegments,
+  findOverlapGroups,
   spanRangeKey,
   type CoverageSegment,
+  type OverlapGroup,
 } from '../../lib/spanOverlapConflicts';
 import { scrollTextRangeIntoView } from '../../lib/scrollRangeIntoView';
 import type { SpanLabelConflict } from '../../lib/traceConflicts';
@@ -220,14 +222,28 @@ const SpanHighlighter = forwardRef<SpanHighlighterHandle, SpanHighlighterProps>(
     }, [spans]);
 
     const siblingBounds = useMemo(() => {
-      // Adjacency for resize handles: among non-overlapping siblings, the
-      // handle can move up to the previous sibling's end / next sibling's start.
-      // Inside an overlap chain there's no clean sibling on the conflict side,
-      // so we conservatively use the document edges.
+      // Adjacency for resize handles. Two regimes:
+      //  - Span is a member of an overlap group → clamp to the group's outer
+      //    extent. Resize stays inside the visible conflict strip; the user
+      //    can shrink to escape the conflict but can't expand past the group
+      //    (which would silently absorb more spans or split the group).
+      //  - Span is not in a group → clamp to the nearest non-overlapping
+      //    sibling's edge (clean adjacency).
       const sorted = [...spans].sort((a, b) => a.start - b.start || a.end - b.end);
+      const groups = findOverlapGroups(spans, text);
+      const groupBySpanKey = new Map<string, OverlapGroup>();
+      for (const g of groups) {
+        for (const m of g.members) groupBySpanKey.set(entitySpanKey(m), g);
+      }
       const m = new Map<string, { minStart: number; maxEnd: number }>();
       for (let i = 0; i < sorted.length; i++) {
         const s = sorted[i]!;
+        const key = entitySpanKey(s);
+        const g = groupBySpanKey.get(key);
+        if (g) {
+          m.set(key, { minStart: g.minStart, maxEnd: g.maxEnd });
+          continue;
+        }
         let minStart = 0;
         for (let j = i - 1; j >= 0; j--) {
           if (sorted[j]!.end <= s.start) {
@@ -242,10 +258,10 @@ const SpanHighlighter = forwardRef<SpanHighlighterHandle, SpanHighlighterProps>(
             break;
           }
         }
-        m.set(entitySpanKey(s), { minStart, maxEnd });
+        m.set(key, { minStart, maxEnd });
       }
       return m;
-    }, [spans, text.length]);
+    }, [spans, text]);
 
     /**
      * Drag state is a ref rather than state so pointermove doesn't re-run

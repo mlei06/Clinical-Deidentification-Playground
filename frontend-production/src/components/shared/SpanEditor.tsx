@@ -110,10 +110,11 @@ export default function SpanEditor({
       for (const g of overlapGroups) {
         const primary = pickPrimarySpan(g.members);
         const pk = entitySpanKey(primary);
-        next[g.id] =
-          prev[g.id] && g.members.some((m) => entitySpanKey(m) === prev[g.id])
-            ? prev[g.id]!
-            : pk;
+        const prior = prev[g.id];
+        const stillValid =
+          prior === DROP_ALL_CHOICE ||
+          (prior != null && g.members.some((m) => entitySpanKey(m) === prior));
+        next[g.id] = stillValid ? prior! : pk;
       }
       return next;
     });

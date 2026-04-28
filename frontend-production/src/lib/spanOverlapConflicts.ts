@@ -1,5 +1,4 @@
 import type { EntitySpanResponse } from '../api/types';
-import { CANONICAL_LABELS } from './canonicalLabels';
 import { entitySpanKey } from './entitySpanKey';
 
 /**
@@ -139,15 +138,32 @@ export interface OverlapGroup {
   excerpt: string;
 }
 
-/** Lower index in CANONICAL_LABELS = higher priority for display / default primary. */
+const RESOLVE_PRIORITY_RANK: ReadonlyMap<string, number> = new Map(
+  RESOLVE_SPANS_LABEL_PRIORITY.map((l, i) => [l, i]),
+);
+const RESOLVE_PRIORITY_DEFAULT_RANK = RESOLVE_SPANS_LABEL_PRIORITY.length;
+
+/** Resolution priority for *label*. Lower wins. Mirrors ``mergeLabelPrioritySpans``. */
 export function labelPriority(label: string): number {
-  const i = CANONICAL_LABELS.indexOf(label as (typeof CANONICAL_LABELS)[number]);
-  if (i >= 0) return i;
-  return 1000 + label.charCodeAt(0);
+  return RESOLVE_PRIORITY_RANK.get(label) ?? RESOLVE_PRIORITY_DEFAULT_RANK;
 }
 
+/**
+ * Sort by the same key as the bulk "label_priority" strategy:
+ * priority asc, length desc, start asc, label asc. So the head matches what
+ * ``mergeLabelPrioritySpans`` would have kept.
+ */
 export function sortSpansByPrimary(spans: EntitySpanResponse[]): EntitySpanResponse[] {
-  return [...spans].sort((a, b) => labelPriority(a.label) - labelPriority(b.label));
+  return [...spans].sort((a, b) => {
+    const pa = labelPriority(a.label);
+    const pb = labelPriority(b.label);
+    if (pa !== pb) return pa - pb;
+    const la = a.end - a.start;
+    const lb = b.end - b.start;
+    if (la !== lb) return lb - la;
+    if (a.start !== b.start) return a.start - b.start;
+    return a.label.localeCompare(b.label);
+  });
 }
 
 export function pickPrimarySpan(spans: EntitySpanResponse[]): EntitySpanResponse {
@@ -310,6 +326,58 @@ export function buildCoverageSegments(
     }
   }
   return segments;
+}
+
+/**
+ * Collapse exact (start, end, label) duplicates produced by multiple detectors
+ * agreeing on a span. Sources are concatenated with ``+`` (deduped, sorted) so
+ * provenance survives. Confidence becomes the max of inputs; ``text`` falls back
+ * to the first non-empty value.
+ *
+ * Spans with ``start >= end`` are dropped defensively. Output is sorted by
+ * ``(start, end, label)`` so it has the same shape downstream code expects.
+ *
+ * Routed through the store's annotation chokepoints (``updateFile``,
+ * ``replaceFileAnnotations``, persist migration), so identical-key duplicates
+ * never reach React keys / `entitySpanKey` lookup tables.
+ */
+export function normalizeAnnotations(spans: EntitySpanResponse[]): EntitySpanResponse[] {
+  if (spans.length === 0) return spans;
+  const byKey = new Map<string, EntitySpanResponse[]>();
+  for (const s of spans) {
+    if (s.start >= s.end) continue;
+    const k = entitySpanKey(s);
+    const list = byKey.get(k) ?? [];
+    list.push(s);
+    byKey.set(k, list);
+  }
+  const out: EntitySpanResponse[] = [];
+  for (const list of byKey.values()) {
+    if (list.length === 1) {
+      out.push(list[0]!);
+      continue;
+    }
+    const sources = new Set<string>();
+    for (const s of list) {
+      if (s.source) sources.add(s.source);
+    }
+    let confidence: number | null | undefined = list[0]!.confidence;
+    for (const s of list) {
+      const c = s.confidence;
+      if (c == null) continue;
+      if (confidence == null || c > confidence) confidence = c;
+    }
+    const text = list.find((s) => (s.text ?? '').length > 0)?.text ?? list[0]!.text;
+    const merged: EntitySpanResponse = {
+      ...list[0]!,
+      text,
+      confidence: confidence ?? null,
+      source: sources.size > 0 ? [...sources].sort().join('+') : list[0]!.source,
+    };
+    out.push(merged);
+  }
+  out.sort((a, b) => a.start - b.start || a.end - b.end || a.label.localeCompare(b.label));
+  return out;
 }
 
 /**

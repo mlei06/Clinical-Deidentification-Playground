@@ -1,5 +1,12 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
-import { Plus, RotateCcw, PanelRightClose, PanelRightOpen } from 'lucide-react';
+import {
+  Plus,
+  RotateCcw,
+  PanelRightClose,
+  PanelRightOpen,
+  Eye,
+  EyeOff,
+} from 'lucide-react';
 import SpanHighlighter, { type SpanHighlighterHandle } from '../shared/SpanHighlighter';
 import LabelBadge from '../shared/LabelBadge';
 import SpanEditor from '../shared/SpanEditor';
@@ -28,7 +35,6 @@ interface DocumentReviewerProps {
   dataset: Dataset;
   file: DatasetFile;
   reviewer: string;
-  hideEditorPanel?: boolean;
 }
 
 interface GhostSelection {
@@ -42,7 +48,6 @@ export default function DocumentReviewer({
   dataset,
   file,
   reviewer,
-  hideEditorPanel = false,
 }: DocumentReviewerProps) {
   const updateFile = useProductionStore((s) => s.updateFile);
   const setFileSurrogateSeed = useProductionStore((s) => s.setFileSurrogateSeed);
@@ -53,6 +58,7 @@ export default function DocumentReviewer({
   const [pulseRange, setPulseRange] = useState<{ start: number; end: number } | null>(null);
   const [addLabel, setAddLabel] = useState<string>('OTHER');
   const [previewOpen, setPreviewOpen] = useState(false);
+  const [editorOpen, setEditorOpen] = useState(true);
   const [spanPopover, setSpanPopover] = useState<{
     key: string;
     span: EntitySpanResponse;
@@ -161,31 +167,54 @@ export default function DocumentReviewer({
     }
   };
 
+  const clearTransientForKeys = useCallback((droppedKeys: Set<string>) => {
+    if (droppedKeys.size === 0) return;
+    setActiveSpanKey((prev) => (prev != null && droppedKeys.has(prev) ? null : prev));
+    setFlashSpanKey((prev) => (prev != null && droppedKeys.has(prev) ? null : prev));
+    setSpanPopover((prev) => (prev != null && droppedKeys.has(prev.key) ? null : prev));
+    setPulseRange(null);
+  }, []);
+
   const handleResolveGroupKeep = useCallback(
     (group: OverlapGroup, kept: EntitySpanResponse) => {
+      const keptKey = entitySpanKey(kept);
+      const dropped = new Set<string>();
+      for (const m of group.members) {
+        const k = entitySpanKey(m);
+        if (k !== keptKey) dropped.add(k);
+      }
+      clearTransientForKeys(dropped);
       updateFile(datasetId, file.id, {
         annotations: keepInOverlapGroup(file.annotations, group, kept),
       });
     },
-    [datasetId, file.id, file.annotations, updateFile],
+    [datasetId, file.id, file.annotations, updateFile, clearTransientForKeys],
   );
 
   const handleResolveGroupDrop = useCallback(
     (group: OverlapGroup) => {
+      const dropped = new Set(group.members.map((m) => entitySpanKey(m)));
+      clearTransientForKeys(dropped);
       updateFile(datasetId, file.id, {
         annotations: dropOverlapGroup(file.annotations, group),
       });
     },
-    [datasetId, file.id, file.annotations, updateFile],
+    [datasetId, file.id, file.annotations, updateFile, clearTransientForKeys],
   );
 
   const handleResolveAllOverlaps = useCallback(
     (strategy: ResolveStrategyId) => {
-      updateFile(datasetId, file.id, {
-        annotations: applyResolveStrategy(file.annotations, strategy),
-      });
+      const next = applyResolveStrategy(file.annotations, strategy);
+      const survivors = new Set(next.map((s) => entitySpanKey(s)));
+      const dropped = new Set<string>();
+      for (const s of file.annotations) {
+        const k = entitySpanKey(s);
+        if (!survivors.has(k)) dropped.add(k);
+      }
+      clearTransientForKeys(dropped);
+      updateFile(datasetId, file.id, { annotations: next });
     },
-    [datasetId, file.id, file.annotations, updateFile],
+    [datasetId, file.id, file.annotations, updateFile, clearTransientForKeys],
   );
 
   const focusGroup = useCallback((group: OverlapGroup) => {
@@ -300,20 +329,39 @@ export default function DocumentReviewer({
               Reset
             </button>
           )}
-          <button
-            type="button"
-            onClick={() => setPreviewOpen((v) => !v)}
-            className="inline-flex items-center gap-1 rounded border border-gray-200 bg-white px-2 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50"
-            title={previewOpen ? 'Hide preview column' : 'Show redacted / surrogate preview'}
-          >
-            {previewOpen ? <PanelRightClose size={12} /> : <PanelRightOpen size={12} />}
-            {previewOpen ? 'Hide preview' : 'Preview'}
-          </button>
+          <div className="flex items-center gap-1 rounded border border-gray-200 bg-white p-0.5">
+            <button
+              type="button"
+              onClick={() => setEditorOpen((v) => !v)}
+              className={`inline-flex items-center gap-1 rounded px-2 py-1 text-xs font-medium ${
+                editorOpen ? 'bg-gray-100 text-gray-800' : 'text-gray-500 hover:bg-gray-50'
+              }`}
+              title={editorOpen ? 'Hide span editor' : 'Show span editor'}
+            >
+              {editorOpen ? <PanelRightClose size={12} /> : <PanelRightOpen size={12} />}
+              Editor
+            </button>
+            <button
+              type="button"
+              onClick={() => setPreviewOpen((v) => !v)}
+              className={`inline-flex items-center gap-1 rounded px-2 py-1 text-xs font-medium ${
+                previewOpen ? 'bg-gray-100 text-gray-800' : 'text-gray-500 hover:bg-gray-50'
+              }`}
+              title={previewOpen ? 'Hide redacted / surrogate preview' : 'Show redacted / surrogate preview'}
+            >
+              {previewOpen ? <EyeOff size={12} /> : <Eye size={12} />}
+              Preview
+            </button>
+          </div>
         </div>
       </header>
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-row overflow-hidden">
-        <div className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-auto p-4">
+        <div
+          className={`relative flex min-h-0 min-w-0 flex-1 flex-col overflow-auto p-4 ${
+            editorOpen && !previewOpen ? 'max-w-[860px]' : ''
+          }`}
+        >
           <SpanHighlighter
             ref={highlighterRef}
             text={file.originalText}
@@ -374,20 +422,15 @@ export default function DocumentReviewer({
               </button>
             </div>
           )}
-          {!previewOpen && (
-            <button
-              type="button"
-              onClick={() => setPreviewOpen(true)}
-              className="absolute right-0 top-1/2 z-10 -translate-y-1/2 rounded-l border border-r-0 border-gray-200 bg-white px-1 py-3 text-[10px] font-semibold uppercase tracking-wide text-gray-500 shadow-sm hover:bg-gray-50"
-              title="Show preview column"
-              style={{ writingMode: 'vertical-rl' }}
-            >
-              Preview
-            </button>
-          )}
         </div>
-        {!hideEditorPanel && (
-          <aside className="flex w-[min(38%,520px)] min-w-[280px] max-w-[560px] shrink-0 flex-col border-l border-gray-200 bg-gray-50/90">
+        {editorOpen && (
+          <aside
+            className={`flex min-w-[280px] flex-col border-l border-gray-200 bg-gray-50/90 ${
+              previewOpen
+                ? 'w-[min(38%,520px)] max-w-[560px] shrink-0'
+                : 'flex-1'
+            }`}
+          >
             <SpanEditor
               originalText={file.originalText}
               spans={file.annotations}

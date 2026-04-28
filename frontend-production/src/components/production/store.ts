@@ -7,7 +7,10 @@ import {
 } from 'zustand/middleware';
 import type { EntitySpanResponse } from '../../api/types';
 import { makeIdbStorage } from '../../lib/idbStorage';
-import type { ResolveStrategyId } from '../../lib/spanOverlapConflicts';
+import {
+  normalizeAnnotations,
+  type ResolveStrategyId,
+} from '../../lib/spanOverlapConflicts';
 
 export type ExportOutputType = 'redacted' | 'annotated' | 'surrogate_annotated';
 
@@ -170,7 +173,8 @@ function migrateLegacyQueue(legacy: {
 }): PersistedShape {
   const files: DatasetFile[] = (legacy.docs ?? []).map((d, i): DatasetFile => {
     const sourceLabel = d.sourceName ?? `legacy-${i + 1}`;
-    const spans = d.editedSpans ?? d.detectedSpans ?? [];
+    const spans = normalizeAnnotations(d.editedSpans ?? d.detectedSpans ?? []);
+    const detected = d.detectedSpans ? normalizeAnnotations(d.detectedSpans) : null;
     const resolved = d.status === 'reviewed';
     const status: DetectionStatus =
       d.status === 'processing'
@@ -185,7 +189,7 @@ function migrateLegacyQueue(legacy: {
       sourceLabel,
       originalText: d.text ?? '',
       annotations: spans,
-      detectedAt: d.detectedSpans ?? null,
+      detectedAt: detected,
       detectionStatus: status,
       resolved,
       flagged: d.status === 'flagged',
@@ -440,7 +444,12 @@ export const useProductionStore = create<State>()(
         set((s) => {
           const ds = s.datasets[datasetId];
           if (!ds) return s;
-          const files = ds.files.map((f) => (f.id === fileId ? { ...f, ...patch } : f));
+          const normalized = patch.annotations
+            ? { ...patch, annotations: normalizeAnnotations(patch.annotations) }
+            : patch;
+          const files = ds.files.map((f) =>
+            f.id === fileId ? { ...f, ...normalized } : f,
+          );
           return {
             datasets: {
               ...s.datasets,
@@ -506,12 +515,13 @@ export const useProductionStore = create<State>()(
         set((s) => {
           const ds = s.datasets[datasetId];
           if (!ds) return s;
+          const normalized = normalizeAnnotations(spans);
           const files = ds.files.map((f) => {
             if (f.id !== fileId) return f;
             return {
               ...f,
-              annotations: spans,
-              detectedAt: spans,
+              annotations: normalized,
+              detectedAt: normalized,
               detectionStatus: 'ready' as DetectionStatus,
               lastDetectionTarget: opts.target,
               processingTimeMs: opts.processingTimeMs,
