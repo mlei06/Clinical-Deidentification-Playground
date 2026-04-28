@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { X, Save, Loader2 } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { X, Save, Loader2, AlertCircle } from 'lucide-react';
 import { usePipelineEditorStore } from '../../stores/pipelineEditorStore';
 import { useCreatePipeline, useUpdatePipeline } from '../../hooks/usePipelines';
 
@@ -21,9 +21,12 @@ export default function PipelineSaveDialog({
     setPipelineDescription,
     toPipelineConfig,
   } = usePipelineEditorStore();
+  const pipes = usePipelineEditorStore((s) => s.pipes);
+  const validationByPipeId = usePipelineEditorStore((s) => s.validationByPipeId);
   const [name, setName] = useState(pipelineName);
   const [description, setDescription] = useState(pipelineDescription);
   const [saveMode, setSaveMode] = useState<'create' | 'update'>(isUpdate ? 'update' : 'create');
+  const [confirmAnyway, setConfirmAnyway] = useState(false);
   const createMutation = useCreatePipeline();
   const updateMutation = useUpdatePipeline();
 
@@ -33,13 +36,25 @@ export default function PipelineSaveDialog({
     setName(pipelineName);
     setDescription(pipelineDescription);
     setSaveMode(isUpdate ? 'update' : 'create');
+    setConfirmAnyway(false);
   }, [isOpen, isUpdate, pipelineDescription, pipelineName]);
   /* eslint-enable react-hooks/set-state-in-effect */
+
+  const invalidPipes = useMemo(() => {
+    return pipes
+      .map((p) => ({
+        label: p.data.label,
+        count: validationByPipeId[p.id]?.errorCount ?? 0,
+      }))
+      .filter((p) => p.count > 0);
+  }, [pipes, validationByPipeId]);
 
   if (!isOpen) return null;
 
   const shouldUpdate = isUpdate && saveMode === 'update';
   const mutation = shouldUpdate ? updateMutation : createMutation;
+  const hasIssues = invalidPipes.length > 0;
+  const blockedByIssues = hasIssues && !confirmAnyway;
 
   const handleSave = () => {
     setPipelineDescription(description);
@@ -135,6 +150,36 @@ export default function PipelineSaveDialog({
             />
           </div>
 
+          {hasIssues && (
+            <div className="mb-3 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+              <div className="mb-1 flex items-center gap-1 font-semibold">
+                <AlertCircle size={13} />
+                {invalidPipes.length} pipe{invalidPipes.length === 1 ? '' : 's'} with schema errors
+              </div>
+              <ul className="ml-4 list-disc space-y-0.5">
+                {invalidPipes.slice(0, 5).map((p, i) => (
+                  <li key={i} className="capitalize">
+                    {p.label} <span className="text-amber-600">({p.count})</span>
+                  </li>
+                ))}
+                {invalidPipes.length > 5 && (
+                  <li className="text-amber-600">
+                    …and {invalidPipes.length - 5} more
+                  </li>
+                )}
+              </ul>
+              <label className="mt-2 flex cursor-pointer items-center gap-1.5 font-medium">
+                <input
+                  type="checkbox"
+                  checked={confirmAnyway}
+                  onChange={(e) => setConfirmAnyway(e.target.checked)}
+                  className="h-3.5 w-3.5"
+                />
+                Save anyway
+              </label>
+            </div>
+          )}
+
           {mutation.isError && (
             <div className="mb-3 rounded border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
               {(mutation.error as Error).message}
@@ -143,7 +188,11 @@ export default function PipelineSaveDialog({
 
           <button
             onClick={handleSave}
-            disabled={mutation.isPending || (!shouldUpdate && !name.trim())}
+            disabled={
+              mutation.isPending ||
+              (!shouldUpdate && !name.trim()) ||
+              blockedByIssues
+            }
             className="flex w-full items-center justify-center gap-1.5 rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-gray-800 disabled:opacity-40"
           >
             {mutation.isPending ? (
@@ -151,7 +200,11 @@ export default function PipelineSaveDialog({
             ) : (
               <Save size={15} />
             )}
-            {shouldUpdate ? 'Update' : 'Save As New'}
+            {hasIssues
+              ? 'Save anyway'
+              : shouldUpdate
+                ? 'Update'
+                : 'Save As New'}
           </button>
         </div>
       </div>

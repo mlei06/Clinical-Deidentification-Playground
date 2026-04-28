@@ -1,8 +1,13 @@
 import { useState } from 'react';
 import { clsx } from 'clsx';
-import { Search, Shuffle, AlertCircle, ChevronDown, ChevronUp, Trash2, GripVertical } from 'lucide-react';
+import { Search, Shuffle, ChevronDown, ChevronUp, Trash2, GripVertical } from 'lucide-react';
+import { useSortable } from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import type { PipelineSequenceEntry } from '../../lib/pipelineToSequence';
 import { pipeConfigExpandedText, pipeConfigOneLiner } from '../../lib/pipeConfigSummary';
+import { usePipelineEditorStore } from '../../stores/pipelineEditorStore';
+import { usePipeReadiness } from '../../hooks/usePipeReadiness';
+import PipeStatusBadge from './PipeStatusBadge';
 
 const ROLE_STYLES: Record<string, { border: string; bg: string; icon: typeof Search }> = {
   detector: { border: 'border-l-blue-500', bg: 'bg-blue-50', icon: Search },
@@ -16,29 +21,55 @@ type PipeCardProps = {
   isActive: boolean;
   onSelect: (id: string) => void;
   onDelete: (id: string) => void;
-  onMove: (fromIndex: number, toIndex: number) => void;
 };
 
-export default function PipeCard({ entry, index, isActive, onSelect, onDelete, onMove }: PipeCardProps) {
+export default function PipeCard({ entry, index, isActive, onSelect, onDelete }: PipeCardProps) {
   const { id, data } = entry;
   const [expanded, setExpanded] = useState(false);
   const style = ROLE_STYLES[data.role] ?? ROLE_STYLES.detector;
   const Icon = style.icon;
   const oneLiner = pipeConfigOneLiner(data);
   const expandedText = pipeConfigExpandedText(data);
+  const validation = usePipelineEditorStore((s) => s.validationByPipeId[id]);
+  const lastRun = usePipelineEditorStore((s) => s.lastRun);
+  const { data: readiness } = usePipeReadiness(
+    data.installed ? data.pipeType : null,
+    data.config as Record<string, unknown>,
+  );
+
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id });
+
+  const sortableStyle: React.CSSProperties = {
+    transform: CSS.Translate.toString(transform),
+    transition,
+  };
+
+  const traceStats = (() => {
+    if (!lastRun || index >= lastRun.frames.length) return null;
+    const cur = lastRun.frames[index];
+    if (!cur?.document) return null;
+    const curCount = cur.document.spans.length;
+    const prevCount =
+      index === 0 ? 0 : lastRun.frames[index - 1]?.document?.spans.length ?? 0;
+    return {
+      total: curCount,
+      added: Math.max(0, curCount - prevCount),
+      dropped: Math.max(0, prevCount - curCount),
+      elapsedMs: cur.elapsed_ms,
+    };
+  })();
 
   return (
     <article
-      onDragOver={(e) => {
-        e.preventDefault();
-        e.dataTransfer.dropEffect = 'move';
-      }}
-      onDrop={(e) => {
-        e.preventDefault();
-        const from = parseInt(e.dataTransfer.getData('text/pipe-reorder'), 10);
-        if (Number.isNaN(from) || from === index) return;
-        onMove(from, index);
-      }}
+      ref={setNodeRef}
+      style={sortableStyle}
       className={clsx(
         'w-full overflow-hidden rounded-lg border bg-white shadow-sm transition-shadow',
         'border-l-4',
@@ -47,6 +78,7 @@ export default function PipeCard({ entry, index, isActive, onSelect, onDelete, o
           ? 'ring-2 ring-blue-500 ring-offset-1 border-gray-200'
           : 'border-gray-200 hover:border-gray-300',
         !data.installed && 'opacity-80',
+        isDragging && 'z-10 shadow-lg ring-2 ring-blue-300',
       )}
     >
       <div className="w-full" onClick={() => onSelect(id)} role="presentation">
@@ -56,18 +88,15 @@ export default function PipeCard({ entry, index, isActive, onSelect, onDelete, o
             onClick={(e) => e.stopPropagation()}
             onKeyDown={(e) => e.stopPropagation()}
           >
-            <div
-              className="cursor-grab touch-none rounded p-1.5 text-gray-400 hover:bg-gray-100 active:cursor-grabbing"
-              draggable
-              onClick={(e) => e.stopPropagation()}
-              onDragStart={(e) => {
-                e.dataTransfer.setData('text/pipe-reorder', String(index));
-                e.dataTransfer.effectAllowed = 'move';
-              }}
-              title="Drag to reorder"
+            <button
+              type="button"
+              className="cursor-grab touch-none rounded p-1.5 text-gray-400 hover:bg-gray-100 active:cursor-grabbing focus:outline-none focus:ring-2 focus:ring-blue-400"
+              title="Drag to reorder (or focus and press Space, then ↑/↓, Space to drop)"
+              {...attributes}
+              {...listeners}
             >
               <GripVertical size={16} />
-            </div>
+            </button>
           </div>
           <div
             className={clsx('flex h-8 w-8 shrink-0 items-center justify-center rounded', style.bg)}
@@ -83,17 +112,40 @@ export default function PipeCard({ entry, index, isActive, onSelect, onDelete, o
                   {data.role.replace(/_/g, ' ')}
                 </div>
                 {!expanded && <p className="mt-0.5 truncate text-xs text-gray-600">{oneLiner}</p>}
+                {!expanded && traceStats && (
+                  <p className="mt-0.5 truncate text-[11px] tabular-nums text-slate-500">
+                    {traceStats.added > 0 && (
+                      <span className="text-emerald-600">+{traceStats.added}</span>
+                    )}
+                    {traceStats.added > 0 && traceStats.dropped > 0 && (
+                      <span className="text-slate-300"> · </span>
+                    )}
+                    {traceStats.dropped > 0 && (
+                      <span className="text-red-600">−{traceStats.dropped}</span>
+                    )}
+                    {(traceStats.added > 0 || traceStats.dropped > 0) && (
+                      <span className="text-slate-300"> · </span>
+                    )}
+                    <span>{traceStats.total} spans</span>
+                    {typeof traceStats.elapsedMs === 'number' && (
+                      <>
+                        <span className="text-slate-300"> · </span>
+                        <span>{traceStats.elapsedMs.toFixed(1)} ms</span>
+                      </>
+                    )}
+                  </p>
+                )}
               </div>
               <div
                 className="flex shrink-0 items-center gap-0.5"
                 onClick={(e) => e.stopPropagation()}
                 onKeyDown={(e) => e.stopPropagation()}
               >
-                {!data.installed && (
-                  <span title="Not fully installed" className="inline-flex">
-                    <AlertCircle size={14} className="text-amber-500" />
-                  </span>
-                )}
+                <PipeStatusBadge
+                  validation={validation}
+                  readiness={readiness}
+                  installed={data.installed}
+                />
                 <button
                   type="button"
                   className="rounded p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600"

@@ -1,6 +1,7 @@
 import { apiFetch } from './client';
 import type {
   OutputMode,
+  PipelineConfig,
   ProcessRequest,
   ProcessResponse,
   RedactRequest,
@@ -11,6 +12,24 @@ import type {
 
 function clientIdHeaders(clientId?: string): Record<string, string> {
   return clientId ? { 'X-Client-Id': clientId } : {};
+}
+
+export interface PreviewProcessRequest {
+  text: string;
+  config: PipelineConfig;
+  request_id?: string;
+}
+
+export function processPreview(
+  req: PreviewProcessRequest,
+  outputMode: OutputMode = 'annotated',
+): Promise<ProcessResponse> {
+  const params = new URLSearchParams();
+  params.set('output_mode', outputMode);
+  return apiFetch(`/process/preview?${params.toString()}`, {
+    method: 'POST',
+    body: JSON.stringify(req),
+  });
 }
 
 export function processText(

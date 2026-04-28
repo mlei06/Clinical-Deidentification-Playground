@@ -417,7 +417,6 @@ export default function TransformForm({ sourceDataset, onCreated }: TransformFor
         {subStep === 'sampling' && (
           <TransformSamplingTab
             source={source}
-            sourceDocCount={sourceDocCount}
             workDocumentCount={workSetDocumentCount}
             schemaLoading={schemaLoading}
             schemaLabels={schemaLabels}

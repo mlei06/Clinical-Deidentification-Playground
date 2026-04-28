@@ -98,6 +98,24 @@ export function fetchLabelSpaceBundle(pipeType: string): Promise<LabelSpaceBundl
   return apiFetch(`/pipelines/pipe-types/${encodeURIComponent(pipeType)}/label-space-bundle`);
 }
 
+export interface PipeReadiness {
+  installed: boolean;
+  ok: boolean;
+  missing: string[];
+  ready_details: Record<string, unknown> | null;
+  install_hint: string | null;
+}
+
+export function fetchPipeReadiness(
+  pipeType: string,
+  config?: Record<string, unknown>,
+): Promise<PipeReadiness> {
+  return apiFetch(`/pipelines/pipe-types/${encodeURIComponent(pipeType)}/readiness`, {
+    method: 'POST',
+    body: JSON.stringify({ config: config ?? null }),
+  });
+}
+
 /** Symbolic labels entering the pipe at *stepIndex* (``label_mapper`` UI). */
 export function fetchPrefixLabelSpace(
   config: PipelineConfig,
