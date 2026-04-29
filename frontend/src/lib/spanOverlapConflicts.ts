@@ -1,5 +1,4 @@
 import type { EntitySpanResponse } from '../api/types';
-import { CANONICAL_LABELS } from './canonicalLabels';
 import { entitySpanKey } from './entitySpanKey';
 
 /**
@@ -73,112 +72,6 @@ export function mergeLabelPrioritySpans(
   return kept;
 }
 
-/** Stable key for a character range (same as traceConflicts.conflictRangeKey). */
-export function spanRangeKey(start: number, end: number): string {
-  return `${start}-${end}`;
-}
-
-/** Group spans that share identical [start, end). */
-export function groupSpansByExactRange(spans: EntitySpanResponse[]): Map<string, EntitySpanResponse[]> {
-  const m = new Map<string, EntitySpanResponse[]>();
-  for (const s of spans) {
-    const k = spanRangeKey(s.start, s.end);
-    const list = m.get(k) ?? [];
-    list.push(s);
-    m.set(k, list);
-  }
-  return m;
-}
-
-export interface SpanConflictSet {
-  start: number;
-  end: number;
-  text: string;
-  spans: EntitySpanResponse[];
-}
-
-/**
- * Ranges where two or more spans share the same indices (possibly different labels).
- */
-export function findConflictSets(
-  spans: EntitySpanResponse[],
-  originalText: string,
-): SpanConflictSet[] {
-  const byRange = groupSpansByExactRange(spans);
-  const out: SpanConflictSet[] = [];
-  for (const [, list] of byRange) {
-    if (list.length <= 1) continue;
-    const uniqLabels = new Set(list.map((s) => s.label));
-    if (uniqLabels.size <= 1) continue;
-    const { start, end } = list[0]!;
-    const text = originalText.slice(start, end);
-    out.push({ start, end, text, spans: [...list] });
-  }
-  out.sort((a, b) => a.start - b.start || a.end - b.end);
-  return out;
-}
-
-/** Lower index in CANONICAL_LABELS = higher priority for display / default primary. */
-export function labelPriority(label: string): number {
-  const i = CANONICAL_LABELS.indexOf(label as (typeof CANONICAL_LABELS)[number]);
-  if (i >= 0) return i;
-  return 1000 + label.charCodeAt(0);
-}
-
-export function sortSpansByPrimary(spans: EntitySpanResponse[]): EntitySpanResponse[] {
-  return [...spans].sort((a, b) => labelPriority(a.label) - labelPriority(b.label));
-}
-
-export function pickPrimarySpan(spans: EntitySpanResponse[]): EntitySpanResponse {
-  return sortSpansByPrimary(spans)[0]!;
-}
-
-/**
- * One span per exact range — the primary label wins for rendering the annotated source.
- */
-export function dedupeSpansKeepPrimary(spans: EntitySpanResponse[]): EntitySpanResponse[] {
-  const byRange = groupSpansByExactRange(spans);
-  const out: EntitySpanResponse[] = [];
-  for (const list of byRange.values()) {
-    out.push(pickPrimarySpan(list));
-  }
-  out.sort((a, b) => a.start - b.start || a.end - b.end);
-  return out;
-}
-
-/** After resolution: remove every span at this range, then add the kept span. */
-export function resolveConflictKeepSpan(
-  spans: EntitySpanResponse[],
-  kept: EntitySpanResponse,
-): EntitySpanResponse[] {
-  const rk = spanRangeKey(kept.start, kept.end);
-  const next = spans.filter((s) => spanRangeKey(s.start, s.end) !== rk);
-  next.push(kept);
-  next.sort((a, b) => a.start - b.start || a.end - b.end);
-  return next;
-}
-
-/** After resolution: drop every span at this range — the user opted to keep none of the candidates. */
-export function resolveConflictDropAll(
-  spans: EntitySpanResponse[],
-  range: { start: number; end: number },
-): EntitySpanResponse[] {
-  const rk = spanRangeKey(range.start, range.end);
-  return spans.filter((s) => spanRangeKey(s.start, s.end) !== rk);
-}
-
-export function rangeHasUnresolvedConflict(
-  conflictSets: SpanConflictSet[],
-  start: number,
-  end: number,
-): boolean {
-  return conflictSets.some((c) => c.start === start && c.end === end);
-}
-
-// ---------------------------------------------------------------------------
-// Resolve strategies (bulk overlap resolution)
-// ---------------------------------------------------------------------------
-
 export type ResolveStrategyId = 'label_priority' | 'longest_wins' | 'leftmost_first';
 
 export const RESOLVE_STRATEGY_LABEL: Record<ResolveStrategyId, string> = {
@@ -221,6 +114,63 @@ export function applyResolveStrategy(
     case 'leftmost_first':
       return mergeLeftmostFirstSpans(spans);
   }
+}
+
+/** Stable key for a character range. Retained for span-level rendering hooks. */
+export function spanRangeKey(start: number, end: number): string {
+  return `${start}-${end}`;
+}
+
+const RESOLVE_PRIORITY_RANK: ReadonlyMap<string, number> = new Map(
+  RESOLVE_SPANS_LABEL_PRIORITY.map((l, i) => [l, i]),
+);
+const RESOLVE_PRIORITY_DEFAULT_RANK = RESOLVE_SPANS_LABEL_PRIORITY.length;
+
+/** Resolution priority for *label*. Lower wins. Mirrors ``mergeLabelPrioritySpans``. */
+export function labelPriority(label: string): number {
+  return RESOLVE_PRIORITY_RANK.get(label) ?? RESOLVE_PRIORITY_DEFAULT_RANK;
+}
+
+/**
+ * Sort by the same key as the bulk "label_priority" strategy:
+ * priority asc, length desc, start asc, label asc. So the head matches what
+ * ``mergeLabelPrioritySpans`` would have kept.
+ */
+export function sortSpansByPrimary(spans: EntitySpanResponse[]): EntitySpanResponse[] {
+  return [...spans].sort((a, b) => {
+    const pa = labelPriority(a.label);
+    const pb = labelPriority(b.label);
+    if (pa !== pb) return pa - pb;
+    const la = a.end - a.start;
+    const lb = b.end - b.start;
+    if (la !== lb) return lb - la;
+    if (a.start !== b.start) return a.start - b.start;
+    return a.label.localeCompare(b.label);
+  });
+}
+
+export function pickPrimarySpan(spans: EntitySpanResponse[]): EntitySpanResponse {
+  return sortSpansByPrimary(spans)[0]!;
+}
+
+/**
+ * One span per exact range — the primary label wins for rendering the annotated source.
+ * Retained for surrogate output rendering, which has its own ambiguity to resolve.
+ */
+export function dedupeSpansKeepPrimary(spans: EntitySpanResponse[]): EntitySpanResponse[] {
+  const byRange = new Map<string, EntitySpanResponse[]>();
+  for (const s of spans) {
+    const k = spanRangeKey(s.start, s.end);
+    const list = byRange.get(k) ?? [];
+    list.push(s);
+    byRange.set(k, list);
+  }
+  const out: EntitySpanResponse[] = [];
+  for (const list of byRange.values()) {
+    out.push(pickPrimarySpan(list));
+  }
+  out.sort((a, b) => a.start - b.start || a.end - b.end);
+  return out;
 }
 
 // ---------------------------------------------------------------------------
