@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { Loader2, X } from 'lucide-react';
 import { redactDocument } from '../../api/process';
 import type { EntitySpanResponse } from '../../api/types';
-import type { SpanConflictSet } from '../../lib/spanOverlapConflicts';
+import type { OverlapGroup } from '../../lib/spanOverlapConflicts';
 import LabelBadge from '../shared/LabelBadge';
 
 interface ConflictResolutionPopoverProps {
@@ -11,10 +11,10 @@ interface ConflictResolutionPopoverProps {
   onClose: () => void;
   anchorRect: DOMRect | null;
   originalText: string;
-  conflict: SpanConflictSet | null;
-  onKeep: (kept: EntitySpanResponse) => void;
-  /** Drop every candidate at the conflicting range — user decided no label applies here. */
-  onDropAll?: (range: { start: number; end: number }) => void;
+  group: OverlapGroup | null;
+  onKeep: (group: OverlapGroup, kept: EntitySpanResponse) => void;
+  /** Drop every member of the group — user decided no label applies here. */
+  onDropAll?: (group: OverlapGroup) => void;
 }
 
 export default function ConflictResolutionPopover({
@@ -22,7 +22,7 @@ export default function ConflictResolutionPopover({
   onClose,
   anchorRect,
   originalText,
-  conflict,
+  group,
   onKeep,
   onDropAll,
 }: ConflictResolutionPopoverProps) {
@@ -31,7 +31,7 @@ export default function ConflictResolutionPopover({
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!open || !conflict) {
+    if (!open || !group) {
       setSurrogateSnippets({});
       setError(null);
       return;
@@ -42,7 +42,7 @@ export default function ConflictResolutionPopover({
     const run = async () => {
       try {
         const entries = await Promise.all(
-          conflict.spans.map(async (s) => {
+          group.members.map(async (s) => {
             const res = await redactDocument({
               text: originalText,
               spans: [{ start: s.start, end: s.end, label: s.label }],
@@ -67,12 +67,16 @@ export default function ConflictResolutionPopover({
     return () => {
       cancelled = true;
     };
-  }, [open, conflict, originalText]);
+  }, [open, group, originalText]);
 
-  if (!open || !conflict || !anchorRect) return null;
+  if (!open || !group || !anchorRect) return null;
 
   const left = Math.max(8, Math.min(anchorRect.left, window.innerWidth - 420));
   const top = Math.min(anchorRect.bottom + 8, window.innerHeight - 120);
+  const excerpt = group.excerpt.length > 60 ? `${group.excerpt.slice(0, 60)}…` : group.excerpt;
+  const isExactRange = group.members.every(
+    (m) => m.start === group.minStart && m.end === group.maxEnd,
+  );
 
   const body = (
     <div
@@ -87,9 +91,9 @@ export default function ConflictResolutionPopover({
             Resolve span conflict
           </h3>
           <p className="mt-0.5 text-[11px] text-gray-500">
-            <span className="font-mono text-gray-700">{conflict.text}</span>
+            <span className="font-mono text-gray-700">{excerpt}</span>
             <span className="text-gray-400"> at </span>
-            {conflict.start}–{conflict.end}
+            {group.minStart}–{group.maxEnd}
           </p>
         </div>
         <button
@@ -102,8 +106,9 @@ export default function ConflictResolutionPopover({
         </button>
       </div>
       <p className="mb-3 text-[11px] leading-snug text-gray-600">
-        Multiple pipes assigned different labels to this exact range. Choose the label to use for
-        redaction and surrogacy.
+        {isExactRange
+          ? 'Multiple pipes assigned different labels to this exact range. Choose the label to use for redaction and surrogacy.'
+          : 'These spans overlap. Keep one (others in the group are dropped) or drop them all.'}
       </p>
 
       {loading && (
@@ -119,7 +124,7 @@ export default function ConflictResolutionPopover({
       )}
 
       <ul className="mb-3 space-y-2">
-        {conflict.spans.map((s) => {
+        {group.members.map((s) => {
           const k = `${s.start}-${s.end}-${s.label}`;
           const preview = surrogateSnippets[k];
           return (
@@ -129,6 +134,9 @@ export default function ConflictResolutionPopover({
             >
               <div className="mb-1 flex flex-wrap items-center gap-1.5">
                 <LabelBadge label={s.label} />
+                <span className="font-mono text-[10px] text-gray-500">
+                  [{s.start}–{s.end}]
+                </span>
                 <span className="text-gray-500">
                   {s.source ? (
                     <>
@@ -147,7 +155,7 @@ export default function ConflictResolutionPopover({
               </div>
               <button
                 type="button"
-                onClick={() => onKeep(s)}
+                onClick={() => onKeep(group, s)}
                 className="mt-2 w-full rounded bg-gray-900 px-2 py-1.5 text-[11px] font-medium text-white hover:bg-gray-800"
               >
                 Keep {s.label}
@@ -160,9 +168,9 @@ export default function ConflictResolutionPopover({
       {onDropAll && (
         <button
           type="button"
-          onClick={() => onDropAll({ start: conflict.start, end: conflict.end })}
+          onClick={() => onDropAll(group)}
           className="mb-2 w-full rounded border border-red-200 bg-white py-1.5 text-[11px] font-medium text-red-700 hover:bg-red-50"
-          title="Remove every candidate span at this range"
+          title="Remove every span in this overlap group"
         >
           Keep none — drop spans
         </button>

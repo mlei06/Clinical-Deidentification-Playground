@@ -11,7 +11,13 @@ import {
 import { clsx } from 'clsx';
 import { labelColor } from '../../lib/labelColors';
 import { entitySpanKey, isRangeUncovered } from '../../lib/entitySpanKey';
-import { spanRangeKey } from '../../lib/spanOverlapConflicts';
+import {
+  buildCoverageSegments,
+  findOverlapGroups,
+  spanRangeKey,
+  type CoverageSegment,
+  type OverlapGroup,
+} from '../../lib/spanOverlapConflicts';
 import { scrollTextRangeIntoView } from '../../lib/scrollRangeIntoView';
 import type { SpanLabelConflict } from '../../lib/traceConflicts';
 import LabelBadge from './LabelBadge';
@@ -26,82 +32,30 @@ interface SpanHighlighterProps {
   text: string;
   spans: EntitySpanResponse[];
   activeSpanKey?: string | null;
-  /** Brief pulse / ring on this span key (e.g. navigated from sidebar). */
   flashSpanKey?: string | null;
   onSpanHover?: (key: string | null) => void;
   onSpanClick?: (span: EntitySpanResponse, key: string, anchor: DOMRect) => void;
-  /** Unflagged selection; `anchor` is where to place a floating label menu. */
   onUncoveredSelection?: (
     sel: { start: number; end: number; text: string },
     anchor: DOMRect,
   ) => void;
-  /** Collapsed selection, empty text, covered range, or selection outside source — clear pending UI. */
   onClearPendingSelection?: () => void;
-  /** Optional pending selection range to tint in the source (Missed PHI). */
   pendingGhostRange?: { start: number; end: number } | null;
-  /** Brief pulse / ring on a plain-text range (e.g. navigated from sidebar). */
   pulseRange?: { start: number; end: number } | null;
-  /** Same text range flagged differently in trace (regex vs whitelist). */
   conflictBySpanKey?: Map<string, SpanLabelConflict>;
   onConflictClick?: (c: SpanLabelConflict, anchor: DOMRect) => void;
-  /** Same indices, different labels — client-side overlap conflicts. */
-  overlapConflictRangeKeys?: Set<string>;
-  overlapSpanCandidatesByRange?: Map<string, EntitySpanResponse[]>;
-  onOverlapConflictClick?: (rangeKey: string, spans: EntitySpanResponse[], anchor: DOMRect) => void;
   /**
-   * If provided, renders drag handles on each span's left/right edges. Fires
-   * continuously during drag with the span's new ``[start, end)``. The caller
-   * is responsible for clamping collision with adjacent spans is already
-   * applied here against the current ``spans`` neighbors.
+   * Click handler for overlap-conflict strips (regions where 2+ spans cover the
+   * same characters). Receives the *covering* spans for that strip, plus the
+   * client rect of the click target so the consumer can position a popover or
+   * focus the corresponding group.
    */
+  onOverlapClick?: (spans: EntitySpanResponse[], anchor: DOMRect) => void;
   onSpanResize?: (key: string, start: number, end: number) => void;
 }
 
-interface SegmentMeta {
-  text: string;
-  span: EntitySpanResponse | null;
-  textStart: number;
-  textEnd: number;
-}
-
-function buildSegments(text: string, spans: EntitySpanResponse[]): SegmentMeta[] {
-  if (spans.length === 0) {
-    return [{ text, span: null, textStart: 0, textEnd: text.length }];
-  }
-
-  const sorted = [...spans].sort((a, b) => a.start - b.start || b.end - a.end);
-  const segments: SegmentMeta[] = [];
-  let cursor = 0;
-
-  for (const span of sorted) {
-    if (span.start < cursor) continue;
-    if (span.start > cursor) {
-      segments.push({
-        text: text.slice(cursor, span.start),
-        span: null,
-        textStart: cursor,
-        textEnd: span.start,
-      });
-    }
-    segments.push({
-      text: text.slice(span.start, span.end),
-      span,
-      textStart: span.start,
-      textEnd: span.end,
-    });
-    cursor = span.end;
-  }
-
-  if (cursor < text.length) {
-    segments.push({
-      text: text.slice(cursor),
-      span: null,
-      textStart: cursor,
-      textEnd: text.length,
-    });
-  }
-
-  return segments;
+function overlapsRange(a0: number, a1: number, b0: number, b1: number): boolean {
+  return Math.max(a0, b0) < Math.min(a1, b1);
 }
 
 function offsetUpTo(root: HTMLElement, container: Node, offset: number): number {
@@ -132,7 +86,6 @@ interface CaretPosResult {
   offset: number;
 }
 
-/** Cross-browser caret-from-point: Firefox uses caretPositionFromPoint, Chromium/Safari use caretRangeFromPoint. */
 function caretFromPoint(doc: Document, x: number, y: number): CaretPosResult | null {
   const anyDoc = doc as unknown as {
     caretPositionFromPoint?: (x: number, y: number) => CaretPosResult | null;
@@ -149,7 +102,6 @@ function caretFromPoint(doc: Document, x: number, y: number): CaretPosResult | n
   return null;
 }
 
-/** Map a viewport point to a text offset inside ``root``. Returns null if the point is outside. */
 function textOffsetFromPoint(root: HTMLElement, x: number, y: number): number | null {
   const pos = caretFromPoint(root.ownerDocument, x, y);
   if (!pos || !root.contains(pos.offsetNode)) return null;
@@ -188,10 +140,6 @@ function textOffsetFromClientResilient(
   return null;
 }
 
-function overlaps(a0: number, a1: number, b0: number, b1: number): boolean {
-  return Math.max(a0, b0) < Math.min(a1, b1);
-}
-
 function PlainWithGhost({
   text,
   g0,
@@ -224,8 +172,8 @@ function PlainWithGhost({
     const b = xs[i + 1];
     if (a >= b) continue;
     const slice = text.slice(a - g0, b - g0);
-    const g = Boolean(ghost && overlaps(a, b, ghost.start, ghost.end));
-    const p = Boolean(pulse && overlaps(a, b, pulse.start, pulse.end));
+    const g = Boolean(ghost && overlapsRange(a, b, ghost.start, ghost.end));
+    const p = Boolean(pulse && overlapsRange(a, b, pulse.start, pulse.end));
     out.push(
       <span
         key={`${a}-${b}`}
@@ -256,15 +204,16 @@ const SpanHighlighter = forwardRef<SpanHighlighterHandle, SpanHighlighterProps>(
       pulseRange,
       conflictBySpanKey,
       onConflictClick,
-      overlapConflictRangeKeys,
-      overlapSpanCandidatesByRange,
-      onOverlapConflictClick,
+      onOverlapClick,
       onSpanResize,
     },
     ref,
   ) {
     const rootRef = useRef<HTMLPreElement>(null);
-    const segments = useMemo(() => buildSegments(text, spans), [text, spans]);
+    const segments = useMemo<CoverageSegment[]>(
+      () => buildCoverageSegments(text.length, spans),
+      [text, spans],
+    );
 
     const spanByKey = useMemo(() => {
       const m = new Map<string, EntitySpanResponse>();
@@ -272,20 +221,47 @@ const SpanHighlighter = forwardRef<SpanHighlighterHandle, SpanHighlighterProps>(
       return m;
     }, [spans]);
 
-    /** Bounds each span can resize into: up to the prior span's end on the left, up to the next span's start on the right. */
     const siblingBounds = useMemo(() => {
+      // Adjacency for resize handles. Two regimes:
+      //  - Span is a member of an overlap group → clamp to the group's outer
+      //    extent. Resize stays inside the visible conflict strip; the user
+      //    can shrink to escape the conflict but can't expand past the group
+      //    (which would silently absorb more spans or split the group).
+      //  - Span is not in a group → clamp to the nearest non-overlapping
+      //    sibling's edge (clean adjacency).
       const sorted = [...spans].sort((a, b) => a.start - b.start || a.end - b.end);
+      const groups = findOverlapGroups(spans, text);
+      const groupBySpanKey = new Map<string, OverlapGroup>();
+      for (const g of groups) {
+        for (const m of g.members) groupBySpanKey.set(entitySpanKey(m), g);
+      }
       const m = new Map<string, { minStart: number; maxEnd: number }>();
       for (let i = 0; i < sorted.length; i++) {
-        const prev = i > 0 ? sorted[i - 1] : null;
-        const next = i < sorted.length - 1 ? sorted[i + 1] : null;
-        m.set(entitySpanKey(sorted[i]), {
-          minStart: prev ? prev.end : 0,
-          maxEnd: next ? next.start : text.length,
-        });
+        const s = sorted[i]!;
+        const key = entitySpanKey(s);
+        const g = groupBySpanKey.get(key);
+        if (g) {
+          m.set(key, { minStart: g.minStart, maxEnd: g.maxEnd });
+          continue;
+        }
+        let minStart = 0;
+        for (let j = i - 1; j >= 0; j--) {
+          if (sorted[j]!.end <= s.start) {
+            minStart = sorted[j]!.end;
+            break;
+          }
+        }
+        let maxEnd = text.length;
+        for (let j = i + 1; j < sorted.length; j++) {
+          if (sorted[j]!.start >= s.end) {
+            maxEnd = sorted[j]!.start;
+            break;
+          }
+        }
+        m.set(key, { minStart, maxEnd });
       }
       return m;
-    }, [spans, text.length]);
+    }, [spans, text]);
 
     /**
      * Drag state is a ref rather than state so pointermove doesn't re-run
@@ -415,22 +391,49 @@ const SpanHighlighter = forwardRef<SpanHighlighterHandle, SpanHighlighterProps>(
       <pre
         ref={rootRef}
         onMouseUp={handleMouseUp}
-        className="whitespace-pre-wrap break-words font-mono text-sm leading-relaxed"
+        className="block w-full whitespace-pre-wrap break-words font-mono text-sm leading-relaxed"
       >
         {segments.map((seg, i) => {
-          if (!seg.span) {
+          const sliceText = text.slice(seg.start, seg.end);
+          if (seg.kind === 'plain') {
             return (
               <span key={i}>
                 <PlainWithGhost
-                  text={seg.text}
-                  g0={seg.textStart}
-                  g1={seg.textEnd}
+                  text={sliceText}
+                  g0={seg.start}
+                  g1={seg.end}
                   ghost={pendingGhostRange}
                   pulse={pulseRange}
                 />
               </span>
             );
           }
+          if (seg.kind === 'overlap') {
+            const labels = [...new Set(seg.spans.map((s) => s.label))];
+            const title = `Overlap conflict — ${labels.join(', ')}. Click to resolve.`;
+            return (
+              <mark
+                key={i}
+                data-overlap="true"
+                className="group relative inline cursor-pointer rounded-sm px-0.5 ring-1 ring-rose-400/70 bg-rose-100/80"
+                style={{
+                  backgroundImage:
+                    'repeating-linear-gradient(45deg, rgba(244,63,94,0.18) 0 4px, rgba(244,63,94,0.06) 4px 8px)',
+                  borderBottom: '2px dashed rgb(225 29 72)',
+                }}
+                title={title}
+                onClick={(e: MouseEvent<HTMLElement>) => {
+                  e.stopPropagation();
+                  if (!onOverlapClick) return;
+                  const rect = e.currentTarget.getBoundingClientRect();
+                  onOverlapClick(seg.spans, rect);
+                }}
+              >
+                {sliceText}
+              </mark>
+            );
+          }
+          // seg.kind === 'span'
           const s = seg.span;
           const c = labelColor(s.label);
           const key = entitySpanKey(s);
@@ -438,17 +441,13 @@ const SpanHighlighter = forwardRef<SpanHighlighterHandle, SpanHighlighterProps>(
           const isActive = activeSpanKey != null && activeSpanKey === key;
           const isFlash = flashSpanKey != null && flashSpanKey === key;
           const traceConflict = conflictBySpanKey?.get(key);
-          const overlapConflict =
-            overlapConflictRangeKeys?.has(rangeK) &&
-            (overlapSpanCandidatesByRange?.get(rangeK)?.length ?? 0) > 1;
-          const traceOnlyConflict = Boolean(traceConflict) && !overlapConflict;
+          const isLeftEdge = seg.start === s.start;
+          const isRightEdge = seg.end === s.end;
 
           const baseTitle = `${s.label}${s.confidence != null ? ` (${(s.confidence * 100).toFixed(0)}%)` : ''}${s.source ? ` — ${s.source}` : ''}`;
-          const title = overlapConflict
-            ? `Label conflict: multiple labels for [${s.start}–${s.end}]. Click to resolve.`
-            : traceConflict
-              ? `Conflict: ${traceConflict.pipeA} → ${traceConflict.labelA} vs ${traceConflict.pipeB} → ${traceConflict.labelB}`
-              : baseTitle;
+          const title = traceConflict
+            ? `Conflict: ${traceConflict.pipeA} → ${traceConflict.labelA} vs ${traceConflict.pipeB} → ${traceConflict.labelB}`
+            : baseTitle;
 
           return (
             <mark
@@ -459,15 +458,12 @@ const SpanHighlighter = forwardRef<SpanHighlighterHandle, SpanHighlighterProps>(
                 'group relative inline cursor-pointer rounded-sm px-0.5 transition-shadow',
                 isActive && 'ring-2 ring-blue-500 ring-offset-1',
                 isFlash && 'animate-pulse ring-2 ring-amber-400 ring-offset-1',
-                overlapConflict && 'ring-1 ring-rose-300/60',
-                traceOnlyConflict && 'border-2 border-dashed border-amber-500 bg-amber-50',
+                traceConflict && 'border-2 border-dashed border-amber-500 bg-amber-50',
               )}
               style={
-                overlapConflict
-                  ? { backgroundColor: c.bg, borderBottom: `2px dashed rgb(225 29 72)` }
-                  : traceOnlyConflict
-                    ? undefined
-                    : { backgroundColor: c.bg, borderBottom: `2px solid ${c.border}` }
+                traceConflict
+                  ? undefined
+                  : { backgroundColor: c.bg, borderBottom: `2px solid ${c.border}` }
               }
               title={title}
               onMouseEnter={() => onSpanHover?.(key)}
@@ -475,11 +471,6 @@ const SpanHighlighter = forwardRef<SpanHighlighterHandle, SpanHighlighterProps>(
               onClick={(e: MouseEvent<HTMLElement>) => {
                 e.stopPropagation();
                 const rect = e.currentTarget.getBoundingClientRect();
-                const candidates = overlapSpanCandidatesByRange?.get(rangeK);
-                if (overlapConflict && candidates && candidates.length > 1 && onOverlapConflictClick) {
-                  onOverlapConflictClick(rangeK, candidates, rect);
-                  return;
-                }
                 if (traceConflict && onConflictClick) {
                   onConflictClick(traceConflict, rect);
                   return;
@@ -487,8 +478,10 @@ const SpanHighlighter = forwardRef<SpanHighlighterHandle, SpanHighlighterProps>(
                 onSpanClick?.(s, key, rect);
               }}
             >
-              <LabelBadge label={s.label} className="absolute -top-4 left-0" data-no-offset="true" />
-              {onSpanResize && (
+              {isLeftEdge && (
+                <LabelBadge label={s.label} className="absolute -top-4 left-0" data-no-offset="true" />
+              )}
+              {onSpanResize && isLeftEdge && (
                 <span
                   data-no-offset="true"
                   aria-hidden="true"
@@ -496,8 +489,8 @@ const SpanHighlighter = forwardRef<SpanHighlighterHandle, SpanHighlighterProps>(
                   className="absolute -left-1.5 top-0 bottom-0 z-10 w-3 min-w-[12px] cursor-ew-resize touch-none opacity-0 group-hover:opacity-100 bg-blue-500/60 rounded-sm"
                 />
               )}
-              {seg.text}
-              {onSpanResize && (
+              {sliceText}
+              {onSpanResize && isRightEdge && (
                 <span
                   data-no-offset="true"
                   aria-hidden="true"

@@ -14,7 +14,12 @@ import {
 import LabelBadge from '../shared/LabelBadge';
 import { CANONICAL_LABELS } from '../../lib/canonicalLabels';
 import { entitySpanKey } from '../../lib/entitySpanKey';
-import { pickPrimarySpan, spanRangeKey, type SpanConflictSet } from '../../lib/spanOverlapConflicts';
+import {
+  pickPrimarySpan,
+  RESOLVE_STRATEGY_LABEL,
+  type OverlapGroup,
+  type ResolveStrategyId,
+} from '../../lib/spanOverlapConflicts';
 import type { EntitySpanResponse } from '../../api/types';
 
 interface SpanEditorProps {
@@ -31,13 +36,13 @@ interface SpanEditorProps {
   onNavigateToGhost?: () => void;
   activeSpanKey?: string | null;
   onActiveSpanKeyChange?: (key: string | null) => void;
-  /** Same-range label overlaps (client-detected). */
-  conflictSets?: SpanConflictSet[];
-  onResolveConflict?: (kept: EntitySpanResponse) => void;
-  /** Drop every candidate at the conflicting range — user decided no label applies here. */
-  onDropConflict?: (range: { start: number; end: number }) => void;
-  /** Greedy merge using label priority (same idea as ``resolve_spans`` / ``label_priority``). */
-  onQuickResolveLabelPriority?: () => void;
+  /** Connected-component overlap groups (client-detected). Includes partial overlaps, not just same-range collisions. */
+  overlapGroups?: OverlapGroup[];
+  onResolveGroupKeep?: (group: OverlapGroup, kept: EntitySpanResponse) => void;
+  /** Drop every member of the group — user decided no label applies here. */
+  onResolveGroupDrop?: (group: OverlapGroup) => void;
+  /** Bulk-resolve every overlap group with the chosen strategy. */
+  onResolveAllOverlaps?: (strategy: ResolveStrategyId) => void;
   /** Commit current spans and regenerate the Output pane via ``/process/redact``. */
   onUpdateOutput?: () => void;
   /**
@@ -46,6 +51,12 @@ interface SpanEditorProps {
    */
   mapTargetLabels?: readonly string[];
 }
+
+const RESOLVE_STRATEGIES: ResolveStrategyId[] = [
+  'label_priority',
+  'longest_wins',
+  'leftmost_first',
+];
 
 export default function SpanEditor({
   originalText,
@@ -60,10 +71,10 @@ export default function SpanEditor({
   onNavigateToGhost,
   activeSpanKey = null,
   onActiveSpanKeyChange = () => {},
-  conflictSets = [],
-  onResolveConflict,
-  onDropConflict,
-  onQuickResolveLabelPriority,
+  overlapGroups = [],
+  onResolveGroupKeep,
+  onResolveGroupDrop,
+  onResolveAllOverlaps,
   onUpdateOutput,
   mapTargetLabels: mapTargetLabelsProp = CANONICAL_LABELS,
 }: SpanEditorProps) {
@@ -73,6 +84,7 @@ export default function SpanEditor({
   const [collapsedConflicts, setCollapsedConflicts] = useState(false);
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
   const [conflictChoice, setConflictChoice] = useState<Record<string, string>>({});
+  const [bulkStrategy, setBulkStrategy] = useState<ResolveStrategyId>('label_priority');
   const [openMapGroup, setOpenMapGroup] = useState<string | null>(null);
   const [remapFeedback, setRemapFeedback] = useState<
     { kind: 'loading' } | { kind: 'ok'; from: string; to: string; count: number } | null
@@ -101,25 +113,30 @@ export default function SpanEditor({
     return [...map.entries()].sort(([a], [b]) => a.localeCompare(b));
   }, [spans]);
 
-  const conflictRangeKeySet = useMemo(
-    () => new Set(conflictSets.map((c) => spanRangeKey(c.start, c.end))),
-    [conflictSets],
-  );
+  const conflictedSpanKeys = useMemo(() => {
+    const s = new Set<string>();
+    for (const g of overlapGroups) {
+      for (const m of g.members) s.add(entitySpanKey(m));
+    }
+    return s;
+  }, [overlapGroups]);
 
   /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     setConflictChoice((prev) => {
       const next: Record<string, string> = {};
-      for (const c of conflictSets) {
-        const rk = spanRangeKey(c.start, c.end);
-        const primary = pickPrimarySpan(c.spans);
+      for (const g of overlapGroups) {
+        const primary = pickPrimarySpan(g.members);
         const pk = entitySpanKey(primary);
-        next[rk] =
-          prev[rk] && c.spans.some((s) => entitySpanKey(s) === prev[rk]) ? prev[rk]! : pk;
+        const prior = prev[g.id];
+        const stillValid =
+          prior === DROP_ALL_CHOICE ||
+          (prior != null && g.members.some((m) => entitySpanKey(m) === prior));
+        next[g.id] = stillValid ? prior! : pk;
       }
       return next;
     });
-  }, [conflictSets]);
+  }, [overlapGroups]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
   useEffect(() => {
@@ -195,19 +212,18 @@ export default function SpanEditor({
     }, 200);
   };
 
-  const confirmConflictResolution = (cs: SpanConflictSet) => {
-    const rk = spanRangeKey(cs.start, cs.end);
-    const key = conflictChoice[rk];
+  const confirmGroupResolution = (g: OverlapGroup) => {
+    const key = conflictChoice[g.id];
     if (!key) return;
     if (key === DROP_ALL_CHOICE) {
-      if (!onDropConflict) return;
-      onDropConflict({ start: cs.start, end: cs.end });
+      if (!onResolveGroupDrop) return;
+      onResolveGroupDrop(g);
       return;
     }
-    if (!onResolveConflict) return;
-    const kept = cs.spans.find((s) => entitySpanKey(s) === key);
+    if (!onResolveGroupKeep) return;
+    const kept = g.members.find((s) => entitySpanKey(s) === key);
     if (!kept) return;
-    onResolveConflict(kept);
+    onResolveGroupKeep(g, kept);
   };
 
   const copyTermsForBlacklist = async () => {
@@ -250,8 +266,8 @@ export default function SpanEditor({
               disabled={isApplying || spans.length === 0}
               className="inline-flex w-full items-center justify-center gap-1 rounded bg-gray-900 px-2 py-1.5 font-medium text-white hover:bg-gray-800 disabled:opacity-40"
               title={
-                conflictSets.length > 0
-                  ? 'Regenerate the Output pane from your current spans. Unresolved same-range overlaps use the canonical primary label.'
+                overlapGroups.length > 0
+                  ? 'Regenerate the Output pane from your current spans. Unresolved overlaps use the canonical primary label.'
                   : 'Regenerate the Output pane from your current spans using the selected view style.'
               }
             >
@@ -331,7 +347,7 @@ export default function SpanEditor({
         </div>
       )}
 
-      {conflictSets.length > 0 && (
+      {overlapGroups.length > 0 && (
         <div className="shrink-0 space-y-2 rounded border border-amber-200 bg-amber-50/50 px-2 py-2">
           <button
             type="button"
@@ -340,34 +356,49 @@ export default function SpanEditor({
           >
             {collapsedConflicts ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
             <AlertTriangle size={14} className="shrink-0 text-amber-600" />
-            <span>Resolve conflicts ({conflictSets.length})</span>
+            <span>Resolve conflicts ({overlapGroups.length})</span>
           </button>
-          {onQuickResolveLabelPriority && (
-            <button
-              type="button"
-              onClick={onQuickResolveLabelPriority}
-              className="w-full rounded border border-amber-300 bg-white px-2 py-1.5 text-[10px] font-medium text-amber-950 hover:bg-amber-100/80"
-            >
-              Quick resolve (label priority)
-            </button>
+          {onResolveAllOverlaps && (
+            <div className="flex items-stretch gap-1">
+              <select
+                value={bulkStrategy}
+                onChange={(e) => setBulkStrategy(e.target.value as ResolveStrategyId)}
+                className="min-w-0 flex-1 rounded border border-amber-300 bg-white px-1.5 py-1 text-[10px] text-amber-950"
+                title="Strategy to apply when resolving all conflicts at once"
+              >
+                {RESOLVE_STRATEGIES.map((s) => (
+                  <option key={s} value={s}>
+                    {RESOLVE_STRATEGY_LABEL[s]}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                onClick={() => onResolveAllOverlaps(bulkStrategy)}
+                className="shrink-0 rounded border border-amber-300 bg-white px-2 py-1 text-[10px] font-medium text-amber-950 hover:bg-amber-100/80"
+              >
+                Resolve all
+              </button>
+            </div>
           )}
           {!collapsedConflicts && (
             <div className="space-y-3 pl-1">
-              {conflictSets.map((cs) => {
-                const rk = spanRangeKey(cs.start, cs.end);
+              {overlapGroups.map((g) => {
+                const excerpt =
+                  g.excerpt.length > 48 ? `${g.excerpt.slice(0, 48)}…` : g.excerpt;
                 return (
                   <div
-                    key={rk}
+                    key={g.id}
                     className="rounded border border-amber-100 bg-white/90 px-2 py-2 shadow-sm"
                   >
                     <div className="mb-2 font-mono text-[10px] text-gray-800">
-                      {cs.text.length > 48 ? `${cs.text.slice(0, 48)}…` : cs.text}{' '}
+                      {excerpt}{' '}
                       <span className="text-gray-400">
-                        [{cs.start}–{cs.end}]
+                        [{g.minStart}–{g.maxEnd}]
                       </span>
                     </div>
                     <div className="space-y-1.5">
-                      {cs.spans.map((s) => {
+                      {g.members.map((s) => {
                         const id = entitySpanKey(s);
                         return (
                           <label
@@ -376,50 +407,51 @@ export default function SpanEditor({
                           >
                             <input
                               type="radio"
-                              name={`conflict-${rk}`}
+                              name={`conflict-${g.id}`}
                               className="mt-0.5"
-                              checked={conflictChoice[rk] === id}
+                              checked={conflictChoice[g.id] === id}
                               onChange={() =>
-                                setConflictChoice((prev) => ({ ...prev, [rk]: id }))
+                                setConflictChoice((prev) => ({ ...prev, [g.id]: id }))
                               }
                             />
                             <span>
-                              <span className="font-semibold">{s.label}</span>
-                              {s.source && (
-                                <span className="text-gray-500"> ({s.source})</span>
-                              )}
+                              <span className="font-semibold">{s.label}</span>{' '}
+                              <span className="text-gray-500">
+                                [{s.start}–{s.end}]
+                                {s.source && ` · ${s.source}`}
+                              </span>
                             </span>
                           </label>
                         );
                       })}
-                      {onDropConflict && (
+                      {onResolveGroupDrop && (
                         <label className="flex cursor-pointer items-start gap-2 text-[10px] text-gray-700">
                           <input
                             type="radio"
-                            name={`conflict-${rk}`}
+                            name={`conflict-${g.id}`}
                             className="mt-0.5"
-                            checked={conflictChoice[rk] === DROP_ALL_CHOICE}
+                            checked={conflictChoice[g.id] === DROP_ALL_CHOICE}
                             onChange={() =>
                               setConflictChoice((prev) => ({
                                 ...prev,
-                                [rk]: DROP_ALL_CHOICE,
+                                [g.id]: DROP_ALL_CHOICE,
                               }))
                             }
                           />
                           <span className="text-red-700">
                             <span className="font-semibold">Keep none</span>
-                            <span className="text-gray-500"> (drop every span at this range)</span>
+                            <span className="text-gray-500"> (drop every span in this group)</span>
                           </span>
                         </label>
                       )}
                     </div>
                     {(() => {
-                      const dropMode = conflictChoice[rk] === DROP_ALL_CHOICE;
+                      const dropMode = conflictChoice[g.id] === DROP_ALL_CHOICE;
                       return (
                         <button
                           type="button"
-                          onClick={() => confirmConflictResolution(cs)}
-                          disabled={dropMode ? !onDropConflict : !onResolveConflict}
+                          onClick={() => confirmGroupResolution(g)}
+                          disabled={dropMode ? !onResolveGroupDrop : !onResolveGroupKeep}
                           className={clsx(
                             'mt-2 w-full rounded px-2 py-1.5 text-[10px] font-medium text-white disabled:opacity-40',
                             dropMode
@@ -473,7 +505,7 @@ export default function SpanEditor({
             {grouped.map(([label, items]) => {
               const collapsed = collapsedLabels.has(label);
               const labelHasConflict = items.some((s) =>
-                conflictRangeKeySet.has(spanRangeKey(s.start, s.end)),
+                conflictedSpanKeys.has(entitySpanKey(s)),
               );
               return (
                 <div key={label} className="rounded border border-gray-200 bg-white shadow-sm">
@@ -563,9 +595,7 @@ export default function SpanEditor({
                         const key = entitySpanKey(s);
                         const rowActive = activeSpanKey === key;
                         const sel = selectedKeys.has(key);
-                        const rowConflict = conflictRangeKeySet.has(
-                          spanRangeKey(s.start, s.end),
-                        );
+                        const rowConflict = conflictedSpanKeys.has(key);
                         return (
                           <li
                             key={key}

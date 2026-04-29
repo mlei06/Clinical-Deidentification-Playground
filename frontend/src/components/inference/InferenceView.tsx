@@ -43,20 +43,20 @@ import { downloadBlob } from '../../lib/download';
 import { entitySpanKey } from '../../lib/entitySpanKey';
 import { CANONICAL_LABELS } from '../../lib/canonicalLabels';
 import { usePipeline } from '../../hooks/usePipelines';
-import { labelFamilyLegend, labelFamilySwatch } from '../../lib/labelColors';
+import ColorKeyPopover from '../shared/ColorKeyPopover';
 import {
   buildConflictMapFromTrace,
   conflictsForFinalSpans,
   type SpanLabelConflict,
 } from '../../lib/traceConflicts';
 import {
+  applyResolveStrategy,
   dedupeSpansKeepPrimary,
-  findConflictSets,
-  mergeLabelPrioritySpans,
-  resolveConflictKeepSpan,
-  resolveConflictDropAll,
-  spanRangeKey,
-  type SpanConflictSet,
+  dropOverlapGroup,
+  findOverlapGroups,
+  keepInOverlapGroup,
+  type OverlapGroup,
+  type ResolveStrategyId,
 } from '../../lib/spanOverlapConflicts';
 import type {
   OutputMode,
@@ -74,59 +74,6 @@ function exportFilenameBase(pipelineName: string): string {
   const safe = pipelineName.replace(/[^a-zA-Z0-9._-]+/g, '_').slice(0, 64) || 'inference';
   const day = new Date().toISOString().slice(0, 10);
   return `${safe}_${day}`;
-}
-
-function ColorKeyPopover() {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-  const items = labelFamilyLegend();
-
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      if (ref.current?.contains(e.target as Node)) return;
-      setOpen(false);
-    };
-    document.addEventListener('mousedown', onDown);
-    return () => document.removeEventListener('mousedown', onDown);
-  }, [open]);
-
-  return (
-    <div ref={ref} className="relative">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className="inline-flex items-center gap-1 rounded border border-gray-200 bg-white px-1.5 py-0.5 text-[10px] font-medium text-gray-600 hover:bg-gray-50"
-        aria-expanded={open}
-        title="Show label color key"
-      >
-        Color key
-        <ChevronDown size={11} className={open ? 'rotate-180 transition-transform' : 'transition-transform'} />
-      </button>
-      {open && (
-        <div className="absolute left-0 top-full z-40 mt-1 w-[320px] max-w-[80vw] rounded-md border border-gray-200 bg-white p-2 shadow-lg">
-          <div className="flex flex-wrap gap-x-3 gap-y-1 text-[10px]">
-            {items.map(({ family, title }) => {
-              const sw = labelFamilySwatch(family);
-              return (
-                <span
-                  key={family}
-                  className="inline-flex items-center gap-1 text-gray-700"
-                  title={title}
-                >
-                  <span
-                    className="h-2.5 w-2.5 shrink-0 rounded-sm"
-                    style={{ backgroundColor: sw.bg, border: `1px solid ${sw.border}` }}
-                  />
-                  <span className="max-w-[160px] truncate">{title}</span>
-                </span>
-              );
-            })}
-          </div>
-        </div>
-      )}
-    </div>
-  );
 }
 
 export default function InferenceView() {
@@ -165,7 +112,7 @@ export default function InferenceView() {
     top: number;
   } | null>(null);
   const [overlapConflictPopover, setOverlapConflictPopover] = useState<{
-    conflict: SpanConflictSet;
+    group: OverlapGroup;
     anchor: DOMRect;
   } | null>(null);
   const [inputExpanded, setInputExpanded] = useState(true);
@@ -412,27 +359,45 @@ export default function InferenceView() {
     return [...set].sort((a, b) => a.localeCompare(b));
   }, [effectiveSpans, pipelineDetail?.config?.output_label_space]);
 
-  const conflictSets = useMemo(() => {
-    if (!result) return [] as SpanConflictSet[];
-    return findConflictSets(effectiveSpans, result.original_text);
+  const overlapGroups = useMemo(() => {
+    if (!result) return [] as OverlapGroup[];
+    return findOverlapGroups(effectiveSpans, result.original_text);
   }, [effectiveSpans, result]);
+
+  /** Rotates through overlap groups via ``[`` / ``]``; scrolls + pulses each one. Skips when an editor/menu has focus. */
+  const overlapNavIdxRef = useRef(-1);
+  useEffect(() => {
+    overlapNavIdxRef.current = -1;
+  }, [result?.request_id, result?.pipeline_name]);
+  useEffect(() => {
+    if (overlapGroups.length === 0) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== '[' && e.key !== ']') return;
+      const t = e.target;
+      if (
+        t instanceof HTMLInputElement ||
+        t instanceof HTMLTextAreaElement ||
+        t instanceof HTMLSelectElement ||
+        (t instanceof HTMLElement && t.isContentEditable)
+      ) {
+        return;
+      }
+      e.preventDefault();
+      const n = overlapGroups.length;
+      const cur = overlapNavIdxRef.current;
+      const nextIdx = e.key === ']' ? (cur + 1 + n) % n : (cur - 1 + n) % n;
+      overlapNavIdxRef.current = nextIdx;
+      const g = overlapGroups[nextIdx]!;
+      highlighterRef.current?.scrollToRange(g.minStart, g.maxEnd);
+      setPulseRange({ start: g.minStart, end: g.maxEnd });
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [overlapGroups]);
 
   const displaySpansForHighlighter = useMemo(
     () => dedupeSpansKeepPrimary(effectiveSpans),
     [effectiveSpans],
-  );
-
-  const overlapSpanCandidatesByRange = useMemo(() => {
-    const m = new Map<string, EntitySpanResponse[]>();
-    for (const c of conflictSets) {
-      m.set(spanRangeKey(c.start, c.end), c.spans);
-    }
-    return m;
-  }, [conflictSets]);
-
-  const overlapConflictRangeKeys = useMemo(
-    () => new Set(conflictSets.map((c) => spanRangeKey(c.start, c.end))),
-    [conflictSets],
   );
 
   const isDirty =
@@ -465,7 +430,7 @@ export default function InferenceView() {
     /** Snapshot before apply so open conflicts remain editable after success. */
     const snapshot = [...effectiveSpans];
     const hadOpenConflicts =
-      findConflictSets(snapshot, result.original_text).length > 0;
+      findOverlapGroups(snapshot, result.original_text).length > 0;
     /** One span per range for the API; unresolved overlaps use canonical primary for this run. */
     const spansPayload = dedupeSpansKeepPrimary(effectiveSpans);
     setRedactError(null);
@@ -535,11 +500,11 @@ export default function InferenceView() {
   };
 
   /** Functional update avoids stale ``effectiveSpans`` when resolving from the popover after other edits. */
-  const handleResolveOverlapConflict = useCallback(
-    (kept: EntitySpanResponse) => {
+  const handleResolveGroupKeep = useCallback(
+    (group: OverlapGroup, kept: EntitySpanResponse) => {
       setEditedSpans((prev) => {
         const base = prev ?? result?.spans ?? [];
-        return resolveConflictKeepSpan(base, kept);
+        return keepInOverlapGroup(base, group, kept);
       });
       setRedactError(null);
       setOverlapConflictPopover(null);
@@ -548,12 +513,12 @@ export default function InferenceView() {
     [result?.spans],
   );
 
-  /** Drop every candidate at the conflicting range — user decided none of the labels should apply here. */
-  const handleDropOverlapConflict = useCallback(
-    (range: { start: number; end: number }) => {
+  /** Drop every member of an overlap group — user decided none of the labels apply here. */
+  const handleResolveGroupDrop = useCallback(
+    (group: OverlapGroup) => {
       setEditedSpans((prev) => {
         const base = prev ?? result?.spans ?? [];
-        return resolveConflictDropAll(base, range);
+        return dropOverlapGroup(base, group);
       });
       setRedactError(null);
       setOverlapConflictPopover(null);
@@ -562,26 +527,35 @@ export default function InferenceView() {
     [result?.spans],
   );
 
-  /** Matches ``resolve_spans`` with strategy ``label_priority`` (see ``span_merge.merge_label_priority``). */
-  const handleQuickResolveLabelPriority = useCallback(() => {
-    setEditedSpans((prev) => {
-      const base = prev ?? result?.spans ?? [];
-      return mergeLabelPrioritySpans(base);
-    });
-    setRedactError(null);
-    setOverlapConflictPopover(null);
-    setConflictUI(null);
-  }, [result?.spans]);
+  /** Bulk-resolve every overlap group with the chosen strategy (see ``span_merge`` in the backend). */
+  const handleResolveAllOverlaps = useCallback(
+    (strategy: ResolveStrategyId) => {
+      setEditedSpans((prev) => {
+        const base = prev ?? result?.spans ?? [];
+        return applyResolveStrategy(base, strategy);
+      });
+      setRedactError(null);
+      setOverlapConflictPopover(null);
+      setConflictUI(null);
+    },
+    [result?.spans],
+  );
 
-  const handleOverlapConflictClick = (
-    rangeKey: string,
-    _candidates: EntitySpanResponse[],
-    anchor: DOMRect,
-  ) => {
-    const cs = conflictSets.find((c) => spanRangeKey(c.start, c.end) === rangeKey);
-    if (!cs) return;
+  /**
+   * Highlighter clicks emit the spans covering the overlap segment under the
+   * cursor. Find the overlap group whose members cover those spans and open
+   * the popover anchored to the click target.
+   */
+  const handleOverlapClick = (overlapSpans: EntitySpanResponse[], anchor: DOMRect) => {
+    if (overlapSpans.length < 2) return;
+    const keys = new Set(overlapSpans.map((s) => entitySpanKey(s)));
+    const group = overlapGroups.find((g) =>
+      overlapSpans.every((s) => g.members.some((m) => entitySpanKey(m) === entitySpanKey(s))) &&
+      g.members.some((m) => keys.has(entitySpanKey(m))),
+    );
+    if (!group) return;
     setSpanPopover(null);
-    setOverlapConflictPopover({ conflict: cs, anchor });
+    setOverlapConflictPopover({ group, anchor });
   };
 
   const updateSpanByKey = (key: string, patch: Partial<EntitySpanResponse>) => {
@@ -924,9 +898,7 @@ export default function InferenceView() {
                         top: anchor.bottom + 6,
                       });
                     }}
-                    overlapConflictRangeKeys={overlapConflictRangeKeys}
-                    overlapSpanCandidatesByRange={overlapSpanCandidatesByRange}
-                    onOverlapConflictClick={handleOverlapConflictClick}
+                    onOverlapClick={handleOverlapClick}
                     onSpanResize={(key, start, end) => {
                       updateSpanByKey(key, {
                         start,
@@ -992,10 +964,10 @@ export default function InferenceView() {
                   }}
                   activeSpanKey={activeSpanKey}
                   onActiveSpanKeyChange={setActiveSpanKey}
-                  conflictSets={conflictSets}
-                  onResolveConflict={handleResolveOverlapConflict}
-                  onDropConflict={handleDropOverlapConflict}
-                  onQuickResolveLabelPriority={handleQuickResolveLabelPriority}
+                  overlapGroups={overlapGroups}
+                  onResolveGroupKeep={handleResolveGroupKeep}
+                  onResolveGroupDrop={handleResolveGroupDrop}
+                  onResolveAllOverlaps={handleResolveAllOverlaps}
                   onUpdateOutput={handleUpdateOutput}
                 />
               }
@@ -1055,9 +1027,9 @@ export default function InferenceView() {
         onClose={() => setOverlapConflictPopover(null)}
         anchorRect={overlapConflictPopover?.anchor ?? null}
         originalText={result?.original_text ?? ''}
-        conflict={overlapConflictPopover?.conflict ?? null}
-        onKeep={handleResolveOverlapConflict}
-        onDropAll={handleDropOverlapConflict}
+        group={overlapConflictPopover?.group ?? null}
+        onKeep={handleResolveGroupKeep}
+        onDropAll={handleResolveGroupDrop}
       />
 
       {spanPopover && result && (

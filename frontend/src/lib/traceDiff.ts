@@ -142,7 +142,7 @@ export type DiffSegment<S extends SpanLite> =
  * the renderer wraps in a colored ``<mark>`` (with optional strikethrough +
  * opacity for removed units).
  *
- * Mirrors the segmentation in ``SpanHighlighter.buildSegments`` so the diff
+ * Mirrors the segmentation in ``buildCoverageSegments`` so the diff
  * view's text layout stays identical to the absolute view's. Units whose
  * range overlaps an earlier emitted unit are skipped.
  */
