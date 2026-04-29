@@ -154,6 +154,58 @@ export function pickPrimarySpan(spans: EntitySpanResponse[]): EntitySpanResponse
 }
 
 /**
+ * Collapse exact (start, end, label) duplicates produced by multiple detectors
+ * agreeing on a span. Sources are concatenated with ``+`` (deduped, sorted) so
+ * provenance survives. Confidence becomes the max of inputs; ``text`` falls back
+ * to the first non-empty value.
+ *
+ * Spans with ``start >= end`` are dropped defensively. Output is sorted by
+ * ``(start, end, label)`` so it has the same shape downstream code expects.
+ *
+ * Without this, two detectors that find the same span produce duplicate
+ * ``entitySpanKey`` collisions in the SpanEditor (shared React keys, shared
+ * selection state, post-resolution residue).
+ */
+export function normalizeAnnotations(spans: EntitySpanResponse[]): EntitySpanResponse[] {
+  if (spans.length === 0) return spans;
+  const byKey = new Map<string, EntitySpanResponse[]>();
+  for (const s of spans) {
+    if (s.start >= s.end) continue;
+    const k = entitySpanKey(s);
+    const list = byKey.get(k) ?? [];
+    list.push(s);
+    byKey.set(k, list);
+  }
+  const out: EntitySpanResponse[] = [];
+  for (const list of byKey.values()) {
+    if (list.length === 1) {
+      out.push(list[0]!);
+      continue;
+    }
+    const sources = new Set<string>();
+    for (const s of list) {
+      if (s.source) sources.add(s.source);
+    }
+    let confidence: number | null | undefined = list[0]!.confidence;
+    for (const s of list) {
+      const c = s.confidence;
+      if (c == null) continue;
+      if (confidence == null || c > confidence) confidence = c;
+    }
+    const text = list.find((s) => (s.text ?? '').length > 0)?.text ?? list[0]!.text;
+    const merged: EntitySpanResponse = {
+      ...list[0]!,
+      text,
+      confidence: confidence ?? null,
+      source: sources.size > 0 ? [...sources].sort().join('+') : list[0]!.source,
+    };
+    out.push(merged);
+  }
+  out.sort((a, b) => a.start - b.start || a.end - b.end || a.label.localeCompare(b.label));
+  return out;
+}
+
+/**
  * One span per exact range — the primary label wins for rendering the annotated source.
  * Retained for surrogate output rendering, which has its own ambiguity to resolve.
  */

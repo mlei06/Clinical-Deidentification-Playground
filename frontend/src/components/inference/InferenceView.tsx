@@ -55,6 +55,7 @@ import {
   dropOverlapGroup,
   findOverlapGroups,
   keepInOverlapGroup,
+  normalizeAnnotations,
   type OverlapGroup,
   type ResolveStrategyId,
 } from '../../lib/spanOverlapConflicts';
@@ -347,7 +348,16 @@ export default function InferenceView() {
     downloadBlob(`${base}_redacted.txt`, result.redacted_text, 'text/plain; charset=utf-8');
   };
 
-  const effectiveSpans: EntitySpanResponse[] = editedSpans ?? result?.spans ?? [];
+  /**
+   * Single chokepoint that collapses exact (start, end, label) duplicates.
+   * Detectors can independently agree on the same span, and resolution paths
+   * can leave residue; without normalization here, ``entitySpanKey`` collisions
+   * surface as broken React keys / shared selection state in SpanEditor.
+   */
+  const effectiveSpans = useMemo<EntitySpanResponse[]>(
+    () => normalizeAnnotations(editedSpans ?? result?.spans ?? []),
+    [editedSpans, result?.spans],
+  );
 
   const { data: pipelineDetail } = usePipeline(pipeline || null);
   const mapTargetLabels = useMemo(() => {
